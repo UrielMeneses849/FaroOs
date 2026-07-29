@@ -32,7 +32,9 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        # The lock includes optional native packages for multiple platforms.
+        # npm install resolves the Linux runner variants without mutating source.
+        run: npm install --no-audit --no-fund
 
       - name: Validate
         run: |
