@@ -1,0 +1,1 @@
+export { financeCategoryRepository } from './financeRepositories'

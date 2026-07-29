@@ -1,0 +1,1 @@
+export { financeGoalRepository } from './financeRepositories'
