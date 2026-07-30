@@ -111,6 +111,7 @@ export interface HealthLog extends BaseEntity {
   area: 'health'
   occurredAt: string
   energy: number
+  foodQuality?: 'good' | 'okay' | 'bad'
   mood?: number
   anxiety?: number
   sleepHours?: number

@@ -18,6 +18,10 @@ describe('registros personales', () => {
     useFaroStore.getState().createHealthLog({ ...base, id: 'health-new', area: 'health', occurredAt: '2026-07-23', mood: 8, energy: 7, anxiety: 3, sleepHours: 7.5 })
     useFaroStore.getState().createTreatmentLog({ ...base, id: 'treatment-new', area: 'health', treatment: 'isotretinoin', occurredAt: '2026-07-23', medicationTaken: true, dosage: 'Dosis indicada' })
     expect(useFaroStore.getState().healthLogs.at(-1)?.mood).toBe(8)
+    useFaroStore.getState().updateHealthLog('health-new', { weightKg: 85 })
+    expect(useFaroStore.getState().healthLogs.find((item) => item.id === 'health-new')?.weightKg).toBe(85)
+    useFaroStore.getState().deleteHealthLog('health-new')
+    expect(useFaroStore.getState().healthLogs.some((item) => item.id === 'health-new')).toBe(false)
     expect(useFaroStore.getState().treatmentLogs.at(-1)).toMatchObject({ medicationTaken: true, dosage: 'Dosis indicada' })
   })
 

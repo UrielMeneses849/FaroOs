@@ -97,12 +97,7 @@ export const demoData: FaroData = {
     { ...base, id: 'tx-3', description: 'Suscripciones', area: 'finance', amount: 850, kind: 'expense', occurredAt: '2026-07-10', category: 'Software' },
     { ...base, id: 'tx-4', description: 'Transporte', area: 'finance', amount: 1200, kind: 'expense', occurredAt: '2026-06-18', category: 'Transporte' },
   ],
-  healthLogs: [
-    { ...base, id: 'health-1', area: 'health', occurredAt: '2026-07-23', energy: 8, mood: 8, anxiety: 3, sleepHours: 7.5, movementMinutes: 35, trainingMinutes: 35, meditationMinutes: 10, waterLiters: 2.1, weightKg: 72.4 },
-    { ...base, id: 'health-2', area: 'health', occurredAt: '2026-07-22', energy: 7, mood: 7, anxiety: 4, sleepHours: 7, meditationMinutes: 8, waterLiters: 1.8, weightKg: 72.6 },
-    { ...base, id: 'health-3', area: 'health', occurredAt: '2026-07-21', energy: 6, mood: 6, anxiety: 5, sleepHours: 6.5, trainingMinutes: 40, movementMinutes: 40, waterLiters: 2, weightKg: 72.7 },
-    { ...base, id: 'health-4', area: 'health', occurredAt: '2026-07-20', energy: 8, mood: 9, anxiety: 2, sleepHours: 8, trainingMinutes: 30, movementMinutes: 30, meditationMinutes: 12, waterLiters: 2.3, weightKg: 72.8 },
-  ],
+  healthLogs: [],
   treatmentLogs: [],
   journalEntries: [
     { ...base, id: 'journal-1', area: 'personal', title: 'El inicio de FARO', content: 'Construir un sistema que reduzca ruido y dé dirección.', occurredAt: now, mood: 9, gratitude: 'Tener claridad para comenzar.', lesson: 'Lo simple sí puede ser profundo.', tags: ['faro', 'inicio'] },

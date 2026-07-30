@@ -5,7 +5,7 @@ import { AppShell } from '../components/layout'
 import { LoginPage, ProtectedRoute } from '../features/auth'
 import { ComingSoonPage } from '../pages/ComingSoonPage'
 import { RouteErrorPage } from '../features/errors/RouteErrorPage'
-import { BacklogPage, CalendarPage, ContentPage, DashboardPage, FinancePage, GoalDetailPage, GoalsPage, HealthPage, JournalPage, LearningPage, PortfolioPage, ProjectDetailPage, ProjectsPage, SalesPage, SettingsPage, SprintsPage, TodayPage, TravelPage } from './LazyPages'
+import { BacklogPage, CalendarPage, ContentPage, DashboardPage, FinancePage, GoalDetailPage, GoalsPage, HealthPage, JournalPage, LearningPage, PortfolioPage, SalesPage, SettingsPage, SprintsPage, TodayPage, TravelPage } from './LazyPages'
 
 const soon = (title: string, description: string, icon: typeof Activity) => <ComingSoonPage title={title} description={description} icon={icon} />
 const deferred = (page: ReactNode) => <Suspense fallback={<div className="route-loading" role="status">Cargando módulo…</div>}>{page}</Suspense>
@@ -26,8 +26,8 @@ export const router = createBrowserRouter(
           { path: 'backlog', element: deferred(<BacklogPage />) },
           { path: 'goals', element: deferred(<GoalsPage />) },
           { path: 'goals/:goalId', element: deferred(<GoalDetailPage />) },
-          { path: 'projects', element: deferred(<ProjectsPage />) },
-          { path: 'projects/:projectId', element: deferred(<ProjectDetailPage />) },
+          { path: 'projects', element: <Navigate to="/goals" replace /> },
+          { path: 'projects/:projectId', element: <Navigate to="/goals" replace /> },
           { path: 'sprints', element: deferred(<SprintsPage />) },
           { path: 'calendar', element: deferred(<CalendarPage />) },
           { path: 'nexvora', element: soon('Nexvora', 'Estrategia, operación y crecimiento en un solo lugar.', Sparkles) },

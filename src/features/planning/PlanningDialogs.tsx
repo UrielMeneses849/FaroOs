@@ -90,7 +90,7 @@ export function ProjectFormDialog({ open, initial, goalId: defaultGoalId, worksp
   </form></Modal>
 }
 
-export function TaskFormDialog({ open, initial, projectId: defaultProjectId, goalId: defaultGoalId, workspaceId: defaultWorkspaceId, dueAt: defaultDueAt, status: defaultStatus, onClose }: DialogProps<Task> & { projectId?: string; goalId?: string; workspaceId?: string; dueAt?: string; status?: TaskStatus }) {
+export function TaskFormDialog({ open, initial, projectId: defaultProjectId, goalId: defaultGoalId, workspaceId: defaultWorkspaceId, dueAt: defaultDueAt, estimatedMinutes: defaultEstimatedMinutes, status: defaultStatus, onClose }: DialogProps<Task> & { projectId?: string; goalId?: string; workspaceId?: string; dueAt?: string; estimatedMinutes?: number; status?: TaskStatus }) {
   const { data: workspaces, loading: workspacesLoading } = useWorkspaces()
   const projects = useFaroStore((state) => state.projects)
   const initialProjectId = initial?.projectId ?? defaultProjectId ?? ''
@@ -104,7 +104,7 @@ export function TaskFormDialog({ open, initial, projectId: defaultProjectId, goa
   const initialDue = timestampToLocalParts(initial?.dueAt ?? defaultDueAt)
   const [dueDate, setDueDate] = useState(initialDue.date || initial?.dueDate || '')
   const [dueTime, setDueTime] = useState(initialDue.time)
-  const [estimatedMinutes, setEstimatedMinutes] = useState(initial?.estimatedMinutes?.toString() ?? '30')
+  const [estimatedMinutes, setEstimatedMinutes] = useState(initial?.estimatedMinutes?.toString() ?? defaultEstimatedMinutes?.toString() ?? '30')
   const fallbackWorkspace = workspaces.find((workspace) => workspace.name === 'Personal')?.id ?? workspaces[0]?.id ?? ''
   const [workspaceId, setWorkspaceId] = useState(initial?.workspaceId ?? defaultWorkspaceId ?? '')
   const [blockerReason, setBlockerReason] = useState(initial?.blockerReason ?? '')

@@ -24,7 +24,7 @@ describe('flujos del backlog', () => {
     const serialized = localStorage.getItem('faro-os-data') ?? '{}'
     const persisted = JSON.parse(serialized)
     expect(persisted.state.ideas.some((item: { title: string }) => item.title === 'Idea persistida')).toBe(true)
-    expect(persisted.version).toBe(5)
+    expect(persisted.version).toBe(6)
     useFaroStore.getState().updateIdea(idea.id, { title: 'Estado temporal' })
     localStorage.setItem('faro-os-data', serialized)
     await useFaroStore.persist.rehydrate()

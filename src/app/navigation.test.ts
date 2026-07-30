@@ -22,6 +22,7 @@ describe('navegación de crecimiento', () => {
         { path: '/backlog' },
         { path: '/calendar' },
         { path: '/finance' },
+        { path: '/health' },
         { path: '/journal' },
       ],
     })

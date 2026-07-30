@@ -6,9 +6,7 @@ import {
   RotateCcw, Target, Trash2, WalletCards,
 } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import {
-  Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
-} from 'recharts'
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { Button, ConfirmDialog, EmptyState, Modal, ProgressBar } from '../components/common'
 import {
   financeAccountSchema, financeBudgetSchema, financeGoalSchema, financeTransactionSchema,
@@ -107,11 +105,23 @@ export function FinancePage() {
       && (item.type === 'expense' || item.type === 'debt_payment'))
       .reduce((sum, item) => sum + item.amountCents, 0),
   })).filter((item) => item.value > 0)
-  const trend = Array.from({ length: 6 }, (_, index) => {
-    const current = subMonths(month, 5 - index)
-    const item = calculateFinanceMetrics(data, current)
-    return { month: format(current, 'MMM', { locale: es }), ingresos: item.monthlyIncomeCents / 100, gastos: item.monthlyExpensesCents / 100 }
-  })
+  const totalCategoryExpenses = categoryExpenses.reduce((sum, item) => sum + item.value, 0)
+  const categoryHistory = Array.from({ length: 6 }, (_, index) => {
+    const period = subMonths(month, index)
+    const prefix = format(period, 'yyyy-MM')
+    const totals = data.categories.map((category) => ({
+      name: category.name,
+      value: data.transactions.filter((item) => item.transactionDate.startsWith(prefix)
+        && item.categoryId === category.id && item.status === 'completed'
+        && (item.type === 'expense' || item.type === 'debt_payment'))
+        .reduce((sum, item) => sum + item.amountCents, 0),
+    })).filter((item) => item.value > 0).sort((a, b) => b.value - a.value)
+    return { period: format(period, 'MMMM yyyy', { locale: es }), total: totals.reduce((sum, item) => sum + item.value, 0), categories: totals }
+  }).filter((item) => item.total > 0)
+  const monthlyComparison = [
+    { name: 'Ingresos', value: metrics.monthlyIncomeCents / 100, color: '#35c78a' },
+    { name: 'Gastos', value: metrics.monthlyExpensesCents / 100, color: '#2457ff' },
+  ]
   const finish = async (message: string) => {
     setDialog(null); setEditingTransaction(undefined); setEditingAccount(undefined)
     setEditingRecurring(undefined); setEditingGoal(undefined); setSelectedGoal(undefined)
@@ -217,8 +227,9 @@ export function FinancePage() {
         </div>
       </section>
       <div className="finance-charts">
-        <section><header><span className="eyebrow">Seis meses</span><h2>Ingresos vs gastos</h2></header><div className="finance-chart"><ResponsiveContainer><BarChart data={trend} accessibilityLayer><CartesianGrid stroke="#1d1d22" vertical={false} /><XAxis dataKey="month" stroke="#686870" axisLine={false} tickLine={false} /><YAxis stroke="#686870" axisLine={false} tickLine={false} width={42} tickFormatter={(value) => `$${Math.round(value / 1000)}k`} /><Tooltip formatter={(value) => formatMxn(Number(value) * 100)} contentStyle={{ background: '#111114', border: '1px solid #303038' }} /><Bar dataKey="ingresos" fill="#35c78a" radius={[3, 3, 0, 0]} /><Bar dataKey="gastos" fill="#315de3" radius={[3, 3, 0, 0]} /></BarChart></ResponsiveContainer></div></section>
-        <section><header><span className="eyebrow">Distribución</span><h2>Gasto por categoría</h2></header>{categoryExpenses.length ? <div className="finance-chart"><ResponsiveContainer><PieChart accessibilityLayer><Pie data={categoryExpenses} dataKey="value" nameKey="name" innerRadius={48} outerRadius={78}>{categoryExpenses.map((item, index) => <Cell key={item.name} fill={['#2457ff', '#35c78a', '#f4b740', '#a970ff', '#f05252'][index % 5]} />)}</Pie><Tooltip formatter={(value) => formatMxn(Number(value))} contentStyle={{ background: '#111114', border: '1px solid #303038' }} /></PieChart></ResponsiveContainer></div> : <EmptyState title="Sin gastos" description="No hay gastos completados en este periodo." />}</section>
+        <section><header><span className="eyebrow">{format(month, 'MMMM yyyy', { locale: es })}</span><h2>Flujo del mes</h2></header><div className="finance-chart finance-chart--monthly finance-flow-chart"><ResponsiveContainer><PieChart accessibilityLayer><Pie data={monthlyComparison} dataKey="value" nameKey="name" innerRadius={50} outerRadius={76} paddingAngle={2}>{monthlyComparison.map((item) => <Cell key={item.name} fill={item.color} />)}</Pie><Tooltip formatter={(value) => formatMxn(Number(value) * 100)} contentStyle={{ background: '#111114', border: '1px solid #303038', borderRadius: 8 }} /></PieChart></ResponsiveContainer><div><span>Balance</span><strong>{formatMxn(metrics.monthlyIncomeCents - metrics.monthlyExpensesCents)}</strong></div></div><div className="finance-flow-summary"><span><i className="income" />Ingresos <strong>{formatMxn(metrics.monthlyIncomeCents)}</strong></span><span><i className="expense" />Gastos <strong>{formatMxn(metrics.monthlyExpensesCents)}</strong></span></div></section>
+        <section><header><span className="eyebrow">Distribución</span><h2>Gasto por categoría</h2></header>{categoryExpenses.length ? <><div className="finance-chart"><ResponsiveContainer><PieChart accessibilityLayer><Pie data={categoryExpenses} dataKey="value" nameKey="name" innerRadius={48} outerRadius={78}>{categoryExpenses.map((item, index) => <Cell key={item.name} fill={['#2457ff', '#35c78a', '#f4b740', '#a970ff', '#f05252'][index % 5]} />)}</Pie><Tooltip formatter={(value) => formatMxn(Number(value))} contentStyle={{ background: '#111114', border: '1px solid #303038' }} /></PieChart></ResponsiveContainer></div><div className="finance-category-legend">{categoryExpenses.sort((a, b) => b.value - a.value).map((item) => <div key={item.name}><span>{item.name}</span><strong>{totalCategoryExpenses ? (item.value / totalCategoryExpenses * 100).toFixed(1) : '0'}%</strong><small>{formatMxn(item.value)}</small></div>)}</div></> : <EmptyState title="Sin gastos" description="No hay gastos completados en este periodo." />}</section>
+        <section className="finance-period-history"><header><span className="eyebrow">Historial mensual</span><h2>Cierres por categoría</h2></header>{categoryHistory.length ? <div>{categoryHistory.map((period) => <article key={period.period}><header><strong>{period.period}</strong><span>{formatMxn(period.total)}</span></header><div>{period.categories.slice(0, 5).map((category) => <span key={category.name}>{category.name} <b>{(category.value / period.total * 100).toFixed(0)}%</b></span>)}</div></article>)}</div> : <EmptyState title="Sin cierres todavía" description="Los meses aparecerán aquí conforme registres gastos completados." />}</section>
       </div>
     </>}
 

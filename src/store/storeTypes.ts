@@ -19,6 +19,8 @@ export interface FaroActions {
   updateTask: (id: string, changes: Partial<Task>) => void
   deleteTask: (id: string) => void
   createHealthLog: (log: HealthLog) => void
+  updateHealthLog: (id: string, changes: Partial<HealthLog>) => void
+  deleteHealthLog: (id: string) => void
   createStudySession: (session: StudySession) => void
   createTransaction: (transaction: Transaction) => void
   createTreatmentLog: (log: TreatmentLog) => void

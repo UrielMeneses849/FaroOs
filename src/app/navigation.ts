@@ -1,6 +1,6 @@
 import {
   Activity, BookOpen, BriefcaseBusiness, CalendarDays, CircleDollarSign, ClipboardList,
-  Compass, FolderKanban, Gauge, GraduationCap, HeartPulse, Landmark, NotebookPen,
+  Compass, Gauge, GraduationCap, HeartPulse, Landmark, NotebookPen,
   Plane, Rocket, Settings, Sparkles, SunMedium, Target,
 } from 'lucide-react'
 
@@ -13,6 +13,7 @@ export const navigationGroups = [
       { path: '/backlog', label: 'Backlog', icon: ClipboardList },
       { path: '/calendar', label: 'Calendario', icon: CalendarDays },
       { path: '/finance', label: 'Finanzas', icon: CircleDollarSign },
+      { path: '/health', label: 'Salud', icon: HeartPulse },
       { path: '/journal', label: 'Diario', icon: NotebookPen },
     ],
   },
@@ -20,7 +21,6 @@ export const navigationGroups = [
     label: 'Planificación',
     items: [
       { path: '/goals', label: 'Objetivos', icon: Target },
-      { path: '/projects', label: 'Proyectos', icon: FolderKanban },
       { path: '/sprints', label: 'Sprints', icon: Rocket },
     ],
   },
@@ -38,7 +38,6 @@ export const navigationGroups = [
     items: [
       { path: '/learning', label: 'Aprendizaje', icon: GraduationCap },
       { path: '/travel', label: 'Viajes', icon: Plane },
-      { path: '/health', label: 'Salud', icon: HeartPulse },
     ],
   },
 ] as const

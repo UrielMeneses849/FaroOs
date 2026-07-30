@@ -107,6 +107,11 @@ export const useFaroStore = create<FaroStore>()(
         })),
       deleteTask: (id) => set((state) => ({ tasks: state.tasks.filter((task) => task.id !== id) })),
       createHealthLog: (log) => set((state) => ({ healthLogs: [...state.healthLogs, log] })),
+      updateHealthLog: (id, changes) => set((state) => ({
+        healthLogs: state.healthLogs.map((log) =>
+          log.id === id ? { ...log, ...changes, updatedAt: stamp() } : log),
+      })),
+      deleteHealthLog: (id) => set((state) => ({ healthLogs: state.healthLogs.filter((log) => log.id !== id) })),
       createStudySession: (session) => set((state) => ({ studySessions: [...state.studySessions, session] })),
       createTransaction: (transaction) => set((state) => ({ transactions: [...state.transactions, transaction] })),
       createTreatmentLog: (log) => set((state) => ({ treatmentLogs: [...state.treatmentLogs, log] })),
@@ -174,7 +179,7 @@ export const useFaroStore = create<FaroStore>()(
     }),
     {
       name: 'faro-os-data',
-      version: 5,
+      version: 6,
       storage: createJSONStorage(() => safeLocalStorage),
       migrate: (persistedState, version) => {
         const data = persistedState as FaroData
@@ -207,10 +212,17 @@ export const useFaroStore = create<FaroStore>()(
               }
             }),
           }
-          return migrated as FaroStore
+          return {
+            ...migrated,
+            healthLogs: (migrated.healthLogs ?? []).filter((log) => !/^health-\d+$/.test(log.id)),
+          } as FaroStore
         }
         const current = persistedState as FaroStore
-        return { ...current, tasks: (current.tasks ?? []).map((task) => ({ ...task, status: task.status === 'inbox' || task.status === 'paused' ? 'todo' : task.status })) }
+        return {
+          ...current,
+          tasks: (current.tasks ?? []).map((task) => ({ ...task, status: task.status === 'inbox' || task.status === 'paused' ? 'todo' : task.status })),
+          healthLogs: (current.healthLogs ?? []).filter((log) => !/^health-\d+$/.test(log.id)),
+        }
       },
       merge: (persistedState, currentState) => {
         const parsed = faroDataSchema.safeParse(persistedState)

@@ -164,6 +164,17 @@ export const taskRepository = {
 
     if (error) throw error
   },
+  async removeCompletedBefore(cutoff: string, userId: string): Promise<string[]> {
+    const { data, error } = await supabase
+      .from('tasks')
+      .delete()
+      .eq('user_id', userId)
+      .eq('status', 'done')
+      .lt('completed_at', cutoff)
+      .select('id')
+    if (error) throw error
+    return (data ?? []).map((item) => item.id)
+  },
   async toggleComplete(id: string, userId: string) {
     const task = await this.getById(id, userId)
     if (!task) throw new Error('La tarea ya no existe.')

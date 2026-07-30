@@ -35,6 +35,21 @@ export function ContentPage() {
 function blankItem(): Item { const now = new Date().toISOString(); return { id: crypto.randomUUID(), user_id: '', title: '', idea: null, format: 'LinkedIn', channel_id: null, status: 'idea', objective: null, publish_at: null, workspace_id: null, campaign_id: null, cta: null, notes: null, portfolio_case_study_id: null, sort_order: 0, created_at: now, updated_at: now } }
 function ContentDialog({ item, userId, onClose, onSaved }: { item: Item; userId?: string; onClose: () => void; onSaved: () => void }) {
   const [value, setValue] = useState(item)
-  const submit = async (event: FormEvent) => { event.preventDefault(); if (!userId) return; await contentItemRepository.save({ ...value, user_id: userId }, userId); onSaved() }
-  return <Modal open title={item.title ? 'Editar contenido' : 'Nueva pieza'} onClose={onClose}><form className="growth-form" onSubmit={submit}><label>Título<input autoFocus required value={value.title} onChange={(event) => setValue({ ...value, title: event.target.value })} /></label><div><label>Formato<select value={value.format} onChange={(event) => setValue({ ...value, format: event.target.value })}>{templates.map((item) => <option key={item}>{item}</option>)}</select></label><label>Estado<select value={value.status} onChange={(event) => setValue({ ...value, status: event.target.value as Item['status'] })}>{statuses.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label></div><label>Idea<textarea rows={3} value={value.idea ?? ''} onChange={(event) => setValue({ ...value, idea: event.target.value })} /></label><label>Fecha de publicación<input type="datetime-local" value={value.publish_at?.slice(0, 16) ?? ''} onChange={(event) => setValue({ ...value, publish_at: event.target.value ? new Date(event.target.value).toISOString() : null })} /></label><label>CTA<input value={value.cta ?? ''} onChange={(event) => setValue({ ...value, cta: event.target.value })} /></label><label>Notas<textarea rows={3} value={value.notes ?? ''} onChange={(event) => setValue({ ...value, notes: event.target.value })} /></label><div className="modal-actions">{item.title && <Button type="button" variant="ghost" icon={<Trash2 size={14} />} onClick={async () => { if (!userId) return; await contentItemRepository.remove(item.id, userId); onSaved() }}>Eliminar</Button>}<Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit">Guardar</Button></div></form></Modal>
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!userId) return
+    await contentItemRepository.save({ ...value, user_id: userId }, userId)
+    onSaved()
+  }
+  return <Modal open panelClassName="content-editor-modal" title={item.title ? 'Editar contenido' : 'Nueva pieza'} onClose={onClose}>
+    <form className="growth-form content-editor-form" onSubmit={submit}>
+      <label>Título<input autoFocus required value={value.title} onChange={(event) => setValue({ ...value, title: event.target.value })} /></label>
+      <div><label>Formato<select value={value.format} onChange={(event) => setValue({ ...value, format: event.target.value })}>{templates.map((template) => <option key={template}>{template}</option>)}</select></label><label>Estado<select value={value.status} onChange={(event) => setValue({ ...value, status: event.target.value as Item['status'] })}>{statuses.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label></div>
+      <label>Idea<textarea rows={4} value={value.idea ?? ''} onChange={(event) => setValue({ ...value, idea: event.target.value })} /></label>
+      <label>Fecha de publicación<input type="datetime-local" value={value.publish_at?.slice(0, 16) ?? ''} onChange={(event) => setValue({ ...value, publish_at: event.target.value ? new Date(event.target.value).toISOString() : null })} /></label>
+      <label>CTA<input value={value.cta ?? ''} onChange={(event) => setValue({ ...value, cta: event.target.value })} /></label>
+      <label>Notas<textarea rows={3} value={value.notes ?? ''} onChange={(event) => setValue({ ...value, notes: event.target.value })} /></label>
+      <div className="modal-actions">{item.title && <Button type="button" variant="ghost" icon={<Trash2 size={14} />} onClick={async () => { if (!userId) return; await contentItemRepository.remove(item.id, userId); onSaved() }}>Eliminar</Button>}<Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit">Guardar</Button></div>
+    </form>
+  </Modal>
 }

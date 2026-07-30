@@ -7,7 +7,12 @@ const reference = new Date('2026-07-23T12:00:00')
 
 describe('dashboard personal', () => {
   it('calcula indicadores conectados correctamente', () => {
-    const metrics = calculateDashboardMetrics(demoData, reference)
+    const healthLogs = [
+      { ...demoData.journalEntries[0], id: 'metric-health-1', area: 'health' as const, occurredAt: '2026-07-23T08:00:00', energy: 8, mood: 8, trainingMinutes: 30, meditationMinutes: 10 },
+      { ...demoData.journalEntries[0], id: 'metric-health-2', area: 'health' as const, occurredAt: '2026-07-22T08:00:00', energy: 7, mood: 7, trainingMinutes: 20, meditationMinutes: 8 },
+      { ...demoData.journalEntries[0], id: 'metric-health-3', area: 'health' as const, occurredAt: '2026-07-21T08:00:00', energy: 7, mood: undefined, trainingMinutes: 15, meditationMinutes: 12 },
+    ]
+    const metrics = calculateDashboardMetrics({ ...demoData, healthLogs }, reference)
     expect(metrics.weeklyStudyMinutes).toBe(140)
     expect(metrics.monthlyBalance).toBe(17150)
     expect(metrics.averageMood7Days).toBe(7.5)
