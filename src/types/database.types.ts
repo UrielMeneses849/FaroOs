@@ -687,6 +687,7 @@ export type Database = {
           archived_at: string | null
           created_at: string
           energy: number | null
+          food_quality: "bad" | "good" | "okay" | null
           id: string
           log_date: string
           meditation_minutes: number | null
@@ -706,6 +707,7 @@ export type Database = {
           archived_at?: string | null
           created_at?: string
           energy?: number | null
+          food_quality?: "bad" | "good" | "okay" | null
           id?: string
           log_date: string
           meditation_minutes?: number | null
@@ -725,6 +727,7 @@ export type Database = {
           archived_at?: string | null
           created_at?: string
           energy?: number | null
+          food_quality?: "bad" | "good" | "okay" | null
           id?: string
           log_date?: string
           meditation_minutes?: number | null

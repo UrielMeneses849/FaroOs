@@ -284,6 +284,7 @@ export const localDataMigrationService = {
       user_id: userId,
       log_date: log.occurredAt.slice(0, 10),
       energy: log.energy,
+      food_quality: log.foodQuality ?? null,
       mood: log.mood ?? null,
       anxiety: log.anxiety ?? null,
       sleep_hours: log.sleepHours ?? null,

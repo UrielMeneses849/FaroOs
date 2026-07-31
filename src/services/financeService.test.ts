@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { FinanceData } from '../features/finance/financeTypes'
 import {
   accountBalance, advanceRecurringDate, annualFinanceTotals, budgetPerformance, calculateFinanceMetrics,
-  financeDecision, financeFrequencyLabel, financeProjectionBreakdown, formatFinanceDate, goalProgress, monthKey, recurringAppliesToMonth, recurringExpectedDate,
+  financeDecision, financeFrequencyLabel, financeGoalProjections, financeProjectionBreakdown, formatFinanceDate, goalProgress, monthKey, recurringAppliesToMonth, recurringExpectedDate,
 } from './financeService'
 
 const base = '2026-07-01T00:00:00.000Z'
@@ -54,6 +54,26 @@ describe('financeService', () => {
   it('deriva el progreso de meta desde aportaciones', () => {
     expect(goalProgress('g', data)).toEqual({
       savedCents: 500_000, remainingCents: 4_500_000, percentage: 10,
+    })
+  })
+
+  it('calcula la aportación mensual necesaria y el ritmo reciente por meta', () => {
+    const projections = financeGoalProjections([{
+      ...data.goals[0], targetDate: '2026-12-31', targetAmountCents: 1_100_000,
+    }], [{ ...data.contributions[0], amountCents: 500_000 }], new Date(2026, 6, 31))
+    expect(projections[0]).toMatchObject({
+      savedCents: 500_000,
+      remainingCents: 600_000,
+      requiredMonthlyCents: 100_000,
+      averageMonthlyCents: 166_667,
+      status: 'on_track',
+    })
+  })
+
+  it('pide una fecha para proyectar una meta sin vencimiento', () => {
+    expect(financeGoalProjections(data.goals, data.contributions, new Date(2026, 6, 31))[0]).toMatchObject({
+      requiredMonthlyCents: 0,
+      status: 'no_date',
     })
   })
 

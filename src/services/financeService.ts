@@ -7,6 +7,8 @@ import type {
   FinanceData,
   FinanceMetrics,
   FinanceRecurringTransaction,
+  FinanceGoal,
+  FinanceGoalContribution,
   FinanceTransaction,
 } from '../features/finance/financeTypes'
 
@@ -231,6 +233,49 @@ export function goalProgress(goalId: string, data: FinanceData) {
     remainingCents: Math.max(0, goal.targetAmountCents - savedCents),
     percentage: Math.min(100, savedCents / goal.targetAmountCents * 100),
   }
+}
+
+export type FinanceGoalProjectionStatus = 'on_track' | 'attention' | 'behind' | 'no_date' | 'completed'
+
+export interface FinanceGoalProjection {
+  goal: FinanceGoal
+  savedCents: number
+  remainingCents: number
+  progressPercentage: number
+  requiredMonthlyCents: number
+  averageMonthlyCents: number
+  targetLabel: string
+  status: FinanceGoalProjectionStatus
+  statusLabel: string
+  insight: string
+}
+
+export function financeGoalProjections(goals: FinanceGoal[], contributions: FinanceGoalContribution[], referenceDate: Date): FinanceGoalProjection[] {
+  const currentMonth = startOfMonth(referenceDate)
+  const recentStart = addMonths(currentMonth, -2)
+  return goals.filter((goal) => goal.status === 'active').map<FinanceGoalProjection>((goal) => {
+    const goalContributions = contributions.filter((item) => item.goalId === goal.id)
+    const savedCents = goalContributions.reduce((sum, item) => sum + item.amountCents, 0)
+    const remainingCents = Math.max(0, goal.targetAmountCents - savedCents)
+    const progressPercentage = goal.targetAmountCents ? Math.min(100, savedCents / goal.targetAmountCents * 100) : 0
+    const recentTotal = goalContributions.filter((item) => {
+      const date = parseISO(item.contributionDate)
+      return !isBefore(date, recentStart) && !isAfter(date, endOfMonth(currentMonth))
+    }).reduce((sum, item) => sum + item.amountCents, 0)
+    const averageMonthlyCents = Math.round(recentTotal / 3)
+    if (remainingCents === 0) return { goal, savedCents, remainingCents, progressPercentage, requiredMonthlyCents: 0, averageMonthlyCents, targetLabel: 'Meta cubierta', status: 'completed', statusLabel: 'Cumplida', insight: 'Ya reuniste el monto objetivo.' }
+    if (!goal.targetDate) return { goal, savedCents, remainingCents, progressPercentage, requiredMonthlyCents: 0, averageMonthlyCents, targetLabel: 'Sin fecha objetivo', status: 'no_date', statusLabel: 'Define fecha', insight: 'Agrega una fecha objetivo para calcular cuánto aportar cada mes.' }
+    const targetMonth = startOfMonth(parseISO(goal.targetDate))
+    const monthDistance = (targetMonth.getFullYear() - currentMonth.getFullYear()) * 12 + targetMonth.getMonth() - currentMonth.getMonth()
+    const monthsRemaining = Math.max(1, monthDistance + 1)
+    const requiredMonthlyCents = Math.ceil(remainingCents / monthsRemaining)
+    const overdue = isBefore(parseISO(goal.targetDate), referenceDate)
+    const status: FinanceGoalProjectionStatus = overdue || averageMonthlyCents < requiredMonthlyCents * .75 ? 'behind' : averageMonthlyCents < requiredMonthlyCents ? 'attention' : 'on_track'
+    const statusLabel = overdue ? 'Fecha vencida' : status === 'on_track' ? 'En ruta' : status === 'attention' ? 'Cerca del ritmo' : 'Requiere ajuste'
+    const gap = Math.max(0, requiredMonthlyCents - averageMonthlyCents)
+    const insight = overdue ? `La fecha objetivo ya pasó; actualízala o aporta ${formatMxn(remainingCents)} para cerrar la meta.` : status === 'on_track' ? `Tu ritmo reciente cubre la aportación mensual necesaria durante ${monthsRemaining} ${monthsRemaining === 1 ? 'mes' : 'meses'}.` : `Para recuperar el ritmo, agrega aproximadamente ${formatMxn(gap)} más al mes.`
+    return { goal, savedCents, remainingCents, progressPercentage, requiredMonthlyCents, averageMonthlyCents, targetLabel: `Objetivo ${formatFinanceDate(goal.targetDate)} · ${monthsRemaining} ${monthsRemaining === 1 ? 'mes' : 'meses'}`, status, statusLabel, insight }
+  }).sort((a, b) => b.requiredMonthlyCents - a.requiredMonthlyCents)
 }
 
 export function financeSummary(data: FinanceData, month: Date) {

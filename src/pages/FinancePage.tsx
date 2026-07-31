@@ -12,7 +12,7 @@ import {
   financeAccountSchema, financeBudgetSchema, financeGoalSchema, financeTransactionSchema,
 } from '../features/finance/financeSchemas'
 import type {
-  FinanceAccount, FinanceGoal, FinanceRecurringOccurrence, FinanceRecurringTransaction, FinanceTransaction,
+  FinanceAccount, FinanceGoal, FinanceGoalContribution, FinanceRecurringOccurrence, FinanceRecurringTransaction, FinanceTransaction,
   FinanceTransactionStatus, FinanceTransactionType,
 } from '../features/finance/financeTypes'
 import { useFinance } from '../hooks/useFinance'
@@ -22,12 +22,12 @@ import {
 } from '../repositories/financeRepositories'
 import {
   accountBalance, annualFinanceTotals, budgetPerformance, calculateFinanceMetrics, financeFrequencyLabel, financeSummary,
-  formatFinanceDate, formatMxn, goalProgress, monthKey, recurringAppliesToMonth, recurringExpectedDate,
+  financeGoalProjections, formatFinanceDate, formatMxn, goalProgress, monthKey, recurringAppliesToMonth, recurringExpectedDate,
 } from '../services/financeService'
 
 type Panel = 'overview' | 'transactions' | 'income' | 'accounts' | 'budgets' | 'recurring' | 'savings' | 'goals'
 type Dialog = 'movementMenu' | 'transaction' | 'account' | 'budget' | 'recurring' | 'goal' | 'contribution' | null
-interface MovementPreset { type: FinanceTransactionType; categoryName?: string; status?: FinanceTransactionStatus }
+interface MovementPreset { type?: FinanceTransactionType; categoryName?: string; status?: FinanceTransactionStatus; contribution?: boolean }
 const typeLabel: Record<FinanceTransactionType, string> = {
   income: 'Ingreso', expense: 'Gasto', transfer: 'Transferencia', saving: 'Ahorro',
   debt_payment: 'Pago de deuda', refund: 'Reembolso',
@@ -41,7 +41,10 @@ export function FinancePage() {
   const [month, setMonth] = useState(() => new Date())
   const [panel, setPanel] = useState<Panel>(() => {
     const stored = sessionStorage.getItem('faro-finance-panel')
-    return ['overview', 'transactions', 'income', 'budgets', 'recurring', 'savings', 'goals', 'accounts'].includes(stored ?? '')
+    // Presupuesto se conserva implementado, pero permanece fuera de la navegación
+    // hasta que vuelva a ser útil y podamos evolucionarlo sin reconstruirlo.
+    if (stored === 'budgets') return 'overview'
+    return ['overview', 'transactions', 'income', 'recurring', 'savings', 'goals', 'accounts'].includes(stored ?? '')
       ? stored as Panel : 'overview'
   })
   const [dialog, setDialog] = useState<Dialog>(null)
@@ -137,6 +140,11 @@ export function FinancePage() {
     sessionStorage.setItem('faro-finance-panel', next)
   }
   const startMovement = (preset: MovementPreset) => {
+    if (preset.contribution) {
+      setSelectedGoal(undefined)
+      setDialog('contribution')
+      return
+    }
     setMovementPreset(preset)
     setDialog('transaction')
   }
@@ -214,7 +222,8 @@ export function FinancePage() {
     {!data.accounts.length && <section className="finance-onboarding"><WalletCards /><div><strong>Crea tu primera cuenta</strong><p>El saldo inicial será la base de tus cálculos. Después podrás registrar tu primer ingreso sin ingresar datos bancarios sensibles.</p></div><Button onClick={() => setDialog('account')}>Crear cuenta</Button><Button variant="ghost" disabled title="Crea una cuenta antes de registrar el ingreso">Registrar ingreso</Button></section>}
     <FinanceMetrics metrics={metrics} previous={previous} hasPreviousData={hasPreviousData} />
     <nav className="finance-tabs" aria-label="Secciones financieras">
-      {([['overview', 'Resumen'], ['transactions', 'Movimientos'], ['income', 'Ingresos'], ['recurring', 'Gastos'], ['savings', 'Ahorro'], ['budgets', 'Presupuesto'], ['goals', 'Metas'], ['accounts', 'Cuentas']] as const).map(([id, label]) =>
+      {/* Presupuesto queda implementado y listo para reactivarse cuando se necesite. */}
+      {([['overview', 'Resumen'], ['transactions', 'Movimientos'], ['income', 'Ingresos'], ['recurring', 'Gastos'], ['savings', 'Ahorro'], ['goals', 'Metas'], ['accounts', 'Cuentas']] as const).map(([id, label]) =>
         <button key={id} className={panel === id ? 'active' : ''} onClick={() => changePanel(id)}>{label}</button>)}
     </nav>
     <div className="finance-content">
@@ -314,9 +323,9 @@ export function FinancePage() {
       </section>
     </div>}
 
-    {panel === 'savings' && <SavingsPanel metrics={metrics} annual={annualTotals} year={month.getFullYear()} />}
+    {panel === 'savings' && <SavingsPanel metrics={metrics} annual={annualTotals} year={month.getFullYear()} goals={data.goals} contributions={data.contributions} />}
 
-    {panel === 'goals' && <section className="finance-section"><SectionHead eyebrow="Dirección" title="Metas financieras" action="Nueva meta" onClick={() => setDialog('goal')} /><div className="finance-goals">{data.goals.map((goal) => { const progress = goalProgress(goal.id, data); return <article key={goal.id}><header><Target /><div><strong>{goal.name}</strong><small>{goal.priority} · {goal.status}</small></div><b>{progress.percentage.toFixed(0)}%</b></header><ProgressBar value={progress.percentage} /><div><span>Ahorrado<strong>{formatMxn(progress.savedCents)}</strong></span><span>Restante<strong>{formatMxn(progress.remainingCents)}</strong></span><span>Objetivo<strong>{formatMxn(goal.targetAmountCents)}</strong></span></div><footer><Button variant="secondary" onClick={() => { setSelectedGoal(goal); setDialog('contribution') }}>Registrar aportación</Button><Button variant="ghost" onClick={() => { setEditingGoal(goal); setDialog('goal') }}>Editar</Button>{goal.status === 'active' && <Button variant="ghost" onClick={async () => { if (!user) return; await financeGoalRepository.save({ ...goal, status: 'paused' }, user.id); await finish('Meta pausada.') }}>Pausar</Button>}{progress.percentage >= 100 && goal.status !== 'completed' && <Button variant="ghost" onClick={async () => { if (!user) return; await financeGoalRepository.save({ ...goal, status: 'completed' }, user.id); await finish('Meta completada.') }}>Completar</Button>}</footer></article> })}</div>{!data.goals.length && <EmptyState title="Sin metas financieras" description="Convierte una intención de ahorro en una dirección medible." />}</section>}
+    {panel === 'goals' && <section className="finance-section"><SectionHead eyebrow="Dirección" title="Metas financieras" action="Nueva meta" onClick={() => setDialog('goal')} /><div className="finance-goals">{data.goals.map((goal) => { const progress = goalProgress(goal.id, data); return <article key={goal.id}><header><Target /><div><strong>{goal.name}</strong><small>{goal.priority} · {goal.status}</small></div><b>{progress.percentage.toFixed(0)}%</b></header><ProgressBar value={progress.percentage} /><div><span>Ahorrado<strong>{formatMxn(progress.savedCents)}</strong></span><span>Restante<strong>{formatMxn(progress.remainingCents)}</strong></span><span>Objetivo<strong>{formatMxn(goal.targetAmountCents)}</strong></span></div><footer><Button variant="secondary" onClick={() => { setSelectedGoal(goal); setDialog('contribution') }}>Registrar aportación</Button><Button variant="ghost" onClick={() => { setEditingGoal(goal); setDialog('goal') }}>Editar</Button>{goal.status === 'active' && <Button variant="ghost" onClick={async () => { if (!user) return; await financeGoalRepository.save({ ...goal, status: 'paused' }, user.id); await finish('Meta pausada.') }}>Pausar</Button>}{goal.status === 'paused' && <Button variant="ghost" onClick={async () => { if (!user) return; await financeGoalRepository.save({ ...goal, status: 'active' }, user.id); await finish('Meta reanudada.') }}>Reanudar</Button>}{progress.percentage >= 100 && goal.status !== 'completed' && <Button variant="ghost" onClick={async () => { if (!user) return; await financeGoalRepository.save({ ...goal, status: 'completed' }, user.id); await finish('Meta completada.') }}>Completar</Button>}</footer></article> })}</div>{!data.goals.length && <EmptyState title="Sin metas financieras" description="Convierte una intención de ahorro en una dirección medible." />}</section>}
     </div>
 
     {dialog === 'movementMenu' && <MovementMenu canTransfer={activeAccounts.length > 1} onClose={() => setDialog(null)} onSelect={startMovement} />}
@@ -345,7 +354,7 @@ export function FinancePage() {
       }}
     />}
     {dialog === 'goal' && <GoalDialog initial={editingGoal} accounts={data.accounts.filter((item) => item.isActive)} onClose={() => { setDialog(null); setEditingGoal(undefined) }} onSave={async (item) => { if (!user) return; await financeGoalRepository.save(item, user.id); await finish('Meta guardada.') }} />}
-    {dialog === 'contribution' && selectedGoal && <ContributionDialog goal={selectedGoal} accounts={data.accounts.filter((item) => item.isActive)} onClose={() => { setDialog(null); setSelectedGoal(undefined) }} onSave={async (item) => { if (!user) return; await financeGoalRepository.contribute(item, user.id); await finish('Aportación registrada.') }} />}
+    {dialog === 'contribution' && <ContributionDialog goal={selectedGoal} goals={data.goals.filter((item) => item.status === 'active')} accounts={data.accounts.filter((item) => item.isActive)} onClose={() => { setDialog(null); setSelectedGoal(undefined) }} onSave={async (item) => { if (!user) return; await financeGoalRepository.contribute(item, user.id); await finish('Aportación registrada y vinculada a la meta.') }} />}
     <ConfirmDialog open={Boolean(deleting)} title="Eliminar movimiento" description="Esta acción elimina el movimiento definitivamente y recalcula los saldos. ¿Deseas continuar?" onClose={() => setDeleting(undefined)} onConfirm={async () => { if (!user || !deleting) return; await financeTransactionRepository.remove(deleting.id, user.id); setDeleting(undefined); await finish('Movimiento eliminado.') }} />
     <ConfirmDialog open={Boolean(deletingAccount)} title="Eliminar cuenta definitivamente" description="Solo se eliminará si no tiene movimientos ni relaciones. Si conserva historial, FARO bloqueará la operación y la cuenta permanecerá archivada." onClose={() => setDeletingAccount(undefined)} onConfirm={async () => {
       if (!user || !deletingAccount) return
@@ -425,11 +434,15 @@ function FinanceMetrics({ metrics, previous, hasPreviousData }: {
   </section>
 }
 
-function SavingsPanel({ metrics, annual, year }: {
+function SavingsPanel({ metrics, annual, year, goals, contributions }: {
   metrics: ReturnType<typeof calculateFinanceMetrics>
   annual: ReturnType<typeof annualFinanceTotals>
   year: number
+  goals: FinanceGoal[]
+  contributions: FinanceGoalContribution[]
 }) {
+  const projections = financeGoalProjections(goals, contributions, new Date())
+  const monthlyTarget = projections.reduce((sum, item) => sum + item.requiredMonthlyCents, 0)
   return <section className="finance-savings-panel">
     <header><span className="eyebrow">Capital y acumulados</span><h2>Ahorro</h2><p>Seguimiento del ahorro del periodo y del flujo anual completado.</p></header>
     <div className="finance-savings-kpis">
@@ -440,6 +453,15 @@ function SavingsPanel({ metrics, annual, year }: {
       <FinanceKpi icon={<ArrowUpRight />} label={`Ingresos acumulados ${year}`} value={annual.incomeCents} context="Movimientos completados" />
       <FinanceKpi icon={<ArrowDownRight />} label={`Gastos acumulados ${year}`} value={annual.expenseCents} context="Sin transferencias ni ahorro" />
       <FinanceKpi label={`Balance anual ${year}`} value={annual.netCents} context="Ingresos acumulados − gastos acumulados" />
+    </section>
+    <section className="finance-goal-projections">
+      <header><div><span className="eyebrow">Ruta de ahorro</span><h3>Proyección de tus metas</h3></div><div><small>Aportación mensual sugerida</small><strong>{formatMxn(monthlyTarget)}</strong></div></header>
+      {projections.length ? <div>{projections.map((projection) => <article key={projection.goal.id}>
+        <header><div><strong>{projection.goal.name}</strong><small>{projection.targetLabel}</small></div><span className={`finance-projection-status finance-projection-status--${projection.status}`}>{projection.statusLabel}</span></header>
+        <ProgressBar value={projection.progressPercentage} />
+        <div className="finance-projection-metrics"><span>Falta<strong>{formatMxn(projection.remainingCents)}</strong></span><span>Necesitas al mes<strong>{formatMxn(projection.requiredMonthlyCents)}</strong></span><span>Ritmo reciente<strong>{formatMxn(projection.averageMonthlyCents)}</strong></span></div>
+        <p>{projection.insight}</p>
+      </article>)}</div> : <EmptyState title="Sin metas activas" description="Crea una meta con fecha objetivo para calcular una ruta mensual." />}
     </section>
   </section>
 }
@@ -468,9 +490,10 @@ function MovementMenu({ canTransfer, onClose, onSelect }: { canTransfer: boolean
     ['Registrar gasto', { type: 'expense' }, 'Gasto fijo o variable'],
     ['Registrar ahorro', { type: 'saving', categoryName: 'Ahorro' }, 'Separar dinero para ahorrar'],
     ['Registrar inversión', { type: 'saving', categoryName: 'Inversión' }, 'Se registra como flujo de ahorro'],
+    ['Registrar aportación', { contribution: true }, 'Vincular ahorro a una meta financiera'],
     ['Transferencia', { type: 'transfer' }, 'Mover dinero entre cuentas'],
   ]
-  return <Modal open title="Nuevo movimiento" onClose={onClose}><div className="finance-movement-menu">{options.map(([label, preset, description]) => { const disabled = preset.type === 'transfer' && !canTransfer; return <button key={label} disabled={disabled} title={disabled ? 'Necesitas al menos dos cuentas activas para mover dinero entre ellas.' : undefined} onClick={() => onSelect(preset)}><span>{label}</span><small>{disabled ? 'Crea o restaura otra cuenta para transferir' : description}</small><ArrowRight size={15} /></button> })}</div></Modal>
+  return <Modal open title="Nuevo movimiento" onClose={onClose}><div className="finance-movement-menu">{options.map(([label, preset, description]) => { const disabled = (preset.type === 'transfer' && !canTransfer); return <button key={label} disabled={disabled} title={disabled ? 'Necesitas al menos dos cuentas activas para mover dinero entre ellas.' : undefined} onClick={() => onSelect(preset)}><span>{label}</span><small>{disabled ? 'Crea o restaura otra cuenta para transferir' : description}</small><ArrowRight size={15} /></button> })}</div></Modal>
 }
 
 function TransactionDialog({ initial, preset, accounts, categories, onClose, onSave }: { initial?: FinanceTransaction; preset?: MovementPreset; accounts: FinanceAccount[]; categories: { id: string; name: string; type: string }[]; onClose: () => void; onSave: (item: Omit<FinanceTransaction, 'createdAt' | 'updatedAt'>) => Promise<void> }) {
@@ -575,8 +598,9 @@ function GoalDialog({ initial, accounts, onClose, onSave }: { initial?: FinanceG
   return <Modal open title={initial ? 'Editar meta financiera' : 'Nueva meta financiera'} onClose={onClose}><form className="finance-form" onSubmit={submit}><label>Nombre<input autoFocus required value={name} onChange={(event) => setName(event.target.value)} /></label><label>Monto objetivo MXN<input type="number" min=".01" step=".01" value={amount} onChange={(event) => setAmount(event.target.value)} /></label><div className="finance-form-grid"><label>Fecha objetivo<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label><label>Prioridad<select value={priority} onChange={(event) => setPriority(event.target.value as FinanceGoal['priority'])}><option value="low">Baja</option><option value="medium">Media</option><option value="high">Alta</option><option value="critical">Crítica</option></select></label></div><label>Cuenta vinculada<select value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="">Ninguna</option>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><ErrorText value={error} /><div className="modal-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit">Guardar</Button></div></form></Modal>
 }
 
-function ContributionDialog({ goal, accounts, onClose, onSave }: { goal: FinanceGoal; accounts: FinanceAccount[]; onClose: () => void; onSave: (item: { id: string; goalId: string; accountId?: string; amountCents: number; contributionDate: string; contributionSource: 'from_account' | 'previously_reserved'; description?: string; notes?: string }) => Promise<void> }) {
-  const [source, setSource] = useState<'from_account' | 'previously_reserved'>('from_account'); const [amount, setAmount] = useState(''); const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd')); const [accountId, setAccountId] = useState(goal.linkedAccountId ?? accounts[0]?.id ?? ''); const [description, setDescription] = useState(''); const [notes, setNotes] = useState(''); const [error, setError] = useState('')
-  const submit = async (event: FormEvent) => { event.preventDefault(); if (moneyToCents(amount) <= 0) return setError('El importe debe ser mayor que cero.'); if (source === 'from_account' && !accountId) return setError('Selecciona una cuenta de origen.'); try { await onSave({ id: crypto.randomUUID(), goalId: goal.id, accountId: source === 'from_account' ? accountId : undefined, amountCents: moneyToCents(amount), contributionDate: date, contributionSource: source, description: description || undefined, notes: notes || undefined }) } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo guardar.') } }
-  return <Modal open title={`Aportación · ${goal.name}`} onClose={onClose}><form className="finance-form" onSubmit={submit}><label>Origen de la aportación<select value={source} onChange={(event) => setSource(event.target.value as typeof source)}><option value="from_account">Descontar de una cuenta</option><option value="previously_reserved">Ya estaba apartado anteriormente</option></select></label><label>Importe MXN<input autoFocus type="number" min=".01" step=".01" required value={amount} onChange={(event) => setAmount(event.target.value)} /></label><label>Fecha<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>{source === 'from_account' && <><label>Cuenta origen<select required value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="">Selecciona</option>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Descripción<input value={description} onChange={(event) => setDescription(event.target.value)} placeholder={`Aportación a ${goal.name}`} /></label></>}<label>Notas<textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} /></label><ErrorText value={error} /><div className="modal-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit">Registrar</Button></div></form></Modal>
+function ContributionDialog({ goal, goals, accounts, onClose, onSave }: { goal?: FinanceGoal; goals: FinanceGoal[]; accounts: FinanceAccount[]; onClose: () => void; onSave: (item: { id: string; goalId: string; accountId?: string; amountCents: number; contributionDate: string; contributionSource: 'from_account' | 'previously_reserved'; description?: string; notes?: string }) => Promise<void> }) {
+  const [goalId, setGoalId] = useState(goal?.id ?? goals[0]?.id ?? ''); const [source, setSource] = useState<'from_account' | 'previously_reserved'>('from_account'); const [amount, setAmount] = useState(''); const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd')); const [accountId, setAccountId] = useState(goal?.linkedAccountId ?? accounts[0]?.id ?? ''); const [description, setDescription] = useState(''); const [notes, setNotes] = useState(''); const [error, setError] = useState('')
+  const selected = goals.find((item) => item.id === goalId) ?? goal
+  const submit = async (event: FormEvent) => { event.preventDefault(); if (!goalId) return setError('Selecciona una meta.'); if (moneyToCents(amount) <= 0) return setError('El importe debe ser mayor que cero.'); if (source === 'from_account' && !accountId) return setError('Selecciona una cuenta de origen.'); try { await onSave({ id: crypto.randomUUID(), goalId, accountId: source === 'from_account' ? accountId : undefined, amountCents: moneyToCents(amount), contributionDate: date, contributionSource: source, description: description || `Aportación a ${selected?.name ?? 'meta'}`, notes: notes || undefined }) } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo guardar.') } }
+  return <Modal open title={goal ? `Aportación · ${goal.name}` : 'Nueva aportación'} onClose={onClose}><form className="finance-form" onSubmit={submit}>{!goal && <label>Meta financiera<select autoFocus required value={goalId} onChange={(event) => { const next = goals.find((item) => item.id === event.target.value); setGoalId(event.target.value); if (next?.linkedAccountId) setAccountId(next.linkedAccountId) }}><option value="">Selecciona</option>{goals.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}<label>Origen de la aportación<select value={source} onChange={(event) => setSource(event.target.value as typeof source)}><option value="from_account">Descontar de una cuenta y crear movimiento</option><option value="previously_reserved">Ya estaba apartado anteriormente</option></select></label><label>Importe MXN<input autoFocus={Boolean(goal)} type="number" min=".01" step=".01" required value={amount} onChange={(event) => setAmount(event.target.value)} /></label><label>Fecha<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>{source === 'from_account' && <><label>Cuenta origen<select required value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="">Selecciona</option>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Descripción<input value={description} onChange={(event) => setDescription(event.target.value)} placeholder={`Aportación a ${selected?.name ?? 'meta'}`} /></label></>}<label>Notas<textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} /></label><p className="finance-form-hint">Al descontar de una cuenta se creará un movimiento de ahorro vinculado. Podrás editarlo o eliminarlo desde Movimientos.</p><ErrorText value={error} /><div className="modal-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit" disabled={!goals.length && !goal}>Registrar</Button></div></form></Modal>
 }

@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react'
 import { Bar, BarChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Button, ConfirmDialog, EmptyState, Modal } from '../components/common'
 import { PageHeader } from '../components/layout'
+import { useHealthRecords } from '../hooks/useHealthRecords'
 import { usePageCapture } from '../hooks/usePageCapture'
 import { forecastWeight } from '../lib/healthAnalytics'
 import { useFaroStore } from '../store'
@@ -20,12 +21,8 @@ const forecastLabels = {
 
 export function HealthPage() {
   const { capture } = usePageCapture()
-  const storedLogs = useFaroStore((state) => state.healthLogs)
-  const logs = storedLogs.filter((item) => !/^health-\d+$/.test(item.id))
+  const { logs, loading, error, refresh, save: saveHealth, remove: removeHealth } = useHealthRecords()
   const treatments = useFaroStore((state) => state.treatmentLogs)
-  const createHealth = useFaroStore((state) => state.createHealthLog)
-  const updateHealth = useFaroStore((state) => state.updateHealthLog)
-  const deleteHealth = useFaroStore((state) => state.deleteHealthLog)
   const createTreatment = useFaroStore((state) => state.createTreatmentLog)
   const [healthOpen, setHealthOpen] = useState(false)
   const [editingHealth, setEditingHealth] = useState<HealthLog>()
@@ -33,6 +30,7 @@ export function HealthPage() {
   const [treatmentOpen, setTreatmentOpen] = useState(false)
   const [targetOpen, setTargetOpen] = useState(false)
   const [targetKg, setTargetKg] = useState(() => Number(localStorage.getItem(targetStorageKey)) || 70)
+  const [operationError, setOperationError] = useState('')
   const recent = logs.filter((item) => new Date(`${item.occurredAt.slice(0, 10)}T12:00:00`) >= subDays(new Date(), 29))
   const weights = [...logs]
     .filter((item) => item.weightKg != null)
@@ -46,6 +44,8 @@ export function HealthPage() {
 
   return <div className="page tracker-page health-focus">
     <PageHeader eyebrow="Salud" title="Peso, hábitos y dirección." description="Tres señales simples para observar tu avance sin ruido." onCapture={capture} />
+    {(error || operationError) && <div className="health-sync-notice" role="alert"><span><strong>La sincronización necesita atención.</strong>{operationError || error} Tu respaldo local permanece en este dispositivo.</span><Button variant="secondary" onClick={() => { setOperationError(''); void refresh() }}>Reintentar</Button></div>}
+    {loading && <div className="health-sync-state" role="status">Sincronizando tus registros de salud…</div>}
     <section className="health-focus__metrics">
       <article className="featured"><Scale /><span>Peso actual</span><strong>{forecast.currentKg ? `${forecast.currentKg.toFixed(1)} kg` : 'Sin registro'}</strong><small>Último peso capturado</small></article>
       <article><Target /><span>Meta al 31 de diciembre</span><strong>{targetKg.toFixed(1)} kg</strong><button onClick={() => setTargetOpen(true)}>Modificar meta</button></article>
@@ -71,27 +71,34 @@ export function HealthPage() {
     <section className="health-history"><header><span className="eyebrow">Historial</span><h2>Registros recientes</h2></header>{[...logs].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)).slice(0, 20).map((item) => <article key={item.id}><time>{item.occurredAt.slice(0, 10)}</time><strong>{item.weightKg ? `${item.weightKg} kg` : 'Sin peso'}</strong><span>{item.foodQuality ? `Comida: ${foodLabels[item.foodQuality]}` : 'Comida sin evaluar'}</span><span>{(item.trainingMinutes ?? 0) > 0 ? 'Sí entrené' : 'No entrené'}</span><nav><button aria-label={`Editar registro del ${item.occurredAt.slice(0, 10)}`} title="Editar" onClick={() => setEditingHealth(item)}><Pencil size={15} /></button><button aria-label={`Eliminar registro del ${item.occurredAt.slice(0, 10)}`} title="Eliminar" onClick={() => setDeletingHealth(item)}><Trash2 size={15} /></button></nav></article>)}</section>
 
     <section className="treatment-panel"><div className="treatment-panel__copy"><ShieldAlert /><div><span className="eyebrow">Subsección separada</span><h2>Isotretinoína</h2><p>Este registro es informativo y no sustituye las indicaciones de tu dermatólogo.</p></div></div><Button variant="secondary" icon={<Plus size={14} />} onClick={() => setTreatmentOpen(true)}>Registrar tratamiento</Button>{treatments.length > 0 && <div className="treatment-history">{[...treatments].reverse().slice(0, 5).map((item) => <article key={item.id}><strong>{item.occurredAt.slice(0, 10)}</strong><span>{item.medicationTaken ? 'Medicamento registrado' : 'No tomado'}{item.dosage ? ` · ${item.dosage}` : ''}</span><small>{item.skinCondition || 'Sin nota de piel'}{item.sideEffects ? ` · ${item.sideEffects}` : ''}</small></article>)}</div>}</section>
-    {healthOpen && <HealthLogDialog onClose={() => setHealthOpen(false)} onSave={createHealth} />}
-    {editingHealth && <HealthLogDialog entry={editingHealth} onClose={() => setEditingHealth(undefined)} onSave={(log) => updateHealth(log.id, log)} />}
+    {healthOpen && <HealthLogDialog onClose={() => setHealthOpen(false)} onSave={saveHealth} />}
+    {editingHealth && <HealthLogDialog entry={editingHealth} onClose={() => setEditingHealth(undefined)} onSave={saveHealth} />}
     {targetOpen && <WeightTargetDialog value={targetKg} onClose={() => setTargetOpen(false)} onSave={(value) => { localStorage.setItem(targetStorageKey, String(value)); setTargetKg(value); setTargetOpen(false) }} />}
     {treatmentOpen && <TreatmentDialog onClose={() => setTreatmentOpen(false)} onSave={createTreatment} />}
-    <ConfirmDialog open={Boolean(deletingHealth)} title="Eliminar registro de salud" description={deletingHealth ? `Se eliminará permanentemente el registro del ${deletingHealth.occurredAt.slice(0, 10)}. La gráfica y la proyección se actualizarán inmediatamente.` : ''} onClose={() => setDeletingHealth(undefined)} onConfirm={() => { if (!deletingHealth) return; deleteHealth(deletingHealth.id); setDeletingHealth(undefined) }} />
+    <ConfirmDialog open={Boolean(deletingHealth)} title="Eliminar registro de salud" description={deletingHealth ? `Se eliminará permanentemente el registro del ${deletingHealth.occurredAt.slice(0, 10)} en Supabase y en el respaldo local. La gráfica y la proyección se actualizarán inmediatamente.` : ''} onClose={() => setDeletingHealth(undefined)} onConfirm={async () => { if (!deletingHealth) return; try { await removeHealth(deletingHealth.id); setDeletingHealth(undefined); setOperationError('') } catch (reason) { setOperationError(reason instanceof Error ? reason.message : 'No se pudo eliminar el registro.'); setDeletingHealth(undefined) } }} />
   </div>
 }
 
-function HealthLogDialog({ entry, onClose, onSave }: { entry?: HealthLog; onClose: () => void; onSave: (log: HealthLog) => void }) {
+function HealthLogDialog({ entry, onClose, onSave }: { entry?: HealthLog; onClose: () => void; onSave: (log: HealthLog) => Promise<HealthLog> }) {
   const [date, setDate] = useState(entry?.occurredAt.slice(0, 10) ?? format(new Date(), 'yyyy-MM-dd'))
   const [weight, setWeight] = useState(entry?.weightKg ? String(entry.weightKg) : '')
   const [foodQuality, setFoodQuality] = useState<'good' | 'okay' | 'bad'>(entry?.foodQuality ?? 'good')
   const [trained, setTrained] = useState((entry?.trainingMinutes ?? 0) > 0)
   const [notes, setNotes] = useState(entry?.notes ?? '')
-  const submit = (event: FormEvent) => {
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const submit = async (event: FormEvent) => {
     event.preventDefault()
     const timestamp = new Date().toISOString()
-    onSave({ ...entry, id: entry?.id ?? crypto.randomUUID(), area: 'health', occurredAt: date, energy: entry?.energy ?? 7, foodQuality, weightKg: weight ? Number(weight) : undefined, trainingMinutes: trained ? 1 : 0, movementMinutes: trained ? 1 : 0, notes: notes || undefined, createdAt: entry?.createdAt ?? timestamp, updatedAt: timestamp })
-    onClose()
+    setSaving(true); setError('')
+    try {
+      await onSave({ ...entry, id: entry?.id ?? crypto.randomUUID(), area: 'health', occurredAt: date, energy: entry?.energy ?? 7, foodQuality, weightKg: weight ? Number(weight) : undefined, trainingMinutes: trained ? 1 : 0, movementMinutes: trained ? 1 : 0, notes: notes || undefined, createdAt: entry?.createdAt ?? timestamp, updatedAt: timestamp })
+      onClose()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo guardar en Supabase. El formulario sigue abierto para que no pierdas la captura.')
+    } finally { setSaving(false) }
   }
-  return <Modal open title="Registro de hoy" onClose={onClose}><form className="tracker-form health-log-form" onSubmit={submit}><label>Fecha<input autoFocus type="date" required value={date} onChange={(event) => setDate(event.target.value)} /></label><label>Peso (kg)<input type="number" min="20" max="400" step=".1" value={weight} onChange={(event) => setWeight(event.target.value)} placeholder="Ej. 72.4" /></label><fieldset><legend>¿Qué tal comí hoy?</legend><div className="health-choice" role="group" aria-label="Calidad de alimentación">{(['good', 'okay', 'bad'] as const).map((value) => <button key={value} type="button" aria-pressed={foodQuality === value} className={foodQuality === value ? 'active' : ''} onClick={() => setFoodQuality(value)}>{foodLabels[value]}</button>)}</div></fieldset><label className="health-trained"><input type="checkbox" checked={trained} onChange={(event) => setTrained(event.target.checked)} /><span>Entrené hoy</span></label><label>Nota <span>opcional</span><textarea rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} /></label><div className="modal-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit">Guardar registro</Button></div></form></Modal>
+  return <Modal open title={entry ? 'Editar registro' : 'Registro de hoy'} onClose={onClose}><form className="tracker-form health-log-form" onSubmit={submit}><label>Fecha<input autoFocus type="date" required value={date} onChange={(event) => setDate(event.target.value)} /></label><label>Peso (kg)<input type="number" min="20" max="400" step=".1" value={weight} onChange={(event) => setWeight(event.target.value)} placeholder="Ej. 72.4" /></label><fieldset><legend>¿Qué tal comí hoy?</legend><div className="health-choice" role="group" aria-label="Calidad de alimentación">{(['good', 'okay', 'bad'] as const).map((value) => <button key={value} type="button" aria-pressed={foodQuality === value} className={foodQuality === value ? 'active' : ''} onClick={() => setFoodQuality(value)}>{foodLabels[value]}</button>)}</div></fieldset><label className="health-trained"><input type="checkbox" checked={trained} onChange={(event) => setTrained(event.target.checked)} /><span>Entrené hoy</span></label><label>Nota <span>opcional</span><textarea rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<div className="modal-actions"><Button type="button" variant="ghost" disabled={saving} onClick={onClose}>Cancelar</Button><Button type="submit" disabled={saving}>{saving ? 'Guardando…' : 'Guardar registro'}</Button></div></form></Modal>
 }
 
 function WeightTargetDialog({ value, onClose, onSave }: { value: number; onClose: () => void; onSave: (value: number) => void }) {
