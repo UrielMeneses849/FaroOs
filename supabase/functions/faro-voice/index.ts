@@ -105,8 +105,10 @@ Deno.serve(async (request) => {
   }
 })
 
-function tool(name: string, description: string, properties: Record<string, unknown>, required: string[] = []) {
-  return { type: 'function', name, description, strict: true, parameters: { type: 'object', properties, required, additionalProperties: false } }
+function tool(name: string, description: string, properties: Record<string, unknown>, _required: string[] = []) {
+  // OpenAI strict mode requires every declared property in `required`.
+  // Optional values remain optional semantically by accepting null.
+  return { type: 'function', name, description, strict: true, parameters: { type: 'object', properties, required: Object.keys(properties), additionalProperties: false } }
 }
 function string(description?: string) { return { type: 'string', ...(description ? { description } : {}) } }
 function optionalString() { return { type: ['string', 'null'] } }

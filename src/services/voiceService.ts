@@ -3,7 +3,18 @@ import { pendingActionSchema, voiceResponseSchema, voiceActionSchema, type Pendi
 
 async function invoke(body: Record<string, unknown>) {
   const { data, error } = await supabase.functions.invoke('faro-voice', { body })
-  if (error) throw new Error(error.message)
+  if (error) {
+    const context = 'context' in error ? error.context : undefined
+    if (context instanceof Response) {
+      try {
+        const payload = await context.clone().json() as { message?: unknown }
+        if (typeof payload.message === 'string' && payload.message) throw new Error(payload.message)
+      } catch (cause) {
+        if (cause instanceof Error && !(cause instanceof SyntaxError)) throw cause
+      }
+    }
+    throw new Error(error.message)
+  }
   return voiceResponseSchema.parse(data)
 }
 
