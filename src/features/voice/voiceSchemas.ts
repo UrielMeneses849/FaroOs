@@ -13,7 +13,12 @@ export const voiceActionSchema = z.object({
   requestId: z.string().uuid(),
   source: z.enum(['text', 'voice']),
   message: z.string().trim().min(1).max(2000),
+  history: z.array(z.object({
+    role: z.enum(['user', 'assistant']),
+    content: z.string().trim().min(1).max(2000),
+  })).max(6).default([]),
 })
+export type VoiceConversationTurn = z.infer<typeof voiceActionSchema>['history'][number]
 
 export const pendingActionSchema = z.object({
   requestId: z.string().uuid(),
@@ -37,4 +42,3 @@ export const voiceResponseSchema = z.object({
   }).optional(),
 })
 export type VoiceResponse = z.infer<typeof voiceResponseSchema>
-

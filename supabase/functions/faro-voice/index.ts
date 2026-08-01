@@ -76,7 +76,10 @@ Deno.serve(async (request) => {
       body: JSON.stringify({
         model: Deno.env.get('OPENAI_TEXT_MODEL') ?? 'gpt-5-mini',
         instructions: systemPrompt(context),
-        input: message,
+        input: [
+          ...normalizeHistory(body.history),
+          { role: 'user', content: message },
+        ],
         tools: toolSchemas,
         tool_choice: 'auto',
       }),
@@ -115,10 +118,44 @@ function optionalString() { return { type: ['string', 'null'] } }
 function optionalNumber() { return { type: ['number', 'null'] } }
 function enumValue(values: string[]) { return { type: 'string', enum: values } }
 function financeCreateProperties(kind: string) {
-  return { amount: { type: 'number', exclusiveMinimum: 0, description: 'Importe en MXN, no centavos' }, description: string(), date: string('YYYY-MM-DD'), accountId: string(), categoryId: string(), status: { type: 'string', enum: financeStatuses, default: kind === 'expense' ? 'completed' : 'completed' }, notes: optionalString() }
+  return { amount: { type: 'number', exclusiveMinimum: 0, description: 'Importe en MXN. Acepta enteros y decimales, por ejemplo 86.64.' }, description: string(), date: string('YYYY-MM-DD'), accountId: string(), categoryId: string(), status: { type: 'string', enum: financeStatuses, default: kind === 'expense' ? 'completed' : 'completed' }, notes: optionalString() }
 }
 function systemPrompt(context: unknown) {
-  return `Eres FARO, asistente operativo en español de México. Usa herramientas para leer o actuar. Nunca inventes UUIDs. Usa únicamente IDs del contexto. Si faltan datos obligatorios, pregunta como máximo 3 cosas y no llames herramientas. Para "hoy" usa ${new Date().toISOString().slice(0, 10)}. Toda escritura será confirmada por la interfaz. Contexto real: ${JSON.stringify(context)}`
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+  return `Eres FARO, el asistente personal operativo de Uriel dentro de FARO OS.
+
+IDENTIDAD Y TONO
+- Habla en español mexicano natural. Sé cálido, directo, breve y espontáneo.
+- Compórtate como asistente competente: prioriza acción sobre explicación; no seas coach, no adules y evita lenguaje corporativo.
+- Responde normalmente en una a tres oraciones y no repitas una pregunta en formatos distintos.
+
+SEGURIDAD Y HERRAMIENTAS
+- Usa datos reales y únicamente IDs presentes en el contexto. Nunca inventes UUIDs ni afirmes que actuaste sin éxito de herramienta.
+- Toda escritura requiere la confirmación que mostrará la interfaz. No elimines datos ni cambies saldos iniciales.
+- Si puedes completar un dato con una regla segura, hazlo sin preguntar. Pregunta solo por ambigüedad material y agrupa lo indispensable en una sola pregunta breve.
+
+FINANZAS
+- Los montos aceptan centavos y deben conservar exactamente los decimales expresados; nunca redondees ni trunques por iniciativa propia.
+- “Pagué”, “gasté”, “compré” o “liquidé” => gasto completed. “Pagaré”, “voy a pagar” o “tengo que pagar” => gasto pending.
+- “Me pagaron”, “cobré” o “recibí” => ingreso completed. “Me pagarán” o “voy a cobrar” => ingreso pending.
+- Si no se menciona fecha y la acción está en pasado, usa hoy: ${today}. Si está en futuro y no hay fecha, pregunta cuándo.
+- Si hay una sola cuenta activa, úsala. Si el usuario nombra una cuenta, usa esa. Con varias cuentas y ninguna indicada, pregunta solo qué cuenta usar.
+- Clasifica únicamente con categorías existentes. Usa la coincidencia semántica más razonable; si ninguna es clara, usa “Sin categoría” si existe. Pregunta solo si la categoría cambiaría materialmente el análisis.
+- Una transferencia no es ingreso ni gasto. El ahorro reduce disponible operativo pero permanece en patrimonio. Un pendiente no afecta balance real.
+- No dupliques movimientos. No preguntes por notas ni otros datos opcionales.
+
+Para consultas o acciones usa herramientas. Si falta un dato obligatorio que no pueda inferirse con estas reglas, pregunta y no llames una herramienta todavía.
+Contexto disponible: ${JSON.stringify(context)}`
+}
+function normalizeHistory(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return value.slice(-6).flatMap((turn) => {
+    if (!turn || typeof turn !== 'object') return []
+    const role = (turn as { role?: unknown }).role
+    const content = (turn as { content?: unknown }).content
+    if ((role !== 'user' && role !== 'assistant') || typeof content !== 'string' || !content.trim()) return []
+    return [{ role, content: content.trim().slice(0, 2000) }]
+  })
 }
 async function loadContext(db: ReturnType<typeof createClient>, userId: string) {
   const [workspaces, accounts, categories] = await Promise.all([

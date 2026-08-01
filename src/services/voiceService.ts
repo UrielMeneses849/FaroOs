@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase/client'
-import { pendingActionSchema, voiceResponseSchema, voiceActionSchema, type PendingVoiceAction } from '../features/voice/voiceSchemas'
+import { pendingActionSchema, voiceResponseSchema, voiceActionSchema, type PendingVoiceAction, type VoiceConversationTurn } from '../features/voice/voiceSchemas'
 
 async function invoke(body: Record<string, unknown>) {
   const { data, error } = await supabase.functions.invoke('faro-voice', { body })
@@ -22,8 +22,8 @@ export const voiceService = {
   health() {
     return invoke({ type: 'health' })
   },
-  send(message: string, source: 'text' | 'voice' = 'text') {
-    return invoke(voiceActionSchema.parse({ requestId: crypto.randomUUID(), source, message }))
+  send(message: string, source: 'text' | 'voice' = 'text', history: VoiceConversationTurn[] = []) {
+    return invoke(voiceActionSchema.parse({ requestId: crypto.randomUUID(), source, message, history }))
   },
   confirm(action: PendingVoiceAction) {
     return invoke({ type: 'confirm', action: pendingActionSchema.parse(action) })
