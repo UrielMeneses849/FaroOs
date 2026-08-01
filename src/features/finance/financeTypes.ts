@@ -44,6 +44,7 @@ export interface FinanceTransaction {
   notes?: string
   recurringTransactionId?: string
   legacyTransactionId?: string
+  budgetId?: string
   createdAt: string
   updatedAt: string
 }
@@ -85,9 +86,18 @@ export interface FinanceBudget {
   categoryId: string
   month: string
   plannedAmountCents: number
+  name?: string
+  periodStart?: string
+  periodEnd?: string
+  carryOverEnabled?: boolean
   createdAt: string
   updatedAt: string
 }
+
+export interface FinanceBudgetClosure { id:string; budgetId:string; leftoverAmountCents:number; destination:'next_period'|'goal'|'savings_fund'|'available'; goalId?:string; closedAt:string }
+export interface FinanceSavingsFund { id:string; name:string; createdAt:string; updatedAt:string }
+export interface FinanceSavingsFundEntry { id:string; fundId:string; amountCents:number; entryDate:string; description?:string; createdAt:string }
+export interface FinanceGoalItem { id:string; goalId:string; name:string; priceCents:number; priority:FinanceGoalPriority; url?:string; status:'pending'|'purchased'|'discarded'; purchaseDate?:string; transactionId?:string; createdAt:string; updatedAt:string }
 
 export interface FinanceGoal {
   id: string
@@ -124,6 +134,10 @@ export interface FinanceData {
   budgets: FinanceBudget[]
   goals: FinanceGoal[]
   contributions: FinanceGoalContribution[]
+  budgetClosures: FinanceBudgetClosure[]
+  savingsFund?: FinanceSavingsFund
+  savingsFundEntries: FinanceSavingsFundEntry[]
+  goalItems: FinanceGoalItem[]
 }
 
 export interface FinanceMetrics {

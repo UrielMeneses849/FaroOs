@@ -89,6 +89,19 @@ export interface Workspace {
   updatedAt: string
 }
 
+export type CalendarEntryKind = 'event' | 'focus'
+
+export interface CalendarEntry extends BaseEntity {
+  title: string
+  description?: string
+  kind: CalendarEntryKind
+  startsAt: string
+  endsAt: string
+  allDay: boolean
+  workspaceId?: string
+  linkedTaskId?: string
+}
+
 export interface StudySession extends BaseEntity {
   topic: string
   skill: string

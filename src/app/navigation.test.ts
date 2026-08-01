@@ -1,15 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { allNavigationItems, navigationGroups } from './navigation'
 
-describe('navegación de crecimiento', () => {
-  it('expone Viajes en /travel y retira Europa de la navegación principal', () => {
-    expect(allNavigationItems).toContainEqual(expect.objectContaining({ path: '/travel', label: 'Viajes' }))
-    expect(allNavigationItems.map((item) => String(item.path))).not.toContain('/europe')
-  })
-
-  it('mantiene accesibles Ventas, Contenido y Portfolio', () => {
-    expect(allNavigationItems.map((item) => item.path)).toEqual(expect.arrayContaining([
-      '/sales', '/content', '/portfolio',
+describe('navegación enfocada', () => {
+  it('mantiene ocultos los módulos pausados', () => {
+    expect(allNavigationItems.map((item) => item.path)).not.toEqual(expect.arrayContaining([
+      '/sprints', '/nexvora', '/portfolio', '/sales', '/content', '/learning', '/travel',
     ]))
   })
 

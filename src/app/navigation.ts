@@ -1,7 +1,6 @@
 import {
-  Activity, BookOpen, BriefcaseBusiness, CalendarDays, CircleDollarSign, ClipboardList,
-  Compass, Gauge, GraduationCap, HeartPulse, Landmark, NotebookPen,
-  Plane, Rocket, Settings, Sparkles, SunMedium, Target,
+  CalendarDays, CircleDollarSign, ClipboardList, Compass, Gauge, HeartPulse,
+  Landmark, NotebookPen, Settings, SunMedium, Target,
 } from 'lucide-react'
 
 export const navigationGroups = [
@@ -21,26 +20,12 @@ export const navigationGroups = [
     label: 'Planificación',
     items: [
       { path: '/goals', label: 'Objetivos', icon: Target },
-      { path: '/sprints', label: 'Sprints', icon: Rocket },
-    ],
-  },
-  {
-    label: 'Trabajo',
-    items: [
-      { path: '/nexvora', label: 'Nexvora', icon: Sparkles },
-      { path: '/portfolio', label: 'Portafolio', icon: BriefcaseBusiness },
-      { path: '/sales', label: 'Ventas', icon: Activity },
-      { path: '/content', label: 'Contenido', icon: BookOpen },
-    ],
-  },
-  {
-    label: 'Vida',
-    items: [
-      { path: '/learning', label: 'Aprendizaje', icon: GraduationCap },
-      { path: '/travel', label: 'Viajes', icon: Plane },
     ],
   },
 ] as const
+
+// Módulos conservados en el código pero retirados temporalmente del producto:
+// Sprints, Nexvora, Portafolio, Ventas, Contenido, Aprendizaje y Viajes.
 
 export const settingsItem = { path: '/settings', label: 'Ajustes', icon: Settings }
 export const mobileItems = [
@@ -52,7 +37,5 @@ export const mobileItems = [
 export const allNavigationItems = [
   ...navigationGroups[0].items,
   ...navigationGroups[1].items,
-  ...navigationGroups[2].items,
-  ...navigationGroups[3].items,
 ]
 export { Compass, Landmark }

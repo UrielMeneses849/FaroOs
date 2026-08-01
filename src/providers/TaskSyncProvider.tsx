@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { format, startOfWeek } from 'date-fns'
+import { format, subDays } from 'date-fns'
 import { useAuth } from '../hooks/auth'
 import {
   isSupabaseId,
@@ -70,18 +70,18 @@ export function TaskSyncProvider({ children }: { children: ReactNode }) {
       setError(null)
 
       try {
-        const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 })
-        const weekKey = format(weekStart, 'yyyy-MM-dd')
+        const cleanupDate = new Date()
+        const cleanupKeyForToday = format(cleanupDate, 'yyyy-MM-dd')
         const cleanupKey = `faro-backlog-cleanup:${user.id}`
-        if (localStorage.getItem(cleanupKey) !== weekKey) {
+        if (localStorage.getItem(cleanupKey) !== cleanupKeyForToday) {
           const removedIds = typeof taskRepository.removeCompletedBefore === 'function'
-            ? await taskRepository.removeCompletedBefore(weekStart.toISOString(), user.id)
+            ? await taskRepository.removeCompletedBefore(subDays(cleanupDate, 3).toISOString(), user.id)
             : []
           if (removedIds.length) {
             const removed = new Set(removedIds)
             useFaroStore.setState((current) => ({ tasks: current.tasks.filter((task) => !removed.has(task.id)) }))
           }
-          localStorage.setItem(cleanupKey, weekKey)
+          localStorage.setItem(cleanupKey, cleanupKeyForToday)
         }
         const remoteTasks = await taskRepository.list(user.id)
         if (!active) return

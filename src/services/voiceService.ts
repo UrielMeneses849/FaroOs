@@ -8,6 +8,9 @@ async function invoke(body: Record<string, unknown>) {
 }
 
 export const voiceService = {
+  health() {
+    return invoke({ type: 'health' })
+  },
   send(message: string, source: 'text' | 'voice' = 'text') {
     return invoke(voiceActionSchema.parse({ requestId: crypto.randomUUID(), source, message }))
   },

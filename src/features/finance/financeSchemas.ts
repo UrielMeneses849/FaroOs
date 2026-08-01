@@ -13,6 +13,7 @@ export const financeTransactionSchema = z.object({
   description: z.string().trim().min(1).max(160),
   status: z.enum(['planned', 'pending', 'completed', 'cancelled']),
   notes: z.string().trim().max(1000).optional(),
+  budgetId: uuid.optional(),
 }).superRefine((value, context) => {
   if (value.type === 'transfer') {
     if (!value.destinationAccountId) context.addIssue({ code: 'custom', path: ['destinationAccountId'], message: 'Selecciona una cuenta destino.' })
@@ -40,7 +41,7 @@ export const financeBudgetSchema = z.object({
 export const financeGoalSchema = z.object({
   name: z.string().trim().min(1).max(100),
   description: z.string().trim().max(1000).optional(),
-  targetAmountCents: z.number().int().positive(),
+  targetAmountCents: z.number().int().positive().default(1),
   targetDate: dateOnly.optional(),
   priority: z.enum(['low', 'medium', 'high', 'critical']),
   linkedAccountId: uuid.optional(),

@@ -49,6 +49,7 @@ export function AuthProvider({
       loading,
       signIn: service.signIn,
       signUp: service.signUp,
+      signInTestLab: service.signInTestLab,
       signOut: service.signOut,
     }),
     [loading, service, session],

@@ -103,6 +103,20 @@ clave privada se entrega al navegador y toda escritura requiere confirmación.
 Consulta [docs/FARO_VOICE.md](docs/FARO_VOICE.md) para configuración, auditoría y
 la futura instalación en Raspberry Pi.
 
+### Laboratorio de OpenAI
+
+La clave `OPENAI_API_KEY` se configura como secreto de Supabase y sólo la lee la
+Edge Function `faro-voice`; nunca debe usar el prefijo `VITE_` ni guardarse en el
+repositorio. En `/settings`, **Laboratorio de FARO + OpenAI** permite:
+
+- verificar que el secreto y el modelo configurado responden;
+- preparar un usuario de pruebas aislado por RLS;
+- crear de forma repetible `NU Pruebas`, `BBVA Pruebas` y categorías de prueba;
+- capturar una línea base de los KPI financieros antes de ejecutar prompts.
+
+El laboratorio debe usarse desde una cuenta de Supabase distinta a la personal.
+La verificación de conexión no envía una conversación ni ejecuta herramientas.
+
 ## Pruebas
 
 La suite cubre captura, conversiones, relaciones, progreso, Hoy, registros personales, persistencia, corrupción local, respaldos y accesibilidad de modales.

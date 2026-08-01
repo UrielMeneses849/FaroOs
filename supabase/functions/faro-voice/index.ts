@@ -38,6 +38,14 @@ Deno.serve(async (request) => {
     const { data: { user } } = await db.auth.getUser()
     if (!user) return json({ status: 'error', message: 'Tu sesión expiró.', questions: [] }, 401)
     const body = await request.json()
+    if (body.type === 'health') {
+      const openaiKey = Deno.env.get('OPENAI_API_KEY')
+      const model = Deno.env.get('OPENAI_TEXT_MODEL') ?? 'gpt-5-mini'
+      if (!openaiKey) return json({ status: 'error', message: 'OPENAI_API_KEY no está configurada en Supabase.', questions: [], result: { configured: false, valid: false, model } })
+      const check = await fetch(`https://api.openai.com/v1/models/${model}`, { headers: { Authorization: `Bearer ${openaiKey}` } })
+      if (!check.ok) return json({ status: 'error', message: `OpenAI rechazó la conexión (${check.status}). Revisa la clave, el proyecto y el modelo.`, questions: [], result: { configured: true, valid: false, model } })
+      return json({ status: 'completed', message: `Conexión verificada. FARO puede usar ${model}.`, questions: [], result: { configured: true, valid: true, model } })
+    }
     if (body.type === 'confirm' || body.type === 'cancel') {
       const action = body.action
       if (!action?.requestId || !action?.toolName || !MUTATIONS.has(action.toolName)) return json({ status: 'error', message: 'La acción no es válida.', questions: [] }, 400)

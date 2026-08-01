@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { FinanceData } from '../features/finance/financeTypes'
 import {
   accountBalance, advanceRecurringDate, annualFinanceTotals, budgetPerformance, calculateFinanceMetrics,
-  financeDecision, financeFrequencyLabel, financeGoalProjections, financeProjectionBreakdown, formatFinanceDate, goalProgress, monthKey, recurringAppliesToMonth, recurringExpectedDate,
+  financeDecision, financeFrequencyLabel, financeGoalProjections, financeProjectionBreakdown, formatFinanceDate, goalProgress, monthKey, personalBudgetForDate, recurringAppliesToMonth, recurringExpectedDate,
 } from './financeService'
 
 const base = '2026-07-01T00:00:00.000Z'
@@ -19,6 +19,7 @@ const data: FinanceData = {
   budgets: [{ id: 'b', categoryId: 'food', month: '2026-07-01', plannedAmountCents: 400_000, createdAt: base, updatedAt: base }],
   goals: [{ id: 'g', name: 'Europa', targetAmountCents: 5_000_000, status: 'active', priority: 'high', createdAt: base, updatedAt: base }],
   contributions: [{ id: 'c', goalId: 'g', amountCents: 500_000, contributionDate: '2026-07-05', createdAt: base }],
+  budgetClosures: [], savingsFundEntries: [], goalItems: [],
 }
 
 describe('financeService', () => {
@@ -27,6 +28,12 @@ describe('financeService', () => {
     expect(metrics.monthlyIncomeCents).toBe(2_500_000)
     expect(metrics.monthlyExpensesCents).toBe(100_000)
     expect(accountBalance(data.accounts[0], data.transactions)).toBe(3_350_000)
+  })
+
+  it('trata ahorro y metas como reservas lógicas sin descontar dos veces la cuenta', () => {
+    const reserved: FinanceData = { ...data, transactions:[...data.transactions,{id:'saving',accountId:'a',categoryId:'food',type:'saving',amountCents:200_000,transactionDate:'2026-07-06',description:'Reserva',status:'completed',createdAt:base,updatedAt:base}], savingsFundEntries:[{id:'f',fundId:'fund',amountCents:100_000,entryDate:'2026-07-06',createdAt:base}] }
+    expect(accountBalance(reserved.accounts[0],reserved.transactions)).toBe(3_350_000)
+    expect(calculateFinanceMetrics(reserved,new Date(2026,6,15)).availableBalanceCents).toBe(3_350_000)
   })
 
   it('calcula acumulados anuales sólo con movimientos completados', () => {
@@ -49,6 +56,16 @@ describe('financeService', () => {
     expect(budgetPerformance(data, new Date(2026, 6, 15))[0]).toMatchObject({
       actualCents: 100_000, remainingCents: 300_000, usedPercentage: 25,
     })
+  })
+
+  it('vincula Personal únicamente al presupuesto que contiene la fecha del gasto', () => {
+    const budgets = [
+      { id: 'first', name: 'Gastos Personales', periodStart: '2026-08-01', periodEnd: '2026-08-15' },
+      { id: 'second', name: 'Gastos Personales', periodStart: '2026-08-16', periodEnd: '2026-08-31' },
+    ]
+    expect(personalBudgetForDate(budgets, '2026-08-14')?.id).toBe('first')
+    expect(personalBudgetForDate(budgets, '2026-08-20')?.id).toBe('second')
+    expect(personalBudgetForDate(budgets, '2026-09-01')).toBeUndefined()
   })
 
   it('deriva el progreso de meta desde aportaciones', () => {

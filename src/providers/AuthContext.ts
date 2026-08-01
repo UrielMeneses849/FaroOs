@@ -11,6 +11,7 @@ export interface AuthContextValue {
   loading: boolean
   signIn: (credentials: AuthCredentials) => Promise<AuthOperationResult>
   signUp: (credentials: AuthCredentials) => Promise<AuthOperationResult>
+  signInTestLab: () => Promise<AuthOperationResult>
   signOut: () => Promise<AuthOperationResult>
 }
 
