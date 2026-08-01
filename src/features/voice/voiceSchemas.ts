@@ -25,6 +25,12 @@ export const pendingActionSchema = z.object({
   toolName: voiceToolNameSchema,
   arguments: z.record(z.string(), z.unknown()),
   summary: z.string(),
+  possibleDuplicate: z.object({
+    id: z.string().uuid(),
+    description: z.string(),
+    amount: z.number(),
+    date: z.string(),
+  }).optional(),
 })
 export type PendingVoiceAction = z.infer<typeof pendingActionSchema>
 

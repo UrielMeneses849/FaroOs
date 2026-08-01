@@ -81,7 +81,7 @@ Deno.serve(async (request) => {
           { role: 'user', content: message },
         ],
         tools: toolSchemas,
-        tool_choice: 'auto',
+        tool_choice: financialToolChoice(message, context) ?? 'auto',
       }),
     })
     if (!ai.ok) throw new Error(`OpenAI respondió ${ai.status}: ${await ai.text()}`)
@@ -95,10 +95,13 @@ Deno.serve(async (request) => {
     }
     const args = JSON.parse(call.arguments || '{}')
     if (MUTATIONS.has(call.name)) {
+      const possibleDuplicate = call.name === 'createExpense' || call.name === 'createIncome'
+        ? await findPotentialDuplicate(db, user.id, call.name, args)
+        : undefined
       const summary = confirmationSummary(call.name, args, context)
-      const pendingAction = { requestId, toolName: call.name, arguments: args, summary }
+      const pendingAction = { requestId, toolName: call.name, arguments: args, summary, ...(possibleDuplicate ? { possibleDuplicate } : {}) }
       await insertLog(db, user.id, requestId, body.source, message, { status: 'pending_confirmation', parsed_intent: call.name, entities: args, tool_name: call.name, tool_arguments: args, confirmation_required: true, confirmation_status: 'pending' })
-      return json({ status: 'pending_confirmation', message: 'Revisa los datos antes de guardar.', questions: [], pendingAction, qa: { intent: call.name, entities: args, toolName: call.name, toolArguments: args } })
+      return json({ status: 'pending_confirmation', message: possibleDuplicate ? 'Encontré un movimiento prácticamente igual. Revisa antes de registrarlo otra vez.' : 'Revisa los datos antes de guardar.', questions: [], pendingAction, qa: { intent: call.name, entities: args, toolName: call.name, toolArguments: args } })
     }
     const result = await executeTool(db, user.id, call.name, args)
     await insertLog(db, user.id, requestId, body.source, message, { status: 'completed', parsed_intent: call.name, entities: args, tool_name: call.name, tool_arguments: args, result, completed_at: new Date().toISOString() })
@@ -164,6 +167,37 @@ async function loadContext(db: ReturnType<typeof createClient>, userId: string) 
     db.from('finance_categories').select('id,name,type').eq('user_id', userId).eq('is_active', true),
   ])
   return { workspaces: workspaces.data ?? [], accounts: accounts.data ?? [], categories: categories.data ?? [] }
+}
+function financialToolChoice(message: string, context: { accounts?: Array<{ name: string }> }) {
+  const normalized = message.toLocaleLowerCase('es-MX')
+  const hasAmount = /(?:\$\s*)?\d[\d,.]*/.test(normalized)
+  const hasKnownAccount = (context.accounts ?? []).length === 1 || (context.accounts ?? []).some((account) => {
+    const name = account.name.toLocaleLowerCase('es-MX')
+    const firstWord = name.split(/\s+/)[0]
+    return normalized.includes(name) || (firstWord.length >= 2 && new RegExp(`\\b${escapeRegex(firstWord)}\\b`, 'i').test(normalized))
+  })
+  if (!hasAmount || !hasKnownAccount) return null
+  if (/\b(pagu[eé]|gast[eé]|compr[eé]|liquid[eé])\b/i.test(normalized)) return { type: 'function', name: 'createExpense' }
+  if (/\b(me pagaron|cobr[eé]|recib[ií])\b/i.test(normalized)) return { type: 'function', name: 'createIncome' }
+  return null
+}
+function escapeRegex(value: string) { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }
+async function findPotentialDuplicate(db: ReturnType<typeof createClient>, userId: string, toolName: string, args: Record<string, unknown>) {
+  if (!args.accountId || !args.date || !Number.isFinite(Number(args.amount))) return undefined
+  const type = toolName === 'createExpense' ? 'expense' : 'income'
+  const { data, error } = await db.from('finance_transactions')
+    .select('id,description,amount,transaction_date')
+    .eq('user_id', userId)
+    .eq('type', type)
+    .eq('account_id', String(args.accountId))
+    .eq('transaction_date', String(args.date))
+    .eq('amount', Number(args.amount))
+    .neq('status', 'cancelled')
+    .order('created_at', { ascending: false })
+    .limit(1)
+  if (error) throw error
+  const match = data?.[0]
+  return match ? { id: match.id, description: match.description, amount: Number(match.amount), date: match.transaction_date } : undefined
 }
 async function executeTool(db: ReturnType<typeof createClient>, userId: string, name: string, args: Record<string, unknown>) {
   const today = new Date().toISOString().slice(0, 10)
