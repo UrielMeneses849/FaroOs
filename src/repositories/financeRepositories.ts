@@ -7,6 +7,8 @@ import type {
   FinanceData,
   FinanceGoal,
   FinanceGoalContribution,
+  FinanceGoalItem,
+  FinanceSavingsFundEntry,
   FinanceRecurringOccurrence,
   FinanceRecurringTransaction,
   FinanceTransaction,
@@ -22,6 +24,10 @@ type RecurringOccurrenceRow = Tables['finance_recurring_occurrences']['Row']
 type BudgetRow = Tables['finance_budgets']['Row']
 type GoalRow = Tables['finance_goals']['Row']
 type ContributionRow = Tables['finance_goal_contributions']['Row']
+type GoalItemRow = Tables['finance_goal_items']['Row']
+type FundRow = Tables['finance_savings_funds']['Row']
+type FundEntryRow = Tables['finance_savings_fund_entries']['Row']
+type ClosureRow = Tables['finance_budget_closures']['Row']
 
 const accountFromRow = (row: AccountRow): FinanceAccount => ({
   id: row.id, name: row.name, type: row.type, currency: row.currency,
@@ -42,6 +48,7 @@ const transactionFromRow = (row: TransactionRow): FinanceTransaction => ({
   description: row.description, status: row.status, notes: row.notes ?? undefined,
   recurringTransactionId: row.recurring_transaction_id ?? undefined,
   legacyTransactionId: row.legacy_transaction_id ?? undefined,
+  budgetId: row.budget_id ?? undefined,
   createdAt: row.created_at, updatedAt: row.updated_at,
 })
 const recurringFromRow = (row: RecurringRow): FinanceRecurringTransaction => ({
@@ -63,8 +70,13 @@ const recurringOccurrenceFromRow = (row: RecurringOccurrenceRow): FinanceRecurri
 const budgetFromRow = (row: BudgetRow): FinanceBudget => ({
   id: row.id, categoryId: row.category_id, month: row.month,
   plannedAmountCents: numericToCents(row.planned_amount),
+  name: row.name, periodStart: row.period_start, periodEnd: row.period_end,
+  carryOverEnabled: row.carry_over_enabled,
   createdAt: row.created_at, updatedAt: row.updated_at,
 })
+const goalItemFromRow = (row: GoalItemRow): FinanceGoalItem => ({ id:row.id,goalId:row.goal_id,name:row.name,priceCents:numericToCents(row.price),priority:row.priority,url:row.url??undefined,status:row.status as FinanceGoalItem['status'],purchaseDate:row.purchase_date??undefined,transactionId:row.transaction_id??undefined,createdAt:row.created_at,updatedAt:row.updated_at })
+const fundEntryFromRow = (row: FundEntryRow): FinanceSavingsFundEntry => ({ id:row.id,fundId:row.fund_id,amountCents:numericToCents(row.amount),entryDate:row.entry_date,description:row.description??undefined,createdAt:row.created_at })
+const closureFromRow = (row: ClosureRow) => ({ id:row.id,budgetId:row.budget_id,leftoverAmountCents:numericToCents(row.leftover_amount),destination:row.destination as 'next_period'|'goal'|'savings_fund'|'available',goalId:row.goal_id??undefined,closedAt:row.closed_at })
 const goalFromRow = (row: GoalRow): FinanceGoal => ({
   id: row.id, name: row.name, description: row.description ?? undefined,
   targetAmountCents: numericToCents(row.target_amount),
@@ -153,6 +165,7 @@ export const financeTransactionRepository = {
       status: transaction.status, notes: transaction.notes ?? null,
       recurring_transaction_id: transaction.recurringTransactionId ?? null,
       legacy_transaction_id: transaction.legacyTransactionId ?? null,
+      budget_id: transaction.budgetId ?? null,
     }, { onConflict: 'id' }).select().single()
     throwIfError(error)
     return transactionFromRow(data!)
@@ -292,7 +305,8 @@ export const financeBudgetRepository = {
     const { data, error } = await supabase.from('finance_budgets').upsert({
       user_id: userId, category_id: item.categoryId, month: item.month,
       planned_amount: centsToNumeric(item.plannedAmountCents),
-    }, { onConflict: 'user_id,category_id,month' }).select().single()
+      name:item.name??'Gastos Personales',period_start:item.periodStart??item.month,period_end:item.periodEnd??item.month,carry_over_enabled:item.carryOverEnabled??false,
+    }, { onConflict: 'user_id,name,period_start' }).select().single()
     throwIfError(error)
     return budgetFromRow(data!)
   },
@@ -334,12 +348,30 @@ export const financeGoalRepository = {
   },
 }
 
+export const financePlanningRepository = {
+  async list(userId:string) {
+    await assertFinanceUser(userId)
+    const [fund,entries,items,closures]=await Promise.all([
+      supabase.from('finance_savings_funds').select('*').eq('user_id',userId).maybeSingle(),
+      supabase.from('finance_savings_fund_entries').select('*').eq('user_id',userId).order('entry_date',{ascending:false}),
+      supabase.from('finance_goal_items').select('*').eq('user_id',userId).order('created_at'),
+      supabase.from('finance_budget_closures').select('*').eq('user_id',userId),
+    ])
+    throwIfError(fund.error);throwIfError(entries.error);throwIfError(items.error);throwIfError(closures.error)
+    return { savingsFund:fund.data?{id:(fund.data as FundRow).id,name:(fund.data as FundRow).name,createdAt:(fund.data as FundRow).created_at,updatedAt:(fund.data as FundRow).updated_at}:undefined,savingsFundEntries:(entries.data??[]).map(fundEntryFromRow),goalItems:(items.data??[]).map(goalItemFromRow),budgetClosures:(closures.data??[]).map(closureFromRow) }
+  },
+  async saveFundEntry(item:Omit<FinanceSavingsFundEntry,'createdAt'>,userId:string){ await assertFinanceUser(userId);const {error}=await supabase.from('finance_savings_fund_entries').insert({id:item.id,user_id:userId,fund_id:item.fundId,amount:centsToNumeric(item.amountCents),entry_date:item.entryDate,description:item.description??null});throwIfError(error) },
+  async saveGoalItem(item:Omit<FinanceGoalItem,'createdAt'|'updatedAt'>,userId:string){await assertFinanceUser(userId);const {error}=await supabase.from('finance_goal_items').upsert({id:item.id,user_id:userId,goal_id:item.goalId,name:item.name,price:centsToNumeric(item.priceCents),priority:item.priority,url:item.url??null,status:item.status,purchase_date:item.purchaseDate??null,transaction_id:item.transactionId??null},{onConflict:'id'});throwIfError(error)},
+  async closeBudget(budgetId:string,destination:'next_period'|'goal'|'savings_fund'|'available',goalId:string|undefined,userId:string){await assertFinanceUser(userId);// eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const {error}=await(supabase.rpc as any)('close_finance_budget',{target_budget_id:budgetId,target_destination:destination,target_goal_id:goalId??null});throwIfError(error)},
+}
+
 export async function loadFinanceData(userId: string): Promise<FinanceData> {
-  const [accounts, categories, transactions, recurring, recurringOccurrences, budgets, goalData] = await Promise.allSettled([
+  const [accounts, categories, transactions, recurring, recurringOccurrences, budgets, goalData, planning] = await Promise.allSettled([
     financeAccountRepository.list(userId), financeCategoryRepository.list(userId),
     financeTransactionRepository.list(userId), financeRecurringRepository.list(userId),
     financeRecurringOccurrenceRepository.list(userId), financeBudgetRepository.list(userId),
-    financeGoalRepository.list(userId),
+    financeGoalRepository.list(userId), financePlanningRepository.list(userId),
   ])
   if (accounts.status === 'rejected') throw accounts.reason
   if (categories.status === 'rejected') throw categories.reason
@@ -362,5 +394,7 @@ export async function loadFinanceData(userId: string): Promise<FinanceData> {
     budgets: budgets.status === 'fulfilled' ? budgets.value : [],
     goals: goalData.status === 'fulfilled' ? goalData.value.goals : [],
     contributions: goalData.status === 'fulfilled' ? goalData.value.contributions : [],
+    budgetClosures:planning.status==='fulfilled'?planning.value.budgetClosures:[], savingsFund:planning.status==='fulfilled'?planning.value.savingsFund:undefined,
+    savingsFundEntries:planning.status==='fulfilled'?planning.value.savingsFundEntries:[],goalItems:planning.status==='fulfilled'?planning.value.goalItems:[],
   }
 }

@@ -16,6 +16,9 @@ export interface CalendarItem {
   projectId?: string
   goalId?: string
   editable: boolean
+  entryKind?: 'event' | 'focus'
+  description?: string
+  linkedTaskId?: string
 }
 
 export interface CalendarData {

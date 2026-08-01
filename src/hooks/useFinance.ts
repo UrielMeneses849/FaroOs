@@ -6,6 +6,7 @@ import { useAuth } from './auth'
 const emptyFinanceData: FinanceData = {
   accounts: [], categories: [], transactions: [], recurring: [],
   recurringOccurrences: [], budgets: [], goals: [], contributions: [],
+  budgetClosures: [], savingsFundEntries: [], goalItems: [],
 }
 
 export function useFinance() {

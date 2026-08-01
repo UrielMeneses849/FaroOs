@@ -6,11 +6,12 @@ import {
   normalizeTimestamp,
 } from '../lib/calendarDates'
 import type { Database } from '../types/database.types'
-import type { Goal, Project, Task } from '../types'
+import type { CalendarEntry, Goal, Project, Task } from '../types'
 
 type TaskRow = Database['public']['Tables']['tasks']['Row']
 type ProjectRow = Database['public']['Tables']['projects']['Row']
 type GoalRow = Database['public']['Tables']['goals']['Row']
+type CalendarEntryRow = Database['public']['Tables']['calendar_entries']['Row']
 
 interface CalendarSource {
   id: string
@@ -138,6 +139,24 @@ function normalizeSources(sources: CalendarSource[]): CalendarNormalizationResul
   return { items, omittedCount }
 }
 
+function normalizedEntry(entry: CalendarEntry): CalendarItem {
+  return {
+    id: `event:${entry.id}`,
+    sourceType: 'event',
+    sourceId: entry.id,
+    title: entry.title,
+    description: entry.description,
+    start: entry.startsAt,
+    end: entry.endsAt,
+    allDay: entry.allDay,
+    workspaceId: entry.workspaceId,
+    linkedTaskId: entry.linkedTaskId,
+    entryKind: entry.kind,
+    status: 'scheduled',
+    editable: true,
+  }
+}
+
 export function normalizeCalendarDataWithReport(input: {
   tasks: Task[]
   projects: Project[]
@@ -162,8 +181,9 @@ export function normalizeCalendarRows(input: {
   tasks: TaskRow[]
   projects: ProjectRow[]
   goals: GoalRow[]
+  entries?: CalendarEntryRow[]
 }): CalendarNormalizationResult {
-  return normalizeSources([
+  const normalized = normalizeSources([
     ...input.tasks.map((row): CalendarSource => ({
       id: row.id,
       sourceType: 'task',
@@ -200,4 +220,23 @@ export function normalizeCalendarRows(input: {
       targetDate: row.target_date,
     })),
   ])
+  return {
+    ...normalized,
+    items: [
+      ...normalized.items,
+      ...(input.entries ?? []).map((row) => normalizedEntry({
+        id: row.id,
+        title: row.title,
+        description: row.description ?? undefined,
+        kind: row.kind as CalendarEntry['kind'],
+        startsAt: row.starts_at,
+        endsAt: row.ends_at,
+        allDay: row.all_day,
+        workspaceId: row.workspace_id ?? undefined,
+        linkedTaskId: row.linked_task_id ?? undefined,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      })),
+    ],
+  }
 }

@@ -14,6 +14,66 @@ export type Database = {
   }
   public: {
     Tables: {
+      calendar_entries: {
+        Row: {
+          all_day: boolean
+          created_at: string
+          description: string | null
+          ends_at: string
+          id: string
+          kind: string
+          linked_task_id: string | null
+          starts_at: string
+          title: string
+          updated_at: string
+          user_id: string
+          workspace_id: string | null
+        }
+        Insert: {
+          all_day?: boolean
+          created_at?: string
+          description?: string | null
+          ends_at: string
+          id?: string
+          kind: string
+          linked_task_id?: string | null
+          starts_at: string
+          title: string
+          updated_at?: string
+          user_id: string
+          workspace_id?: string | null
+        }
+        Update: {
+          all_day?: boolean
+          created_at?: string
+          description?: string | null
+          ends_at?: string
+          id?: string
+          kind?: string
+          linked_task_id?: string | null
+          starts_at?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "calendar_entries_linked_task_id_fkey"
+            columns: ["linked_task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "calendar_entries_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       content_campaigns: {
         Row: {
           created_at: string
@@ -212,30 +272,103 @@ export type Database = {
         }
         Relationships: []
       }
+      finance_budget_closures: {
+        Row: {
+          budget_id: string
+          closed_at: string
+          destination: string
+          goal_id: string | null
+          id: string
+          leftover_amount: number
+          next_budget_id: string | null
+          overrun_amount: number
+          spent_amount: number
+          user_id: string
+        }
+        Insert: {
+          budget_id: string
+          closed_at?: string
+          destination: string
+          goal_id?: string | null
+          id?: string
+          leftover_amount: number
+          next_budget_id?: string | null
+          overrun_amount?: number
+          spent_amount?: number
+          user_id: string
+        }
+        Update: {
+          budget_id?: string
+          closed_at?: string
+          destination?: string
+          goal_id?: string | null
+          id?: string
+          leftover_amount?: number
+          next_budget_id?: string | null
+          overrun_amount?: number
+          spent_amount?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_budget_closures_budget_id_user_id_fkey"
+            columns: ["budget_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "finance_budgets"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "finance_budget_closures_goal_id_user_id_fkey"
+            columns: ["goal_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "finance_goals"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "finance_budget_closures_next_budget_fk"
+            columns: ["next_budget_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "finance_budgets"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
+      }
       finance_budgets: {
         Row: {
+          carry_over_enabled: boolean
           category_id: string
           created_at: string
           id: string
           month: string
+          name: string
+          period_end: string
+          period_start: string
           planned_amount: number
           updated_at: string
           user_id: string
         }
         Insert: {
+          carry_over_enabled?: boolean
           category_id: string
           created_at?: string
           id?: string
           month: string
+          name?: string
+          period_end: string
+          period_start: string
           planned_amount: number
           updated_at?: string
           user_id: string
         }
         Update: {
+          carry_over_enabled?: boolean
           category_id?: string
           created_at?: string
           id?: string
           month?: string
+          name?: string
+          period_end?: string
+          period_start?: string
           planned_amount?: number
           updated_at?: string
           user_id?: string
@@ -346,6 +479,66 @@ export type Database = {
           },
           {
             foreignKeyName: "finance_goal_contributions_transaction_id_user_id_fkey"
+            columns: ["transaction_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "finance_transactions"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
+      }
+      finance_goal_items: {
+        Row: {
+          created_at: string
+          goal_id: string
+          id: string
+          name: string
+          price: number
+          priority: Database["public"]["Enums"]["finance_goal_priority"]
+          purchase_date: string | null
+          status: string
+          transaction_id: string | null
+          updated_at: string
+          url: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          goal_id: string
+          id?: string
+          name: string
+          price: number
+          priority?: Database["public"]["Enums"]["finance_goal_priority"]
+          purchase_date?: string | null
+          status?: string
+          transaction_id?: string | null
+          updated_at?: string
+          url?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          goal_id?: string
+          id?: string
+          name?: string
+          price?: number
+          priority?: Database["public"]["Enums"]["finance_goal_priority"]
+          purchase_date?: string | null
+          status?: string
+          transaction_id?: string | null
+          updated_at?: string
+          url?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_goal_items_goal_id_user_id_fkey"
+            columns: ["goal_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "finance_goals"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "finance_goal_items_transaction_id_user_id_fkey"
             columns: ["transaction_id", "user_id"]
             isOneToOne: false
             referencedRelation: "finance_transactions"
@@ -545,10 +738,73 @@ export type Database = {
           },
         ]
       }
+      finance_savings_fund_entries: {
+        Row: {
+          amount: number
+          created_at: string
+          description: string | null
+          entry_date: string
+          fund_id: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          description?: string | null
+          entry_date: string
+          fund_id: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          description?: string | null
+          entry_date?: string
+          fund_id?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_savings_fund_entries_fund_id_user_id_fkey"
+            columns: ["fund_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "finance_savings_funds"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
+      }
+      finance_savings_funds: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       finance_transactions: {
         Row: {
           account_id: string
           amount: number
+          budget_id: string | null
           category_id: string | null
           created_at: string
           description: string
@@ -566,6 +822,7 @@ export type Database = {
         Insert: {
           account_id: string
           amount: number
+          budget_id?: string | null
           category_id?: string | null
           created_at?: string
           description: string
@@ -583,6 +840,7 @@ export type Database = {
         Update: {
           account_id?: string
           amount?: number
+          budget_id?: string | null
           category_id?: string | null
           created_at?: string
           description?: string
@@ -603,6 +861,13 @@ export type Database = {
             columns: ["account_id", "user_id"]
             isOneToOne: false
             referencedRelation: "finance_accounts"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "finance_transactions_budget_fk"
+            columns: ["budget_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "finance_budgets"
             referencedColumns: ["id", "user_id"]
           },
           {
@@ -687,7 +952,7 @@ export type Database = {
           archived_at: string | null
           created_at: string
           energy: number | null
-          food_quality: "bad" | "good" | "okay" | null
+          food_quality: string | null
           id: string
           log_date: string
           meditation_minutes: number | null
@@ -707,7 +972,7 @@ export type Database = {
           archived_at?: string | null
           created_at?: string
           energy?: number | null
-          food_quality?: "bad" | "good" | "okay" | null
+          food_quality?: string | null
           id?: string
           log_date: string
           meditation_minutes?: number | null
@@ -727,7 +992,7 @@ export type Database = {
           archived_at?: string | null
           created_at?: string
           energy?: number | null
-          food_quality?: "bad" | "good" | "okay" | null
+          food_quality?: string | null
           id?: string
           log_date?: string
           meditation_minutes?: number | null
@@ -2426,6 +2691,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      close_finance_budget: {
+        Args: {
+          target_budget_id: string
+          target_destination: string
+          target_goal_id?: string
+        }
+        Returns: string
+      }
       delete_finance_transaction_safely: {
         Args: { target_transaction_id: string }
         Returns: undefined

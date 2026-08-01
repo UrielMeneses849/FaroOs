@@ -36,7 +36,8 @@ const completed = (transaction: FinanceTransaction) => transaction.status === 'c
 export function transactionImpact(transaction: FinanceTransaction) {
   if (!completed(transaction)) return 0
   if (transaction.type === 'income' || transaction.type === 'refund') return transaction.amountCents
-  if (transaction.type === 'expense' || transaction.type === 'saving' || transaction.type === 'debt_payment') return -transaction.amountCents
+  // Saving is a logical reservation inside FARO; the money remains in the physical account.
+  if (transaction.type === 'expense' || transaction.type === 'debt_payment') return -transaction.amountCents
   return 0
 }
 
@@ -121,16 +122,14 @@ export function financeProjectionBreakdown(data: FinanceData, month: Date): Fina
   const gastosRealizados = monthly.filter((item) =>
     completed(item) && (item.type === 'expense' || item.type === 'saving' || item.type === 'debt_payment'))
     .reduce((sum, item) => sum + item.amountCents, 0)
-  const reservedFromAccounts = data.contributions.filter((item) => item.contributionSource === 'from_account' && item.transactionId)
-    .reduce((sum, item) => sum + item.amountCents, 0)
   const saldoRealActual = data.accounts
-    .reduce((sum, account) => sum + accountBalance(account, data.transactions), 0) + reservedFromAccounts
+    .reduce((sum, account) => sum + accountBalance(account, data.transactions), 0)
   const pendingEventual = monthly.filter((item) =>
     !item.recurringTransactionId && (item.status === 'planned' || item.status === 'pending'))
   let ingresosPendientes = pendingEventual.filter((item) => item.type === 'income' || item.type === 'refund')
     .reduce((sum, item) => sum + item.amountCents, 0)
   let gastosPendientes = pendingEventual.filter((item) =>
-    item.type === 'expense' || item.type === 'saving' || item.type === 'debt_payment')
+    item.type === 'expense' || item.type === 'debt_payment')
     .reduce((sum, item) => sum + item.amountCents, 0)
   const period = monthKey(month)
   for (const item of data.recurring) {
@@ -167,8 +166,12 @@ export function calculateFinanceMetrics(data: FinanceData, month: Date): Finance
   const monthlySavingsCents = monthly.filter((item) => completed(item) && item.type === 'saving')
     .reduce((sum, item) => sum + item.amountCents, 0)
   const totalMoneyCents = projection.saldoRealActual
-  const availableBalanceCents = data.accounts.filter((account) => account.isActive)
+  const physicalAvailable = data.accounts.filter((account) => account.isActive)
     .reduce((sum, account) => sum + accountBalance(account, data.transactions), 0)
+  // Goal and fund contributions earmark money without moving it out of its account.
+  // Keep operational availability tied to the physical balance so reservations are
+  // not deducted a second time from the headline account amount.
+  const availableBalanceCents = physicalAvailable
   const plannedBudget = data.budgets.filter((item) => item.month === monthKey(month))
     .reduce((sum, item) => sum + item.plannedAmountCents, 0)
   return {
@@ -207,15 +210,28 @@ export interface BudgetPerformance extends FinanceBudget {
   usedPercentage: number
 }
 
+export function personalBudgetForDate(
+  budgets: Array<Pick<FinanceBudget, 'id' | 'name' | 'periodStart' | 'periodEnd'>>,
+  date: string,
+) {
+  return budgets
+    .filter((budget) => (budget.name ?? 'Gastos Personales') === 'Gastos Personales'
+      && Boolean(budget.periodStart && budget.periodEnd)
+      && budget.periodStart! <= date && budget.periodEnd! >= date)
+    .sort((a, b) => (b.periodStart ?? '').localeCompare(a.periodStart ?? ''))[0]
+}
+
 export function budgetPerformance(data: FinanceData, month: Date): BudgetPerformance[] {
-  return data.budgets.filter((budget) => budget.month === monthKey(month)).map((budget) => {
+  return data.budgets.filter((budget) => (budget.periodStart??budget.month) <= format(month,'yyyy-MM-dd') && (budget.periodEnd??format(endOfMonth(parseISO(budget.month)),'yyyy-MM-dd')) >= format(month,'yyyy-MM-dd')).map((budget) => {
+    const linkedCategory = data.categories.find((item) => item.id === budget.categoryId)
     const actualCents = data.transactions.filter((item) =>
-      item.categoryId === budget.categoryId && inMonth(item.transactionDate, month)
+      (item.budgetId === budget.id || (!item.budgetId && item.categoryId === budget.categoryId && (linkedCategory?.name === 'Personal' || !budget.periodStart)))
+      && item.transactionDate >= (budget.periodStart??budget.month) && item.transactionDate <= (budget.periodEnd??format(endOfMonth(parseISO(budget.month)),'yyyy-MM-dd'))
       && completed(item) && (item.type === 'expense' || item.type === 'debt_payment'))
       .reduce((sum, item) => sum + item.amountCents, 0)
     return {
       ...budget,
-      category: data.categories.find((item) => item.id === budget.categoryId),
+      category: linkedCategory,
       actualCents,
       remainingCents: budget.plannedAmountCents - actualCents,
       usedPercentage: budget.plannedAmountCents ? actualCents / budget.plannedAmountCents * 100 : 0,
@@ -226,14 +242,20 @@ export function budgetPerformance(data: FinanceData, month: Date): BudgetPerform
 export function goalProgress(goalId: string, data: FinanceData) {
   const goal = data.goals.find((item) => item.id === goalId)
   if (!goal) return { savedCents: 0, remainingCents: 0, percentage: 0 }
+  const targetCents = goalTargetCents(goalId,data)
   const savedCents = data.contributions.filter((item) => item.goalId === goalId)
     .reduce((sum, item) => sum + item.amountCents, 0)
   return {
     savedCents,
-    remainingCents: Math.max(0, goal.targetAmountCents - savedCents),
-    percentage: Math.min(100, savedCents / goal.targetAmountCents * 100),
+    remainingCents: Math.max(0, targetCents - savedCents),
+    percentage: targetCents ? Math.min(100, savedCents / targetCents * 100) : 0,
   }
 }
+
+export function goalTargetCents(goalId:string,data:FinanceData){const active=data.goalItems.filter(item=>item.goalId===goalId&&item.status!=='discarded');return active.length?active.reduce((sum,item)=>sum+item.priceCents,0):data.goals.find(item=>item.id===goalId)?.targetAmountCents??0}
+export function goalSpentCents(goalId:string,data:FinanceData){return data.goalItems.filter(item=>item.goalId===goalId&&item.status==='purchased').reduce((sum,item)=>sum+item.priceCents,0)}
+export function goalAvailableCents(goalId:string,data:FinanceData){const contributed=data.contributions.filter(item=>item.goalId===goalId).reduce((sum,item)=>sum+item.amountCents,0);return Math.max(0,contributed-goalSpentCents(goalId,data))}
+export function savingsFundMetrics(data:FinanceData,reference=new Date()){const balanceCents=data.savingsFundEntries.reduce((sum,item)=>sum+item.amountCents,0);const month=format(reference,'yyyy-MM');const year=format(reference,'yyyy');return{balanceCents,monthCents:data.savingsFundEntries.filter(item=>item.entryDate.startsWith(month)&&item.amountCents>0).reduce((s,i)=>s+i.amountCents,0),yearCents:data.savingsFundEntries.filter(item=>item.entryDate.startsWith(year)&&item.amountCents>0).reduce((s,i)=>s+i.amountCents,0),lastEntry:data.savingsFundEntries[0]}}
 
 export type FinanceGoalProjectionStatus = 'on_track' | 'attention' | 'behind' | 'no_date' | 'completed'
 

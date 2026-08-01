@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { demoData } from '../data/mockData'
-import { normalizeCalendarData } from './calendarService'
+import { normalizeCalendarData, normalizeCalendarRows } from './calendarService'
 
 describe('normalización del calendario', () => {
   afterEach(() => vi.restoreAllMocks())
@@ -77,5 +77,36 @@ describe('normalización del calendario', () => {
 
     expect(item.start).toBe('2026-08-01')
     expect(item.end).toBeUndefined()
+  })
+
+  it('mantiene los eventos fuera del modelo de tareas y conserva su intención', () => {
+    const result = normalizeCalendarRows({
+      tasks: [],
+      projects: [],
+      goals: [],
+      entries: [{
+        id: 'event-1',
+        user_id: 'user-1',
+        workspace_id: 'workspace-personal',
+        linked_task_id: null,
+        kind: 'event',
+        title: 'Junta con stakeholder',
+        description: 'Revisión semanal',
+        starts_at: '2026-08-01T19:30:00.000Z',
+        ends_at: '2026-08-01T20:00:00.000Z',
+        all_day: false,
+        created_at: '2026-08-01T18:00:00.000Z',
+        updated_at: '2026-08-01T18:00:00.000Z',
+      }],
+    })
+
+    expect(result.items).toHaveLength(1)
+    expect(result.items[0]).toMatchObject({
+      sourceType: 'event',
+      entryKind: 'event',
+      title: 'Junta con stakeholder',
+      status: 'scheduled',
+      editable: true,
+    })
   })
 })

@@ -10,7 +10,7 @@ const fromRow = (row: Row): HealthLog => ({
   area: 'health',
   occurredAt: row.log_date,
   energy: row.energy ?? 7,
-  foodQuality: row.food_quality ?? undefined,
+  foodQuality: (row.food_quality as HealthLog['foodQuality']) ?? undefined,
   mood: row.mood ?? undefined,
   anxiety: row.anxiety ?? undefined,
   sleepHours: row.sleep_hours ?? undefined,

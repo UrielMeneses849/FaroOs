@@ -1,6 +1,6 @@
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { AlertTriangle, Check, Circle, Ellipsis, FolderKanban, List, Plus, Rows3, Timer, Workflow } from 'lucide-react'
+import { AlertTriangle, CalendarClock, Check, Circle, Ellipsis, FolderKanban, List, Plus, Rows3, Timer, Workflow } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, EmptyState } from '../components/common'
@@ -9,6 +9,7 @@ import { PageHeader } from '../components/layout'
 import { TaskFormDialog } from '../features/planning/PlanningDialogs'
 import { useFinance } from '../hooks/useFinance'
 import { useTodayTasks } from '../hooks/useTodayTasks'
+import { useCalendarData } from '../hooks/useCalendarData'
 import { usePageCapture } from '../hooks/usePageCapture'
 import { useWorkspaces } from '../hooks/useWorkspaces'
 import { useFaroStore } from '../store'
@@ -21,6 +22,7 @@ export function TodayPage() {
   const navigate = useNavigate()
   const { data: workspaces, loading: workspacesLoading, error: workspaceError, refresh: refreshWorkspaces, restoreDefaults } = useWorkspaces()
   const { data: queriedTasks, loading: tasksLoading, error: tasksError, refresh: refreshTasks } = useTodayTasks(true)
+  const { data: calendarData, loading: calendarLoading, error: calendarError, refresh: refreshCalendar } = useCalendarData()
   const { data: finance } = useFinance()
   const projects = useFaroStore((state) => state.projects)
   const updateTask = useFaroStore((state) => state.updateTask)
@@ -39,6 +41,10 @@ export function TodayPage() {
     item.transactionDate === today && item.status === 'completed'
     && (item.type === 'expense' || item.type === 'debt_payment'))
   const spentToday = todayExpenses.reduce((sum, item) => sum + item.amountCents, 0)
+  const agenda = useMemo(() => calendarData.items
+    .filter((item) => item.sourceType === 'event' && timestampToLocalParts(item.start).date === today)
+    .filter((item) => workspaceFilter === 'all' || item.workspaceId === workspaceFilter)
+    .sort((a, b) => a.start.localeCompare(b.start)), [calendarData.items, today, workspaceFilter])
 
   const tasks = useMemo(() => queriedTasks
     .filter((task) => task.dueDate === today || (task.status !== 'done' && Boolean(task.dueDate && task.dueDate < today)))
@@ -55,19 +61,21 @@ export function TodayPage() {
   const overdueCount = tasks.filter((task) => task.status !== 'done' && Boolean(task.dueDate && task.dueDate < today)).length
   const upcoming = queriedTasks.filter((task) => task.status !== 'done' && task.dueAt && (parseTimestamp(task.dueAt)?.getTime() ?? 0) >= renderedAt)
     .sort((a, b) => a.dueAt!.localeCompare(b.dueAt!))[0]
+  const upcomingAgenda = agenda.find((item) => (parseTimestamp(item.start)?.getTime() ?? 0) >= renderedAt)
   const priorityTask = tasks.find((task) => task.status !== 'done' && task.dueDate === today && (task.priority === 'critical' || task.priority === 'high'))
     ?? upcoming ?? tasks.find((task) => task.status !== 'done')
   const activeWorkspaces = workspaces.filter((workspace) => workspace.isActive)
   const openCreate = (workspaceId?: string) => { setCreateWorkspaceId(workspaceId); setEditing('new') }
 
-  if (workspacesLoading || tasksLoading) return <div className="page today-context"><div className="today-skeleton" role="status">Preparando tus contextos…</div></div>
-  if (workspaceError || tasksError) return <div className="page"><EmptyState title="No pudimos cargar Hoy" description={workspaceError ?? tasksError ?? ''} action={<Button onClick={() => { void refreshWorkspaces(); void refreshTasks() }}>Reintentar</Button>} /></div>
+  if (workspacesLoading || tasksLoading || calendarLoading) return <div className="page today-context"><div className="today-skeleton" role="status">Preparando tus contextos…</div></div>
+  if (workspaceError || tasksError || calendarError) return <div className="page"><EmptyState title="No pudimos cargar Hoy" description={workspaceError ?? tasksError ?? calendarError ?? ''} action={<Button onClick={() => { void refreshWorkspaces(); void refreshTasks(); void refreshCalendar() }}>Reintentar</Button>} /></div>
   if (!activeWorkspaces.length) return <div className="page"><EmptyState title="No hay workspaces activos" description="Restaura tus contextos iniciales para organizar las tareas." action={<Button onClick={() => void restoreDefaults()}>Restaurar contextos</Button>} /></div>
 
   return <div className="page today-context">
     <PageHeader eyebrow={format(new Date(), "EEEE, d 'de' MMMM", { locale: es })} title="Hoy" description="Tu atención, separada por el contexto correcto." onCapture={capture} />
     <section className="today-context__summary"><div><span>Pendientes</span><strong>{pending}</strong></div><div><span>Completadas</span><strong>{completed}</strong></div><button className="today-context__spending" onClick={() => { sessionStorage.setItem('faro-finance-panel', 'transactions'); navigate('/finance') }}><span>Gastado hoy</span><strong>{formatMxn(spentToday)}</strong></button></section>
-    <section className="today-brief"><div><span>Siguiente</span><strong>{upcoming ? `${timestampToLocalParts(upcoming.dueAt).time} · ${upcoming.title}` : 'Sin tareas programadas para las próximas horas'}</strong></div><div><span>Vencidas</span><strong>{overdueCount} {overdueCount === 1 ? 'tarea' : 'tareas'}</strong></div>{priorityTask && <div><span>Prioridad del día</span><strong>{priorityTask.title}</strong></div>}</section>
+    <section className="today-brief"><div><span>Siguiente</span><strong>{upcomingAgenda ? `${timestampToLocalParts(upcomingAgenda.start).time} · ${upcomingAgenda.title}` : upcoming ? `${timestampToLocalParts(upcoming.dueAt).time} · ${upcoming.title}` : 'Sin compromisos programados para las próximas horas'}</strong></div><div><span>Vencidas</span><strong>{overdueCount} {overdueCount === 1 ? 'tarea' : 'tareas'}</strong></div>{priorityTask && <div><span>Prioridad del día</span><strong>{priorityTask.title}</strong></div>}</section>
+    {agenda.length > 0 && <section className="today-agenda" aria-labelledby="today-agenda-title"><header><div><CalendarClock size={14} /><div><span className="eyebrow">Agenda</span><h2 id="today-agenda-title">Compromisos de hoy</h2></div></div><button onClick={() => navigate('/calendar')}>Abrir calendario</button></header><div>{agenda.map((item) => <article key={item.id}><time>{timestampToLocalParts(item.start).time}</time><i style={{ background: activeWorkspaces.find((workspace) => workspace.id === item.workspaceId)?.color }} /><div><strong>{item.title}</strong><span>{item.entryKind === 'focus' ? 'Bloque de enfoque' : 'Evento'}{item.linkedTaskId ? ' · Vinculado a una tarea' : ''}</span></div></article>)}</div></section>}
     <div className="today-context__toolbar">
       <div className="context-chips" aria-label="Filtrar por workspace"><button className={workspaceFilter === 'all' ? 'active' : ''} onClick={() => setWorkspaceFilter('all')}>Todos</button>{activeWorkspaces.map((workspace) => <button key={workspace.id} className={workspaceFilter === workspace.id ? 'active' : ''} onClick={() => setWorkspaceFilter(workspace.id)}>{workspace.name}</button>)}</div>
       <div className="today-context__selects"><select aria-label="Fecha" value={dateFilter} onChange={(event) => setDateFilter(event.target.value as typeof dateFilter)}><option value="all">Todas</option><option value="today">Hoy</option><option value="overdue">Vencidas</option><option value="untimed">Sin hora</option></select><select aria-label="Prioridad" value={priority} onChange={(event) => setPriority(event.target.value as Priority | 'all')}><option value="all">Prioridad</option><option value="critical">Crítica</option><option value="high">Alta</option><option value="medium">Media</option><option value="low">Baja</option></select><select aria-label="Estado" value={status} onChange={(event) => setStatus(event.target.value as TaskStatus | 'all')}><option value="all">Estado</option><option value="todo">Por hacer</option><option value="doing">En curso</option><option value="paused">Pausada</option><option value="blocked">Bloqueada</option><option value="done">Completada</option></select><button aria-label="Vista agrupada" className={view === 'grouped' ? 'active' : ''} onClick={() => setView('grouped')}><Rows3 size={15} /></button><button aria-label="Lista única" className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}><List size={15} /></button></div>
