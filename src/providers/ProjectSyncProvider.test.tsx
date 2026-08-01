@@ -41,6 +41,7 @@ const authService: AuthService = {
   subscribe: vi.fn().mockReturnValue({ unsubscribe: vi.fn() }),
   signIn: vi.fn().mockResolvedValue({ error: null }),
   signUp: vi.fn().mockResolvedValue({ error: null }),
+  signInTestLab: vi.fn().mockResolvedValue({ error: null }),
   signOut: vi.fn().mockResolvedValue({ error: null }),
 }
 

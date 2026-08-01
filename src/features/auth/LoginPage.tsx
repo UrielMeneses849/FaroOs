@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
-import { ArrowRight, Compass, UserPlus } from 'lucide-react'
+import { ArrowRight, Compass, FlaskConical, UserPlus } from 'lucide-react'
 import { Button, FormField } from '../../components/common'
 import { useAuth } from '../../hooks/auth'
 import { loginSchema, type LoginFields } from './loginSchema'
@@ -10,13 +10,13 @@ interface LocationState {
 }
 
 export function LoginPage() {
-  const { loading: authLoading, session, signIn, signUp } = useAuth()
+  const { loading: authLoading, session, signIn, signUp, signInTestLab } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [fields, setFields] = useState<LoginFields>({ email: '', password: '' })
   const [errors, setErrors] = useState<Partial<Record<keyof LoginFields, string>>>({})
   const [feedback, setFeedback] = useState('')
-  const [action, setAction] = useState<'signIn' | 'signUp' | null>(null)
+  const [action, setAction] = useState<'signIn' | 'signUp' | 'testLab' | null>(null)
 
   const destination =
     (location.state as LocationState | null)?.from?.pathname ?? '/dashboard'
@@ -70,6 +70,23 @@ export function LoginPage() {
         ? error.message
         : 'Cuenta creada. Revisa tu correo si la confirmación está habilitada.',
     )
+  }
+
+  const handleTestLab = async () => {
+    setAction('testLab')
+    setFeedback('')
+    const { error } = await signInTestLab()
+    setAction(null)
+    if (error) {
+      const anonymousAccessDisabled = /anonymous|provider.*disabled/i.test(error.message)
+      setFeedback(
+        anonymousAccessDisabled
+          ? 'Supabase aún no permite accesos anónimos. Activa “Allow anonymous sign-ins” en Authentication → General Configuration e inténtalo de nuevo.'
+          : error.message,
+      )
+      return
+    }
+    navigate('/lab', { replace: true })
   }
 
   return (
@@ -136,6 +153,22 @@ export function LoginPage() {
           >
             Crear cuenta
           </Button>
+          <div className="auth-lab-divider"><span>Entorno aislado</span></div>
+          <Button
+            type="button"
+            size="lg"
+            variant="secondary"
+            loading={action === 'testLab'}
+            disabled={action !== null || authLoading}
+            icon={<FlaskConical size={17} />}
+            onClick={() => void handleTestLab()}
+          >
+            Entrar al laboratorio
+          </Button>
+          <p className="auth-lab-note">
+            Crea una identidad temporal separada. No carga ni sincroniza tus finanzas,
+            tareas, backlog o calendario personales.
+          </p>
           <button
             type="button"
             className="auth-forgot"

@@ -2,6 +2,7 @@ import { Navigate, createBrowserRouter } from 'react-router-dom'
 import { Suspense, type ReactNode } from 'react'
 import { AppShell } from '../components/layout'
 import { LoginPage, ProtectedRoute } from '../features/auth'
+import { AiTestLabPage } from '../features/voice/AiTestLabPage'
 import { RouteErrorPage } from '../features/errors/RouteErrorPage'
 import { BacklogPage, CalendarPage, DashboardPage, FinancePage, GoalDetailPage, GoalsPage, HealthPage, JournalPage, SettingsPage, TodayPage } from './LazyPages'
 
@@ -12,7 +13,9 @@ export const router = createBrowserRouter(
     { path: '/login', element: <LoginPage /> },
     {
       element: <ProtectedRoute />,
-      children: [{
+      children: [
+        { path: '/lab', element: <AiTestLabPage /> },
+        {
         path: '/',
         element: <AppShell />,
         errorElement: <RouteErrorPage />,
@@ -42,7 +45,8 @@ export const router = createBrowserRouter(
           { path: 'europe', element: <Navigate to="/dashboard" replace /> },
           { path: '*', element: <Navigate to="/dashboard" replace /> },
         ],
-      }],
+        },
+      ],
     },
   ],
   { basename: import.meta.env.BASE_URL },

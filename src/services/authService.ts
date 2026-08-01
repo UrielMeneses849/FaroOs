@@ -22,6 +22,7 @@ export interface AuthService {
   ) => Subscription
   signIn: (credentials: AuthCredentials) => Promise<AuthOperationResult>
   signUp: (credentials: AuthCredentials) => Promise<AuthOperationResult>
+  signInTestLab: () => Promise<AuthOperationResult>
   signOut: () => Promise<AuthOperationResult>
 }
 
@@ -40,6 +41,12 @@ export const authService: AuthService = {
   },
   async signUp(credentials) {
     const { error } = await supabase.auth.signUp(credentials)
+    return { error }
+  },
+  async signInTestLab() {
+    const { error } = await supabase.auth.signInAnonymously({
+      options: { data: { faro_mode: 'ai_test_lab' } },
+    })
     return { error }
   },
   async signOut() {

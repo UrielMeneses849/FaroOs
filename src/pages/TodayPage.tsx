@@ -1,6 +1,6 @@
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { AlertTriangle, CalendarClock, Check, Circle, Ellipsis, FolderKanban, List, Plus, Rows3, Timer, Workflow } from 'lucide-react'
+import { AlertTriangle, CalendarClock, Check, Circle, Ellipsis, FolderKanban, List, Plus, Rows3, Scale, Timer, Workflow } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, EmptyState } from '../components/common'
@@ -25,6 +25,7 @@ export function TodayPage() {
   const { data: calendarData, loading: calendarLoading, error: calendarError, refresh: refreshCalendar } = useCalendarData()
   const { data: finance } = useFinance()
   const projects = useFaroStore((state) => state.projects)
+  const healthLogs = useFaroStore((state) => state.healthLogs)
   const updateTask = useFaroStore((state) => state.updateTask)
   const deleteTask = useFaroStore((state) => state.deleteTask)
   const [editing, setEditing] = useState<Task | 'new' | null>(null)
@@ -37,6 +38,10 @@ export function TodayPage() {
   const [showEmpty, setShowEmpty] = useState(false)
   const [renderedAt] = useState(() => Date.now())
   const today = localDate()
+  const todayHealth = healthLogs.find((item) => item.occurredAt.slice(0, 10) === today)
+  const latestWeight = [...healthLogs]
+    .filter((item) => item.weightKg != null)
+    .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))[0]?.weightKg
   const todayExpenses = finance.transactions.filter((item) =>
     item.transactionDate === today && item.status === 'completed'
     && (item.type === 'expense' || item.type === 'debt_payment'))
@@ -73,7 +78,7 @@ export function TodayPage() {
 
   return <div className="page today-context">
     <PageHeader eyebrow={format(new Date(), "EEEE, d 'de' MMMM", { locale: es })} title="Hoy" description="Tu atención, separada por el contexto correcto." onCapture={capture} />
-    <section className="today-context__summary"><div><span>Pendientes</span><strong>{pending}</strong></div><div><span>Completadas</span><strong>{completed}</strong></div><button className="today-context__spending" onClick={() => { sessionStorage.setItem('faro-finance-panel', 'transactions'); navigate('/finance') }}><span>Gastado hoy</span><strong>{formatMxn(spentToday)}</strong></button></section>
+    <section className="today-context__summary"><div><span>Pendientes</span><strong>{pending}</strong></div><div><span>Completadas</span><strong>{completed}</strong></div><button className="today-context__weight" data-missing={!todayHealth?.weightKg} onClick={() => navigate('/health')}><Scale size={16} /><span>{todayHealth?.weightKg ? 'Peso de hoy' : 'Peso pendiente'}</span><strong>{todayHealth?.weightKg ? `${todayHealth.weightKg} kg` : latestWeight ? `Último: ${latestWeight} kg` : 'Registrar peso'}</strong><small>{todayHealth?.weightKg ? 'Capturado hoy' : 'Aún no lo has capturado hoy'}</small></button><button className="today-context__spending" onClick={() => { sessionStorage.setItem('faro-finance-panel', 'transactions'); navigate('/finance') }}><span>Gastado hoy</span><strong>{formatMxn(spentToday)}</strong></button></section>
     <section className="today-brief"><div><span>Siguiente</span><strong>{upcomingAgenda ? `${timestampToLocalParts(upcomingAgenda.start).time} · ${upcomingAgenda.title}` : upcoming ? `${timestampToLocalParts(upcoming.dueAt).time} · ${upcoming.title}` : 'Sin compromisos programados para las próximas horas'}</strong></div><div><span>Vencidas</span><strong>{overdueCount} {overdueCount === 1 ? 'tarea' : 'tareas'}</strong></div>{priorityTask && <div><span>Prioridad del día</span><strong>{priorityTask.title}</strong></div>}</section>
     {agenda.length > 0 && <section className="today-agenda" aria-labelledby="today-agenda-title"><header><div><CalendarClock size={14} /><div><span className="eyebrow">Agenda</span><h2 id="today-agenda-title">Compromisos de hoy</h2></div></div><button onClick={() => navigate('/calendar')}>Abrir calendario</button></header><div>{agenda.map((item) => <article key={item.id}><time>{timestampToLocalParts(item.start).time}</time><i style={{ background: activeWorkspaces.find((workspace) => workspace.id === item.workspaceId)?.color }} /><div><strong>{item.title}</strong><span>{item.entryKind === 'focus' ? 'Bloque de enfoque' : 'Evento'}{item.linkedTaskId ? ' · Vinculado a una tarea' : ''}</span></div></article>)}</div></section>}
     <div className="today-context__toolbar">
@@ -83,7 +88,7 @@ export function TodayPage() {
     {view === 'grouped' ? <div className="workspace-groups">{activeWorkspaces.map((workspace) => {
       const workspaceTasks = visibleTasks.filter((task) => task.workspaceId === workspace.id)
       if (!showEmpty && !workspaceTasks.length) return null
-      return <section className="workspace-group" key={workspace.id}><header><div><i style={{ background: workspace.color }} /><h2>{workspace.name === 'Personal' ? 'Prioridades personales' : workspace.name}</h2><span>{workspaceTasks.length}</span></div><button onClick={() => openCreate(workspace.id)}><Plus size={14} /> Añadir</button></header>{workspaceTasks.length ? workspaceTasks.map((task) => <ContextTaskRow key={task.id} task={task} project={projects.find((project) => project.id === task.projectId)?.title} workspaces={activeWorkspaces} onUpdate={(changes) => updateTask(task.id, changes)} onEdit={() => setEditing(task)} onDelete={() => deleteTask(task.id)} />) : <p className="workspace-group__empty">Sin tareas para hoy.</p>}</section>
+      return <section className="workspace-group workspace-group--tasks" key={workspace.id}><header><div><i style={{ background: workspace.color }} /><h2>{workspace.name === 'Personal' ? 'Prioridades personales' : workspace.name}</h2><span>{workspaceTasks.length} {workspaceTasks.length === 1 ? 'tarea' : 'tareas'}</span></div><button onClick={() => openCreate(workspace.id)}><Plus size={14} /> Añadir</button></header>{workspaceTasks.length ? workspaceTasks.map((task) => <ContextTaskRow key={task.id} task={task} project={projects.find((project) => project.id === task.projectId)?.title} workspaces={activeWorkspaces} onUpdate={(changes) => updateTask(task.id, changes)} onEdit={() => setEditing(task)} onDelete={() => deleteTask(task.id)} />) : <p className="workspace-group__empty">Sin tareas para hoy.</p>}</section>
     })}<button className="show-empty" onClick={() => setShowEmpty((value) => !value)}>{showEmpty ? 'Ocultar contextos vacíos' : 'Mostrar contextos vacíos'}</button></div> : <section className="workspace-group workspace-group--list">{visibleTasks.map((task) => <ContextTaskRow key={task.id} task={task} project={projects.find((project) => project.id === task.projectId)?.title} workspaces={activeWorkspaces} onUpdate={(changes) => updateTask(task.id, changes)} onEdit={() => setEditing(task)} onDelete={() => deleteTask(task.id)} />)}{!visibleTasks.length && <EmptyState title="Nada pendiente para este filtro" description="Ajusta los filtros o crea una tarea." action={<Button icon={<Plus size={15} />} onClick={() => openCreate()}>Crear tarea</Button>} />}</section>}
     <Button className="today-context__create" icon={<Plus size={15} />} onClick={() => openCreate()}>Crear tarea</Button>
     {editing && <TaskFormDialog open initial={editing === 'new' ? undefined : editing} workspaceId={createWorkspaceId} onClose={() => { setEditing(null); setCreateWorkspaceId(undefined) }} />}

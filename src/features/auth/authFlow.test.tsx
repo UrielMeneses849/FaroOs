@@ -32,6 +32,7 @@ function createService(session: Session | null = null): AuthService {
     subscribe: vi.fn().mockReturnValue({ unsubscribe: vi.fn() }),
     signIn: vi.fn().mockResolvedValue({ error: null }),
     signUp: vi.fn().mockResolvedValue({ error: null }),
+    signInTestLab: vi.fn().mockResolvedValue({ error: null }),
     signOut: vi.fn().mockResolvedValue({ error: null }),
   }
 }
@@ -137,5 +138,28 @@ describe('flujo de autenticación', () => {
         password: 'segura123',
       }),
     )
+  })
+
+  it('entra al laboratorio sin solicitar correo ni contraseña', async () => {
+    const service = createService()
+    const user = userEvent.setup()
+
+    render(
+      <AuthProvider service={service}>
+        <MemoryRouter initialEntries={['/login']}>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/lab" element={<p>Laboratorio aislado</p>} />
+          </Routes>
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    await user.click(await screen.findByRole('button', { name: 'Entrar al laboratorio' }))
+
+    await waitFor(() => expect(service.signInTestLab).toHaveBeenCalledOnce())
+    expect(await screen.findByText('Laboratorio aislado')).toBeInTheDocument()
+    expect(service.signIn).not.toHaveBeenCalled()
+    expect(service.signUp).not.toHaveBeenCalled()
   })
 })

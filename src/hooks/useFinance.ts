@@ -24,5 +24,10 @@ export function useFinance() {
     finally { setLoading(false) }
   }, [user])
   useEffect(() => { queueMicrotask(() => void refresh()) }, [refresh])
+  useEffect(() => {
+    const handleFinanceUpdate = () => void refresh()
+    window.addEventListener('faro:finance-updated', handleFinanceUpdate)
+    return () => window.removeEventListener('faro:finance-updated', handleFinanceUpdate)
+  }, [refresh])
   return { data, loading, error, refresh, user }
 }
