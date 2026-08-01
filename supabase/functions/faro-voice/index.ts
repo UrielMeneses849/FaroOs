@@ -101,7 +101,7 @@ Deno.serve(async (request) => {
       const summary = confirmationSummary(call.name, args, context)
       const pendingAction = { requestId, toolName: call.name, arguments: args, summary, ...(possibleDuplicate ? { possibleDuplicate } : {}) }
       await insertLog(db, user.id, requestId, body.source, message, { status: 'pending_confirmation', parsed_intent: call.name, entities: args, tool_name: call.name, tool_arguments: args, confirmation_required: true, confirmation_status: 'pending' })
-      return json({ status: 'pending_confirmation', message: possibleDuplicate ? 'Encontré un movimiento prácticamente igual. Revisa antes de registrarlo otra vez.' : 'Revisa los datos antes de guardar.', questions: [], pendingAction, qa: { intent: call.name, entities: args, toolName: call.name, toolArguments: args } })
+      return json({ status: 'pending_confirmation', message: confirmationPrompt(call.name, args, context, Boolean(possibleDuplicate)), questions: [], pendingAction, qa: { intent: call.name, entities: args, toolName: call.name, toolArguments: args } })
     }
     const result = await executeTool(db, user.id, call.name, args)
     await insertLog(db, user.id, requestId, body.source, message, { status: 'completed', parsed_intent: call.name, entities: args, tool_name: call.name, tool_arguments: args, result, completed_at: new Date().toISOString() })
@@ -131,6 +131,7 @@ IDENTIDAD Y TONO
 - Habla en español mexicano natural. Sé cálido, directo, breve y espontáneo.
 - Compórtate como asistente competente: prioriza acción sobre explicación; no seas coach, no adules y evita lenguaje corporativo.
 - Responde normalmente en una a tres oraciones y no repitas una pregunta en formatos distintos.
+- Las confirmaciones hablables deben ser de una sola oración y mencionar únicamente acción, monto y categoría. Omite fecha, cuenta, descripción y estado cuando ya fueron inferidos correctamente; esos detalles estarán visibles en la interfaz.
 
 SEGURIDAD Y HERRAMIENTAS
 - Usa datos reales y únicamente IDs presentes en el contexto. Nunca inventes UUIDs ni afirmes que actuaste sin éxito de herramienta.
@@ -169,18 +170,19 @@ async function loadContext(db: ReturnType<typeof createClient>, userId: string) 
   return { workspaces: workspaces.data ?? [], accounts: accounts.data ?? [], categories: categories.data ?? [] }
 }
 function financialToolChoice(message: string, context: { accounts?: Array<{ name: string }> }) {
-  const normalized = message.toLocaleLowerCase('es-MX')
+  const normalized = foldText(message)
   const hasAmount = /(?:\$\s*)?\d[\d,.]*/.test(normalized)
   const hasKnownAccount = (context.accounts ?? []).length === 1 || (context.accounts ?? []).some((account) => {
-    const name = account.name.toLocaleLowerCase('es-MX')
+    const name = foldText(account.name)
     const firstWord = name.split(/\s+/)[0]
     return normalized.includes(name) || (firstWord.length >= 2 && new RegExp(`\\b${escapeRegex(firstWord)}\\b`, 'i').test(normalized))
   })
   if (!hasAmount || !hasKnownAccount) return null
-  if (/\b(pagu[eé]|gast[eé]|compr[eé]|liquid[eé])\b/i.test(normalized)) return { type: 'function', name: 'createExpense' }
-  if (/\b(me pagaron|cobr[eé]|recib[ií])\b/i.test(normalized)) return { type: 'function', name: 'createIncome' }
+  if (/\b(pague|gaste|compre|liquide)\b/.test(normalized)) return { type: 'function', name: 'createExpense' }
+  if (/\b(me pagaron|cobre|recibi)\b/.test(normalized)) return { type: 'function', name: 'createIncome' }
   return null
 }
+function foldText(value: string) { return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es-MX') }
 function escapeRegex(value: string) { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }
 async function findPotentialDuplicate(db: ReturnType<typeof createClient>, userId: string, toolName: string, args: Record<string, unknown>) {
   if (!args.accountId || !args.date || !Number.isFinite(Number(args.amount))) return undefined
@@ -251,6 +253,17 @@ function confirmationSummary(name: string, args: Record<string, unknown>, contex
   if (name === 'createTask') return `Crear “${args.title}” en ${label(context.workspaces, args.workspaceId)}${args.dueDate ? ` para ${args.dueDate}` : ''}.`
   if (name === 'createExpense' || name === 'createIncome') return `${name === 'createExpense' ? 'Gasto' : 'Ingreso'} de $${Number(args.amount).toLocaleString('es-MX')} en ${label(context.accounts, args.accountId)}, categoría ${label(context.categories, args.categoryId)}, fecha ${args.date}.`
   return `${name}: ${JSON.stringify(args)}`
+}
+function confirmationPrompt(name: string, args: Record<string, unknown>, context: { categories?: Array<{ id: string; name: string }> }, duplicate: boolean) {
+  if (duplicate) return 'Ya existe un movimiento igual. ¿Quieres registrarlo otra vez?'
+  if (name === 'createExpense' || name === 'createIncome') {
+    const amount = Number(args.amount).toLocaleString('es-MX', { maximumFractionDigits: 2 })
+    const category = context.categories?.find((item) => item.id === args.categoryId)?.name ?? 'Sin categoría'
+    const kind = name === 'createExpense' ? 'gasto' : 'ingreso'
+    const classification = category.toLocaleLowerCase('es-MX') === 'personal' ? `${kind} personal` : `${kind} en ${category}`
+    return `¿Registro $${amount} como ${classification}?`
+  }
+  return '¿Confirmas este cambio?'
 }
 function successMessage(name: string) { return name === 'createTask' ? 'Tarea creada correctamente.' : name === 'createExpense' ? 'Gasto registrado correctamente.' : name === 'createIncome' ? 'Ingreso registrado correctamente.' : 'Cambio guardado correctamente.' }
 function readResultMessage(name: string, result: unknown) { return name === 'getDailySummary' ? 'Aquí tienes tu resumen de hoy.' : name === 'getFinanceSummary' ? 'Aquí tienes tu resumen financiero.' : `Encontré ${Array.isArray(result) ? result.length : 1} resultado(s).` }
