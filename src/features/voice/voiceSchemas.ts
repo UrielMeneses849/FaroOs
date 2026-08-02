@@ -3,7 +3,8 @@ import { z } from 'zod'
 export const voiceToolNames = [
   'getDailySummary', 'listTodayTasks', 'createTask', 'updateTaskStatus',
   'createExpense', 'createIncome', 'updateFinanceTransactionStatus',
-  'searchFinanceTransactions', 'getFinanceSummary',
+  'searchFinanceTransactions', 'getFinanceSummary', 'listRecurringExpenses',
+  'createRecurringExpense', 'registerRecurringPayment',
 ] as const
 
 export const voiceToolNameSchema = z.enum(voiceToolNames)

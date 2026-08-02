@@ -1,7 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { corsHeaders, json } from '../_shared/http.ts'
 
-const MUTATIONS = new Set(['createTask', 'updateTaskStatus', 'createExpense', 'createIncome', 'updateFinanceTransactionStatus'])
+const MUTATIONS = new Set(['createTask', 'updateTaskStatus', 'createExpense', 'createIncome', 'updateFinanceTransactionStatus', 'createRecurringExpense', 'registerRecurringPayment'])
 const statuses = ['inbox', 'todo', 'doing', 'paused', 'blocked', 'done']
 const financeStatuses = ['planned', 'pending', 'completed', 'cancelled']
 const toolSchemas = [
@@ -26,6 +26,15 @@ const toolSchemas = [
     status: { type: ['string', 'null'], enum: [...financeStatuses, null] },
   }),
   tool('getFinanceSummary', 'Resumen financiero por periodo.', { startDate: optionalString(), endDate: optionalString() }),
+  tool('listRecurringExpenses', 'Lista gastos recurrentes y el estado de su ocurrencia actual.', { query: optionalString(), activeOnly: { type: ['boolean', 'null'] } }),
+  tool('createRecurringExpense', 'Crea una programación de gasto recurrente y su primera ocurrencia.', {
+    description: string(), amount: { type: 'number', exclusiveMinimum: 0 }, accountId: string(), categoryId: string(),
+    frequency: enumValue(['weekly', 'biweekly', 'monthly', 'quarterly', 'yearly']), startDate: string('YYYY-MM-DD'),
+    firstExpectedDate: string('YYYY-MM-DD'), dayOfMonth: optionalNumber(), endDate: optionalString(),
+  }),
+  tool('registerRecurringPayment', 'Registra como pagada la ocurrencia indicada y crea su movimiento financiero.', {
+    recurringId: string('UUID del recurrente'), period: string('Primer día del mes, YYYY-MM-01'), expectedDate: string('YYYY-MM-DD'),
+  }),
 ]
 
 Deno.serve(async (request) => {
@@ -95,6 +104,22 @@ Deno.serve(async (request) => {
     }
     const args = JSON.parse(call.arguments || '{}')
     if (MUTATIONS.has(call.name)) {
+      if (call.name === 'registerRecurringPayment') {
+        const recurring = context.recurring.find((item: { id: string }) => item.id === args.recurringId)
+        const occurrence = context.recurringOccurrences.find((item: { recurring_transaction_id: string; period: string }) =>
+          item.recurring_transaction_id === args.recurringId && item.period === args.period)
+        const recurringName = recurring?.description ?? 'Este gasto recurrente'
+        if (occurrence?.status === 'paid' || occurrence?.transaction_id) {
+          const result = { alreadyPaid: true, recurringId: args.recurringId, period: args.period, transactionId: occurrence.transaction_id }
+          await insertLog(db, user.id, requestId, body.source, message, { status: 'completed', parsed_intent: call.name, entities: args, tool_name: call.name, tool_arguments: args, result, completed_at: new Date().toISOString() })
+          return json({ status: 'completed', message: `${recurringName} ya está pagado este periodo.`, questions: [], result, qa: { intent: call.name, entities: args, toolName: call.name, toolArguments: args } })
+        }
+        if (!occurrence) {
+          const answer = `No encontré un pago pendiente de ${recurringName} para este periodo.`
+          await insertLog(db, user.id, requestId, body.source, message, { status: 'needs_clarification', parsed_intent: call.name, entities: args, tool_name: call.name, tool_arguments: args, questions: [], result: { answer } })
+          return json({ status: 'needs_clarification', message: answer, questions: [], qa: { intent: call.name, entities: args, toolName: call.name, toolArguments: args } })
+        }
+      }
       const possibleDuplicate = call.name === 'createExpense' || call.name === 'createIncome'
         ? await findPotentialDuplicate(db, user.id, call.name, args)
         : undefined
@@ -147,6 +172,9 @@ FINANZAS
 - Clasifica únicamente con categorías existentes. Usa la coincidencia semántica más razonable; si ninguna es clara, usa “Sin categoría” si existe. Pregunta solo si la categoría cambiaría materialmente el análisis.
 - Una transferencia no es ingreso ni gasto. El ahorro reduce disponible operativo pero permanece en patrimonio. Un pendiente no afecta balance real.
 - No dupliques movimientos. No preguntes por notas ni otros datos opcionales.
+- Para “registra el pago de mi renta/internet/etc.” busca el recurrente del contexto y usa registerRecurringPayment; no crees un gasto eventual separado.
+- “Cada mes”, “semanal”, “quincenal”, “trimestral” o “anual” describen una programación recurrente. Crear la programación requiere confirmación.
+- Si un recurrente ya está pagado en el periodo actual, informa brevemente y no propongas otra acción.
 
 Para consultas o acciones usa herramientas. Si falta un dato obligatorio que no pueda inferirse con estas reglas, pregunta y no llames una herramienta todavía.
 Contexto disponible: ${JSON.stringify(context)}`
@@ -162,21 +190,37 @@ function normalizeHistory(value: unknown) {
   })
 }
 async function loadContext(db: ReturnType<typeof createClient>, userId: string) {
-  const [workspaces, accounts, categories] = await Promise.all([
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+  const period = `${today.slice(0, 7)}-01`
+  const [workspaces, accounts, categories, recurring, recurringOccurrences] = await Promise.all([
     db.from('workspaces').select('id,name,type').eq('user_id', userId).eq('is_active', true),
     db.from('finance_accounts').select('id,name,type').eq('user_id', userId).eq('is_active', true),
     db.from('finance_categories').select('id,name,type').eq('user_id', userId).eq('is_active', true),
+    db.from('finance_recurring_transactions').select('id,description,type,amount,frequency,next_occurrence,day_of_month,is_active,account_id,category_id').eq('user_id', userId),
+    db.from('finance_recurring_occurrences').select('id,recurring_transaction_id,period,expected_date,amount,status,transaction_id').eq('user_id', userId).eq('period', period),
   ])
-  return { workspaces: workspaces.data ?? [], accounts: accounts.data ?? [], categories: categories.data ?? [] }
+  return { workspaces: workspaces.data ?? [], accounts: accounts.data ?? [], categories: categories.data ?? [], recurring: recurring.data ?? [], recurringOccurrences: recurringOccurrences.data ?? [], currentPeriod: period }
 }
-function financialToolChoice(message: string, context: { accounts?: Array<{ name: string }> }) {
+function financialToolChoice(message: string, context: { accounts?: Array<{ name: string }>; recurring?: Array<{ id: string; description: string; type: string }> }) {
   const normalized = foldText(message)
+  const namedRecurring = (context.recurring ?? []).find((item) => {
+    if (item.type === 'income') return false
+    const description = foldText(item.description)
+    const meaningfulWords = description.split(/\s+/).filter((word) => word.length >= 4)
+    return normalized.includes(description) || meaningfulWords.some((word) => new RegExp(`\\b${escapeRegex(word)}\\b`).test(normalized))
+  })
+  if (namedRecurring && /\b(registra|registre|marca|marque)\b/.test(normalized) && /\b(pago|pagado|pague)\b/.test(normalized)) {
+    return { type: 'function', name: 'registerRecurringPayment' }
+  }
   const hasAmount = /(?:\$\s*)?\d[\d,.]*/.test(normalized)
   const hasKnownAccount = (context.accounts ?? []).length === 1 || (context.accounts ?? []).some((account) => {
     const name = foldText(account.name)
     const firstWord = name.split(/\s+/)[0]
     return normalized.includes(name) || (firstWord.length >= 2 && new RegExp(`\\b${escapeRegex(firstWord)}\\b`, 'i').test(normalized))
   })
+  if (hasAmount && hasKnownAccount && /\b(recurrente|semanal|quincenal|mensual|trimestral|anual|cada semana|cada quincena|cada mes|cada ano)\b/.test(normalized)) {
+    return { type: 'function', name: 'createRecurringExpense' }
+  }
   if (!hasAmount || !hasKnownAccount) return null
   if (/\b(pague|gaste|compre|liquide)\b/.test(normalized)) return { type: 'function', name: 'createExpense' }
   if (/\b(me pagaron|cobre|recibi)\b/.test(normalized)) return { type: 'function', name: 'createIncome' }
@@ -226,6 +270,55 @@ async function executeTool(db: ReturnType<typeof createClient>, userId: string, 
     const { data, error } = await db.from('finance_transactions').insert({ user_id: userId, account_id: args.accountId, category_id: args.categoryId, type, amount: Number(args.amount), transaction_date: args.date, description: args.description, status: args.status ?? 'completed', notes: args.notes ?? null }).select().single()
     if (error) throw error; return data
   }
+  if (name === 'listRecurringExpenses') {
+    let query = db.from('finance_recurring_transactions').select('id,description,amount,frequency,next_occurrence,is_active,account_id,category_id').eq('user_id', userId).neq('type', 'income')
+    if (args.activeOnly) query = query.eq('is_active', true)
+    if (args.query) query = query.ilike('description', `%${String(args.query).replace(/[%_]/g, '')}%`)
+    const { data, error } = await query.order('next_occurrence')
+    if (error) throw error
+    const localToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+    const period = `${localToday.slice(0, 7)}-01`
+    const recurringIds = (data ?? []).map((item) => item.id)
+    if (!recurringIds.length) return []
+    const { data: occurrences, error: occurrencesError } = await db.from('finance_recurring_occurrences')
+      .select('id,recurring_transaction_id,period,expected_date,amount,status,transaction_id')
+      .eq('user_id', userId).eq('period', period).in('recurring_transaction_id', recurringIds)
+    if (occurrencesError) throw occurrencesError
+    return (data ?? []).map((item) => ({
+      ...item,
+      currentOccurrence: occurrences?.find((occurrence) => occurrence.recurring_transaction_id === item.id) ?? null,
+    }))
+  }
+  if (name === 'createRecurringExpense') {
+    const recurringId = crypto.randomUUID()
+    const expectedDate = String(args.firstExpectedDate)
+    const period = `${expectedDate.slice(0, 7)}-01`
+    const { data: recurring, error } = await db.from('finance_recurring_transactions').insert({
+      id: recurringId, user_id: userId, account_id: args.accountId, category_id: args.categoryId, type: 'expense',
+      amount: Number(args.amount), description: String(args.description), frequency: args.frequency,
+      start_date: args.startDate, next_occurrence: expectedDate, end_date: args.endDate || null,
+      day_of_month: args.dayOfMonth || null, is_active: true,
+    }).select().single()
+    if (error) throw error
+    const { data: occurrence, error: occurrenceError } = await db.from('finance_recurring_occurrences').insert({
+      user_id: userId, recurring_transaction_id: recurringId, period, expected_date: expectedDate,
+      amount: Number(args.amount), status: 'pending',
+    }).select().single()
+    if (occurrenceError) {
+      await db.from('finance_recurring_transactions').delete().eq('id', recurringId).eq('user_id', userId)
+      throw occurrenceError
+    }
+    return { recurring, occurrence }
+  }
+  if (name === 'registerRecurringPayment') {
+    const { data, error } = await db.rpc('register_finance_recurring_occurrence', {
+      target_recurring_id: args.recurringId,
+      target_period: args.period,
+      target_expected_date: args.expectedDate,
+    })
+    if (error) throw error
+    return { transactionId: data, recurringId: args.recurringId, period: args.period }
+  }
   if (name === 'updateFinanceTransactionStatus') {
     if (!financeStatuses.includes(String(args.status))) throw new Error('Estado financiero inválido.')
     const { data, error } = await db.from('finance_transactions').update({ status: args.status }).eq('id', args.transactionId).eq('user_id', userId).select().single()
@@ -248,13 +341,15 @@ async function executeTool(db: ReturnType<typeof createClient>, userId: string, 
   }
   throw new Error(`Herramienta no permitida: ${name}`)
 }
-function confirmationSummary(name: string, args: Record<string, unknown>, context: { workspaces?: Array<{ id: string; name: string }>; accounts?: Array<{ id: string; name: string }>; categories?: Array<{ id: string; name: string }> }) {
+function confirmationSummary(name: string, args: Record<string, unknown>, context: { workspaces?: Array<{ id: string; name: string }>; accounts?: Array<{ id: string; name: string }>; categories?: Array<{ id: string; name: string }>; recurring?: Array<{ id: string; description: string }> }) {
   const label = (items: Array<{ id: string; name: string }> | undefined, id: unknown) => items?.find((item) => item.id === id)?.name ?? String(id ?? 'sin definir')
   if (name === 'createTask') return `Crear “${args.title}” en ${label(context.workspaces, args.workspaceId)}${args.dueDate ? ` para ${args.dueDate}` : ''}.`
   if (name === 'createExpense' || name === 'createIncome') return `${name === 'createExpense' ? 'Gasto' : 'Ingreso'} de $${Number(args.amount).toLocaleString('es-MX')} en ${label(context.accounts, args.accountId)}, categoría ${label(context.categories, args.categoryId)}, fecha ${args.date}.`
+  if (name === 'createRecurringExpense') return `Crear ${args.description} por $${Number(args.amount).toLocaleString('es-MX')} con frecuencia ${args.frequency}, primer pago ${args.firstExpectedDate}.`
+  if (name === 'registerRecurringPayment') return `Registrar el pago de ${label(context.recurring?.map((item) => ({ id: item.id, name: item.description })), args.recurringId)}.`
   return `${name}: ${JSON.stringify(args)}`
 }
-function confirmationPrompt(name: string, args: Record<string, unknown>, context: { categories?: Array<{ id: string; name: string }> }, duplicate: boolean) {
+function confirmationPrompt(name: string, args: Record<string, unknown>, context: { categories?: Array<{ id: string; name: string }>; recurring?: Array<{ id: string; description: string }> }, duplicate: boolean) {
   if (duplicate) return 'Ya existe un movimiento igual. ¿Quieres registrarlo otra vez?'
   if (name === 'createExpense' || name === 'createIncome') {
     const amount = Number(args.amount).toLocaleString('es-MX', { maximumFractionDigits: 2 })
@@ -263,10 +358,15 @@ function confirmationPrompt(name: string, args: Record<string, unknown>, context
     const classification = category.toLocaleLowerCase('es-MX') === 'personal' ? `${kind} personal` : `${kind} en ${category}`
     return `¿Registro $${amount} como ${classification}?`
   }
+  if (name === 'createRecurringExpense') return `¿Creo ${String(args.description)} como gasto recurrente?`
+  if (name === 'registerRecurringPayment') {
+    const recurring = context.recurring?.find((item) => item.id === args.recurringId)?.description ?? 'este recurrente'
+    return `¿Registro el pago de ${recurring}?`
+  }
   return '¿Confirmas este cambio?'
 }
-function successMessage(name: string) { return name === 'createTask' ? 'Tarea creada correctamente.' : name === 'createExpense' ? 'Gasto registrado correctamente.' : name === 'createIncome' ? 'Ingreso registrado correctamente.' : 'Cambio guardado correctamente.' }
-function readResultMessage(name: string, result: unknown) { return name === 'getDailySummary' ? 'Aquí tienes tu resumen de hoy.' : name === 'getFinanceSummary' ? 'Aquí tienes tu resumen financiero.' : `Encontré ${Array.isArray(result) ? result.length : 1} resultado(s).` }
+function successMessage(name: string) { return name === 'createTask' ? 'Tarea creada correctamente.' : name === 'createExpense' ? 'Gasto registrado correctamente.' : name === 'createIncome' ? 'Ingreso registrado correctamente.' : name === 'createRecurringExpense' ? 'Gasto recurrente creado.' : name === 'registerRecurringPayment' ? 'Pago recurrente registrado.' : 'Cambio guardado correctamente.' }
+function readResultMessage(name: string, result: unknown) { return name === 'getDailySummary' ? 'Aquí tienes tu resumen de hoy.' : name === 'getFinanceSummary' ? 'Aquí tienes tu resumen financiero.' : name === 'listRecurringExpenses' ? `Encontré ${Array.isArray(result) ? result.length : 0} gasto(s) recurrente(s).` : `Encontré ${Array.isArray(result) ? result.length : 1} resultado(s).` }
 function extractQuestions(text: string) { return text.split(/\n+/).map((x) => x.trim()).filter((x) => x.endsWith('?')) }
 async function insertLog(db: ReturnType<typeof createClient>, userId: string, requestId: string, source: string, transcript: string, values: Record<string, unknown>) {
   const { error } = await db.from('voice_action_logs').insert({ user_id: userId, request_id: requestId, source, transcript, ...values })
