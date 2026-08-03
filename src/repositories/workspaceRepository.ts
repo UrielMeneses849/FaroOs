@@ -12,6 +12,7 @@ export const defaultWorkspaces = [
   { name: 'BIMSA', type: 'client', color: '#35c78a' },
   { name: 'Nexvora', type: 'business', color: '#6d8aff' },
   { name: 'Portfolio', type: 'personal', color: '#a970ff' },
+  { name: 'FARO OS', type: 'business', color: '#2457ff', icon: 'sparkles' },
 ] as const
 
 const fromRow = (row: WorkspaceRow): Workspace => ({
@@ -70,7 +71,7 @@ export const workspaceRepository = {
   async ensureDefaults(userId: string) {
     const rows: WorkspaceInsert[] = defaultWorkspaces.map((workspace, index) => ({
       user_id: userId, name: workspace.name, type: workspace.type,
-      color: workspace.color, is_active: true, sort_order: index,
+      color: workspace.color, icon: 'icon' in workspace ? workspace.icon : null, is_active: true, sort_order: index,
     }))
     const { error } = await supabase.from('workspaces').upsert(rows, {
       onConflict: 'user_id,name', ignoreDuplicates: true,

@@ -492,6 +492,7 @@ export type Database = {
           goal_id: string
           id: string
           name: string
+          notes: string | null
           price: number
           priority: Database["public"]["Enums"]["finance_goal_priority"]
           purchase_date: string | null
@@ -506,6 +507,7 @@ export type Database = {
           goal_id: string
           id?: string
           name: string
+          notes?: string | null
           price: number
           priority?: Database["public"]["Enums"]["finance_goal_priority"]
           purchase_date?: string | null
@@ -520,6 +522,7 @@ export type Database = {
           goal_id?: string
           id?: string
           name?: string
+          notes?: string | null
           price?: number
           priority?: Database["public"]["Enums"]["finance_goal_priority"]
           purchase_date?: string | null
@@ -599,6 +602,7 @@ export type Database = {
       finance_recurring_occurrences: {
         Row: {
           amount: number | null
+          description: string | null
           created_at: string
           expected_date: string
           id: string
@@ -614,6 +618,7 @@ export type Database = {
         }
         Insert: {
           amount?: number | null
+          description?: string | null
           created_at?: string
           expected_date: string
           id?: string
@@ -629,6 +634,7 @@ export type Database = {
         }
         Update: {
           amount?: number | null
+          description?: string | null
           created_at?: string
           expected_date?: string
           id?: string

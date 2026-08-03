@@ -1,12 +1,12 @@
 import { format, subDays } from 'date-fns'
 import { Activity, Beef, Pencil, Plus, Scale, ShieldAlert, Target, Trash2 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
-import { Bar, BarChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Button, ConfirmDialog, EmptyState, Modal } from '../components/common'
 import { PageHeader } from '../components/layout'
 import { useHealthRecords } from '../hooks/useHealthRecords'
 import { usePageCapture } from '../hooks/usePageCapture'
-import { weightGoalProgress } from '../lib/healthAnalytics'
+import { weightGoalProgress, weightProjectionSeries } from '../lib/healthAnalytics'
 import { useFaroStore } from '../store'
 import type { HealthLog } from '../types'
 
@@ -37,12 +37,8 @@ export function HealthPage() {
   const [operationError, setOperationError] = useState('')
   const [activeTab, setActiveTab] = useState<'progress' | 'history' | 'treatment'>('progress')
   const recent = logs.filter((item) => new Date(`${item.occurredAt.slice(0, 10)}T12:00:00`) >= subDays(new Date(), 29))
-  const weights = [...logs]
-    .filter((item) => item.weightKg != null)
-    .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))
-    .slice(-24)
-    .map((item) => ({ date: format(new Date(`${item.occurredAt.slice(0, 10)}T12:00:00`), 'dd MMM'), weight: item.weightKg }))
   const progress = weightGoalProgress(logs, targetKg, new Date(`${targetDate}T12:00:00`))
+  const weightSeries = weightProjectionSeries(logs, new Date(`${targetDate}T12:00:00`)).map((item) => ({ ...item, label: format(new Date(`${item.date}T12:00:00`), 'dd MMM') }))
   const [progressTitle, progressCopy] = progressLabels[progress.status]
   const trainedDays = recent.filter((item) => (item.trainingMinutes ?? 0) > 0).length
   const foodLoggedDays = recent.filter((item) => item.foodQuality != null).length
@@ -66,7 +62,8 @@ export function HealthPage() {
         <div className="health-focus__grid">
           <section className="health-weight-chart">
             <header><div><span className="eyebrow">Historial de peso</span><h2>Tu trayectoria</h2></div><strong>{progress.recentWeeklyKg == null ? '—' : `${progress.recentWeeklyKg > 0 ? '+' : ''}${progress.recentWeeklyKg} kg/sem`}</strong></header>
-            {weights.length ? <div className="chart-box chart-box--tall" aria-label="Historial de peso"><ResponsiveContainer width="100%" height="100%"><BarChart data={weights} accessibilityLayer><CartesianGrid stroke="#1d1d22" vertical={false} /><XAxis dataKey="date" stroke="#777780" tickLine={false} axisLine={false} fontSize={10} /><YAxis domain={['dataMin - 1', 'dataMax + 1']} stroke="#777780" tickLine={false} axisLine={false} fontSize={10} width={38} /><Tooltip formatter={(value) => [`${Number(value).toFixed(1)} kg`, 'Peso']} contentStyle={{ background: '#111114', border: '1px solid #303038', borderRadius: 8 }} /><ReferenceLine y={targetKg} stroke="#35c78a" strokeDasharray="4 4" label={{ value: 'Meta', fill: '#35c78a', fontSize: 10 }} /><Bar dataKey="weight" fill="#315de3" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></div> : <EmptyState title="Sin pesos todavía" description="Registra tu peso para comenzar a observar la tendencia." />}
+            {weightSeries.length ? <div className="chart-box chart-box--tall" aria-label="Peso real y proyección"><ResponsiveContainer width="100%" height="100%"><LineChart data={weightSeries} accessibilityLayer><CartesianGrid stroke="#1d1d22" vertical={false} /><XAxis dataKey="label" stroke="#777780" tickLine={false} axisLine={false} fontSize={10} minTickGap={28} /><YAxis domain={['dataMin - 1', 'dataMax + 1']} stroke="#777780" tickLine={false} axisLine={false} fontSize={10} width={42} /><Tooltip formatter={(value, name) => [`${Number(value).toFixed(1)} kg`, name === 'actual' ? 'Peso real' : 'Proyección']} contentStyle={{ background: '#111114', border: '1px solid #303038', borderRadius: 8 }} /><ReferenceLine y={targetKg} stroke="#35c78a" strokeDasharray="4 4" label={{ value: 'Meta', fill: '#35c78a', fontSize: 10 }} /><ReferenceLine x={format(new Date(`${targetDate}T12:00:00`), 'dd MMM')} stroke="#a970ff" strokeDasharray="3 5" label={{ value: 'Fecha objetivo', fill: '#a970ff', fontSize: 9 }} />{progress.estimatedCompletionDate && <ReferenceLine x={format(new Date(`${progress.estimatedCompletionDate}T12:00:00`), 'dd MMM')} stroke="#f4b740" strokeDasharray="2 5" />}<Line type="monotone" dataKey="actual" stroke="#315de3" strokeWidth={3} dot={{ r: 3 }} connectNulls={false} /><Line type="monotone" dataKey="projected" stroke="#6f8df3" strokeWidth={2} strokeDasharray="6 5" dot={false} connectNulls /></LineChart></ResponsiveContainer></div> : <EmptyState title="Sin pesos todavía" description="Registra tu peso para comenzar a observar la tendencia." />}
+            {progress.measurements < 3 && weightSeries.length > 0 && <p className="health-projection-empty">Registra al menos tres pesos en 30 días para mostrar la proyección.</p>}
           </section>
           <section className={`health-forecast health-forecast--${progress.status}`}><span className="eyebrow">Progreso hacia tu meta</span><h2>{progressTitle}</h2><p>{progressCopy}</p><dl className="health-progress-list"><div><dt>Peso actual</dt><dd>{progress.currentKg ? `${progress.currentKg.toFixed(1)} kg` : '—'}</dd></div><div><dt>Peso objetivo</dt><dd>{targetKg.toFixed(1)} kg</dd></div><div><dt>Kilos restantes</dt><dd>{progress.remainingKg == null ? '—' : `${progress.remainingKg.toFixed(1)} kg`}</dd></div><div><dt>Tiempo restante</dt><dd>{progress.daysRemaining} días</dd></div><div><dt>Ritmo necesario / mes</dt><dd>{progress.requiredMonthlyKg == null ? '—' : `${progress.requiredMonthlyKg} kg`}</dd></div><div><dt>Ritmo necesario / semana</dt><dd>{progress.requiredWeeklyKg == null ? '—' : `${progress.requiredWeeklyKg} kg`}</dd></div><div><dt>Ritmo reciente real</dt><dd>{progress.recentWeeklyKg == null ? '—' : `${progress.recentWeeklyKg > 0 ? '+' : ''}${progress.recentWeeklyKg} kg/sem`}</dd></div><div><dt>Fecha estimada</dt><dd>{progress.estimatedCompletionDate ?? '—'}</dd></div></dl><em>Regresión lineal de los últimos 30 días. Estimación informativa, no recomendación médica.</em></section>
         </div>

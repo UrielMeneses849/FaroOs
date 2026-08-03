@@ -3,8 +3,11 @@ import { format, subDays } from 'date-fns'
 import { useAuth } from '../hooks/auth'
 import {
   isSupabaseId,
+  taskFromRow,
   taskRepository,
 } from '../repositories/taskRepository'
+import { supabase } from '../lib/supabase/client'
+import type { Database } from '../types/database.types'
 import { useFaroStore } from '../store'
 import type { Task } from '../types'
 import { GoalSyncContext } from './GoalSyncContext'
@@ -51,6 +54,8 @@ export function TaskSyncProvider({ children }: { children: ReactNode }) {
 
     let active = true
     let unsubscribe: (() => void) | undefined
+    let applyingRemote = false
+    let realtimeChannel: ReturnType<typeof supabase.channel> | undefined
     const goalRelationsReady = !goalSync || goalSync.state === 'ready'
     const projectRelationsReady = !projectSync || projectSync.state === 'ready'
     const safeRemoteTask = (task: Task): Task =>
@@ -137,7 +142,7 @@ export function TaskSyncProvider({ children }: { children: ReactNode }) {
 
         let queue: Promise<unknown> = Promise.resolve()
         unsubscribe = useFaroStore.subscribe((current, previous) => {
-          if (current.tasks === previous.tasks) return
+          if (applyingRemote || current.tasks === previous.tasks) return
 
           const previousById = new Map(previous.tasks.map((task) => [task.id, task]))
           const currentById = new Map(current.tasks.map((task) => [task.id, task]))
@@ -155,11 +160,27 @@ export function TaskSyncProvider({ children }: { children: ReactNode }) {
           if (!added.length && !updated.length && !removed.length) return
           setState('syncing')
           queue = queue
-            .then(() => Promise.all([
-              ...added.map((task) => taskRepository.create(safeRemoteTask(task), user.id)),
-              ...updated.map((task) => taskRepository.update(safeRemoteTask(task), user.id)),
-              ...removed.map((task) => taskRepository.remove(task.id, user.id)),
-            ]))
+            .then(async () => {
+              const operations = [
+                ...added.map((task) => ({ kind: 'create' as const, task, run: () => taskRepository.create(safeRemoteTask(task), user.id) })),
+                ...updated.map((task) => ({ kind: 'update' as const, task, previous: previousById.get(task.id), run: () => taskRepository.update(safeRemoteTask(task), user.id) })),
+                ...removed.map((task) => ({ kind: 'remove' as const, task, run: () => taskRepository.remove(task.id, user.id) })),
+              ]
+              const results = await Promise.allSettled(operations.map((operation) => operation.run()))
+              const failed = operations.filter((_, index) => results[index].status === 'rejected')
+              if (failed.length) {
+                useFaroStore.setState((current) => {
+                  const byId = new Map(current.tasks.map((task) => [task.id, task]))
+                  for (const operation of failed) {
+                    if (operation.kind === 'create') byId.delete(operation.task.id)
+                    else if (operation.kind === 'update' && operation.previous) byId.set(operation.previous.id, operation.previous)
+                    else if (operation.kind === 'remove') byId.set(operation.task.id, operation.task)
+                  }
+                  return { tasks: [...byId.values()] }
+                })
+                throw new Error('No se guardaron algunos cambios; FARO restauró el estado anterior.')
+              }
+            })
             .then(() => {
               if (active) {
                 setState('ready')
@@ -168,6 +189,23 @@ export function TaskSyncProvider({ children }: { children: ReactNode }) {
             })
             .catch(reportError)
         })
+
+        realtimeChannel = supabase.channel(`tasks:${user.id}`)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter: `user_id=eq.${user.id}` }, (payload) => {
+            if (!active) return
+            applyingRemote = true
+            try {
+              useFaroStore.setState((current) => {
+                if (payload.eventType === 'DELETE') {
+                  const deleted = payload.old as Pick<Database['public']['Tables']['tasks']['Row'], 'id'>
+                  return { tasks: current.tasks.filter((task) => task.id !== deleted.id) }
+                }
+                const remote = taskFromRow(payload.new as Database['public']['Tables']['tasks']['Row'])
+                const exists = current.tasks.some((task) => task.id === remote.id)
+                return { tasks: exists ? current.tasks.map((task) => task.id === remote.id ? remote : task) : [...current.tasks, remote] }
+              })
+            } finally { applyingRemote = false }
+          }).subscribe()
 
         setState(uploads.some((result) => result.status === 'rejected') ? 'error' : 'ready')
         if (uploads.some((result) => result.status === 'rejected')) {
@@ -183,6 +221,7 @@ export function TaskSyncProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false
       unsubscribe?.()
+      if (realtimeChannel) void supabase.removeChannel(realtimeChannel)
     }
   }, [attempt, goalSync, projectSync, user])
 

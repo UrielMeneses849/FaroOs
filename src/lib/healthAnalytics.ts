@@ -16,6 +16,8 @@ export interface WeightProgress {
   status: WeightProgressStatus
 }
 
+export interface WeightProjectionPoint { date: string; actual?: number; projected?: number }
+
 const round = (value: number) => Math.round(value * 10) / 10
 
 export function weightGoalProgress(logs: HealthLog[], targetKg: number, targetDate: Date, referenceDate = new Date()): WeightProgress {
@@ -53,6 +55,30 @@ export function weightGoalProgress(logs: HealthLog[], targetKg: number, targetDa
   const ratio = requiredDaily > 0 ? paceTowardTarget / requiredDaily : 0
   base.status = ratio >= 1.15 ? 'ahead' : ratio >= .85 ? 'on_track' : ratio >= .5 ? 'attention' : 'off_track'
   return base
+}
+
+export function weightProjectionSeries(logs: HealthLog[], targetDate: Date, referenceDate = new Date()): WeightProjectionPoint[] {
+  const latestByDay = new Map<string, HealthLog & { weightKg: number }>()
+  logs.filter((log): log is HealthLog & { weightKg: number } => Number.isFinite(log.weightKg)).forEach((log) => {
+    const day = log.occurredAt.slice(0, 10); const existing = latestByDay.get(day)
+    if (!existing || log.updatedAt.localeCompare(existing.updatedAt) >= 0) latestByDay.set(day, log)
+  })
+  const start = subDays(referenceDate, 29)
+  const actual = [...latestByDay.values()].filter((log) => parseISO(log.occurredAt.slice(0, 10)) >= start).sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))
+  const result: WeightProjectionPoint[] = actual.map((log) => ({ date: log.occurredAt.slice(0, 10), actual: log.weightKg }))
+  if (actual.length < 3) return result
+  const points = actual.map((log) => ({ day: parseISO(log.occurredAt.slice(0, 10)).getTime() / 86_400_000, weight: log.weightKg }))
+  const meanDay = points.reduce((sum, point) => sum + point.day, 0) / points.length
+  const meanWeight = points.reduce((sum, point) => sum + point.weight, 0) / points.length
+  const denominator = points.reduce((sum, point) => sum + (point.day - meanDay) ** 2, 0)
+  const slope = denominator ? points.reduce((sum, point) => sum + (point.day - meanDay) * (point.weight - meanWeight), 0) / denominator : 0
+  const last = actual.at(-1)!; const lastDate = parseISO(last.occurredAt.slice(0, 10)); const projectionEnd = targetDate > lastDate ? targetDate : addDays(lastDate, 30)
+  for (let date = addDays(lastDate, 1); date <= projectionEnd; date = addDays(date, 1)) {
+    const day = date.getTime() / 86_400_000
+    result.push({ date: format(date, 'yyyy-MM-dd'), projected: round(meanWeight + slope * (day - meanDay)) })
+  }
+  result[result.length - (Math.max(1, differenceInCalendarDays(projectionEnd, lastDate))) - 1] = { ...result.at(actual.length - 1)!, projected: last.weightKg }
+  return result
 }
 
 // Alias temporal para consumidores externos previos; conserva la API sin mantener la extrapolación antigua.

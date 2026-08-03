@@ -177,6 +177,11 @@ export function normalizeCalendarData(input: {
   return normalizeCalendarDataWithReport(input).items
 }
 
+export function mergePlanningCalendarItems(remote: CalendarItem[], local: CalendarItem[]) {
+  const localIds = new Set(local.map((item) => item.id))
+  return [...remote.filter((item) => item.sourceType === 'event' || !localIds.has(item.id)), ...local]
+}
+
 export function normalizeCalendarRows(input: {
   tasks: TaskRow[]
   projects: ProjectRow[]
