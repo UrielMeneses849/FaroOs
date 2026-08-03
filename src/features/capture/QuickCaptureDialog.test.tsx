@@ -1,9 +1,33 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from '../../App'
 import { useFaroStore } from '../../store'
 import { QuickCaptureDialog } from './QuickCaptureDialog'
+
+const supabaseMocks = vi.hoisted(() => {
+  const channel = { on: vi.fn(), subscribe: vi.fn(), unsubscribe: vi.fn() }
+  channel.on.mockReturnValue(channel)
+  channel.subscribe.mockReturnValue(channel)
+  const query = {
+    select: vi.fn(), eq: vi.fn(), order: vi.fn(), maybeSingle: vi.fn(), single: vi.fn(),
+    upsert: vi.fn(), insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
+  }
+  for (const method of ['select', 'eq', 'order', 'upsert', 'insert', 'update', 'delete'] as const) query[method].mockReturnValue(query)
+  query.maybeSingle.mockResolvedValue({ data: null, error: null })
+  query.single.mockResolvedValue({ data: null, error: null })
+  Object.assign(query, { then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(resolve) })
+  return { channel, query, removeChannel: vi.fn().mockResolvedValue('ok') }
+})
+
+vi.mock('../../lib/supabase/client', () => ({
+  supabase: {
+    channel: vi.fn(() => supabaseMocks.channel),
+    removeChannel: supabaseMocks.removeChannel,
+    from: vi.fn(() => supabaseMocks.query),
+    rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
+  },
+}))
 
 vi.mock('../../services/authService', () => ({
   authService: {
@@ -74,6 +98,11 @@ vi.mock('../../services/localDataMigrationService', () => ({
 }))
 
 describe('captura rápida', () => {
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
+
   it('abre con Cmd + K', async () => {
     const user = userEvent.setup()
     render(<App />)
