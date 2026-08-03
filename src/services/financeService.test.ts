@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { FinanceData } from '../features/finance/financeTypes'
 import {
   accountBalance, advanceRecurringDate, annualFinanceTotals, budgetPerformance, calculateFinanceMetrics,
-  financeDecision, financeFrequencyLabel, financeGoalProjections, financeProjectionBreakdown, formatFinanceDate, goalProgress, monthKey, personalBudgetForDate, recurringAppliesToMonth, recurringExpectedDate,
+  financeAvailableEvolution, financeDecision, financeFrequencyLabel, financeGoalProjections, financePeriodFlow, financeProjectionBreakdown, formatFinanceDate, goalProgress, monthKey, personalBudgetForDate, recurringAppliesToMonth, recurringExpectedDate,
 } from './financeService'
 
 const base = '2026-07-01T00:00:00.000Z'
@@ -23,6 +23,23 @@ const data: FinanceData = {
 }
 
 describe('financeService', () => {
+  it('separa el flujo del periodo de la evolución del disponible', () => {
+    const periodData = {
+      ...data,
+      accounts: [
+        { ...data.accounts[0], initialBalanceCents: 100_000 },
+        { ...data.accounts[0], id: 'b', name: 'Ahorro', initialBalanceCents: 0 },
+      ],
+      transactions: [
+        { ...data.transactions[0], id: 'income', type: 'income' as const, status: 'completed' as const, amountCents: 50_000, transactionDate: '2026-07-02' },
+        { ...data.transactions[0], id: 'expense', type: 'expense' as const, status: 'completed' as const, amountCents: 20_000, transactionDate: '2026-07-03' },
+        { ...data.transactions[0], id: 'saving', type: 'saving' as const, status: 'completed' as const, amountCents: 10_000, transactionDate: '2026-07-04' },
+        { ...data.transactions[0], id: 'transfer', type: 'transfer' as const, status: 'completed' as const, amountCents: 99_000, transactionDate: '2026-07-05', destinationAccountId: 'b' },
+      ],
+    }
+    expect(financePeriodFlow(periodData, new Date(2026, 6, 15))).toEqual({ incomeCents: 50_000, expenseCents: 20_000, savingCents: 10_000, netCents: 20_000 })
+    expect(financeAvailableEvolution(periodData, new Date(2026, 6, 15))).toMatchObject({ initialCents: 100_000, finalCents: 120_000 })
+  })
   it('calcula flujo sin contar transferencias como ingreso o gasto', () => {
     const metrics = calculateFinanceMetrics(data, new Date(2026, 6, 15))
     expect(metrics.monthlyIncomeCents).toBe(2_500_000)
@@ -30,10 +47,10 @@ describe('financeService', () => {
     expect(accountBalance(data.accounts[0], data.transactions)).toBe(3_350_000)
   })
 
-  it('trata ahorro y metas como reservas lógicas sin descontar dos veces la cuenta', () => {
+  it('mantiene el ahorro en patrimonio pero lo descuenta del disponible operativo', () => {
     const reserved: FinanceData = { ...data, transactions:[...data.transactions,{id:'saving',accountId:'a',categoryId:'food',type:'saving',amountCents:200_000,transactionDate:'2026-07-06',description:'Reserva',status:'completed',createdAt:base,updatedAt:base}], savingsFundEntries:[{id:'f',fundId:'fund',amountCents:100_000,entryDate:'2026-07-06',createdAt:base}] }
     expect(accountBalance(reserved.accounts[0],reserved.transactions)).toBe(3_350_000)
-    expect(calculateFinanceMetrics(reserved,new Date(2026,6,15)).availableBalanceCents).toBe(3_350_000)
+    expect(calculateFinanceMetrics(reserved,new Date(2026,6,15)).availableBalanceCents).toBe(3_150_000)
   })
 
   it('calcula acumulados anuales sólo con movimientos completados', () => {

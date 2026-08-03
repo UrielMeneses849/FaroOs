@@ -36,7 +36,7 @@ const completed = (transaction: FinanceTransaction) => transaction.status === 'c
 export function transactionImpact(transaction: FinanceTransaction) {
   if (!completed(transaction)) return 0
   if (transaction.type === 'income' || transaction.type === 'refund') return transaction.amountCents
-  // Saving is a logical reservation inside FARO; the money remains in the physical account.
+  // Saving stays in the patrimony, but is removed from operational availability below.
   if (transaction.type === 'expense' || transaction.type === 'debt_payment') return -transaction.amountCents
   return 0
 }
@@ -168,10 +168,9 @@ export function calculateFinanceMetrics(data: FinanceData, month: Date): Finance
   const totalMoneyCents = projection.saldoRealActual
   const physicalAvailable = data.accounts.filter((account) => account.isActive)
     .reduce((sum, account) => sum + accountBalance(account, data.transactions), 0)
-  // Goal and fund contributions earmark money without moving it out of its account.
-  // Keep operational availability tied to the physical balance so reservations are
-  // not deducted a second time from the headline account amount.
-  const availableBalanceCents = physicalAvailable
+  const reservedSavings = data.transactions.filter((item) => completed(item) && item.type === 'saving')
+    .reduce((sum, item) => sum + item.amountCents, 0)
+  const availableBalanceCents = physicalAvailable - reservedSavings
   const plannedBudget = data.budgets.filter((item) => item.month === monthKey(month))
     .reduce((sum, item) => sum + item.plannedAmountCents, 0)
   return {
@@ -184,6 +183,26 @@ export function calculateFinanceMetrics(data: FinanceData, month: Date): Finance
     actualBalanceCents: totalMoneyCents,
     budgetVarianceCents: plannedBudget - monthlyExpensesCents,
     savingsRate: monthlyIncomeCents ? monthlySavingsCents / monthlyIncomeCents * 100 : 0,
+  }
+}
+
+export function financePeriodFlow(data: FinanceData, month: Date) {
+  const metrics = calculateFinanceMetrics(data, month)
+  return {
+    incomeCents: metrics.monthlyIncomeCents,
+    expenseCents: metrics.monthlyExpensesCents,
+    savingCents: metrics.monthlySavingsCents,
+    netCents: metrics.monthlyIncomeCents - metrics.monthlyExpensesCents - metrics.monthlySavingsCents,
+  }
+}
+
+export function financeAvailableEvolution(data: FinanceData, month: Date) {
+  const flow = financePeriodFlow(data, month)
+  const finalCents = calculateFinanceMetrics(data, month).availableBalanceCents
+  return {
+    initialCents: finalCents - flow.incomeCents + flow.expenseCents + flow.savingCents,
+    ...flow,
+    finalCents,
   }
 }
 

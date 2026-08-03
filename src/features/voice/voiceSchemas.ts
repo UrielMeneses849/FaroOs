@@ -3,7 +3,8 @@ import { z } from 'zod'
 export const voiceToolNames = [
   'getDailySummary', 'listTodayTasks', 'createTask', 'updateTaskStatus',
   'createExpense', 'createIncome', 'updateFinanceTransactionStatus',
-  'searchFinanceTransactions', 'getFinanceSummary',
+  'searchFinanceTransactions', 'getFinanceSummary', 'listRecurringExpenses',
+  'createRecurringExpense', 'registerRecurringPayment',
 ] as const
 
 export const voiceToolNameSchema = z.enum(voiceToolNames)
@@ -13,13 +14,24 @@ export const voiceActionSchema = z.object({
   requestId: z.string().uuid(),
   source: z.enum(['text', 'voice']),
   message: z.string().trim().min(1).max(2000),
+  history: z.array(z.object({
+    role: z.enum(['user', 'assistant']),
+    content: z.string().trim().min(1).max(2000),
+  })).max(6).default([]),
 })
+export type VoiceConversationTurn = z.infer<typeof voiceActionSchema>['history'][number]
 
 export const pendingActionSchema = z.object({
   requestId: z.string().uuid(),
   toolName: voiceToolNameSchema,
   arguments: z.record(z.string(), z.unknown()),
   summary: z.string(),
+  possibleDuplicate: z.object({
+    id: z.string().uuid(),
+    description: z.string(),
+    amount: z.number(),
+    date: z.string(),
+  }).optional(),
 })
 export type PendingVoiceAction = z.infer<typeof pendingActionSchema>
 
@@ -37,4 +49,3 @@ export const voiceResponseSchema = z.object({
   }).optional(),
 })
 export type VoiceResponse = z.infer<typeof voiceResponseSchema>
-

@@ -2,7 +2,7 @@ import { ArrowRight, Bug, Check, Send, Sparkles } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { Button } from '../../components/common'
 import { voiceService } from '../../services/voiceService'
-import type { PendingVoiceAction, VoiceResponse } from './voiceSchemas'
+import type { PendingVoiceAction, VoiceConversationTurn, VoiceResponse } from './voiceSchemas'
 
 const examples = [
   'Muéstrame mi resumen financiero del mes',
@@ -17,14 +17,22 @@ export function AiLabConsole({ onOpenFinance }: { onOpenFinance: () => void }) {
   const [text, setText] = useState('')
   const [state, setState] = useState<ConsoleState>('ready')
   const [response, setResponse] = useState<VoiceResponse | null>(null)
+  const [history, setHistory] = useState<VoiceConversationTurn[]>([])
   const [qaOpen, setQaOpen] = useState(false)
 
   const send = async (message: string) => {
     setState('thinking')
     setResponse(null)
     try {
-      const next = await voiceService.send(message)
+      const recentHistory = history.slice(-6)
+      const next = await voiceService.send(message, 'text', recentHistory)
       setResponse(next)
+      const completedTurns: VoiceConversationTurn[] = [
+        ...recentHistory,
+        { role: 'user', content: message },
+        { role: 'assistant', content: next.message },
+      ]
+      setHistory(completedTurns.slice(-6))
       setState(next.status === 'pending_confirmation' ? 'confirmation' : next.status === 'error' ? 'error' : 'completed')
     } catch (error) {
       setResponse({ status: 'error', message: error instanceof Error ? error.message : 'FARO no pudo procesar la solicitud.', questions: [] })
@@ -73,8 +81,8 @@ export function AiLabConsole({ onOpenFinance }: { onOpenFinance: () => void }) {
 
       <div className="ai-lab-console__thread">
         {!response && <div className="ai-lab-console__empty"><Sparkles size={22} /><strong>{busy ? 'FARO está analizando…' : 'Aquí aparecerá la respuesta'}</strong><span>Empieza con uno de los ejemplos o escribe tu propia instrucción.</span></div>}
-        {response && <div className={`voice-response voice-response--${response.status}`}><p>{response.message}</p>{response.questions.map((question) => <p key={question}>• {question}</p>)}</div>}
-        {response?.pendingAction && <div className="voice-confirmation"><strong>Confirma antes de guardar</strong><p>{response.pendingAction.summary}</p><div><Button icon={<Check size={15} />} disabled={busy} onClick={() => void resolve(response.pendingAction!, true)}>Confirmar</Button><Button variant="ghost" disabled={busy} onClick={() => void resolve(response.pendingAction!, false)}>Cancelar</Button></div></div>}
+        {response && <div className={`voice-response voice-response--${response.status}`}><p>{response.message}</p>{response.questions.filter((question) => !response.message.includes(question)).map((question) => <p key={question}>• {question}</p>)}</div>}
+        {response?.pendingAction && <div className={`voice-confirmation ${response.pendingAction.possibleDuplicate ? 'voice-confirmation--duplicate' : ''}`}><strong>{response.pendingAction.possibleDuplicate ? 'Posible movimiento duplicado' : 'Confirma antes de guardar'}</strong><p>{response.pendingAction.summary}</p>{response.pendingAction.possibleDuplicate && <small>Ya existe “{response.pendingAction.possibleDuplicate.description}” por ${response.pendingAction.possibleDuplicate.amount.toLocaleString('es-MX')} del {response.pendingAction.possibleDuplicate.date}.</small>}<div><Button icon={<Check size={15} />} disabled={busy} onClick={() => void resolve(response.pendingAction!, true)}>{response.pendingAction.possibleDuplicate ? 'Registrar de todos modos' : 'Confirmar'}</Button><Button variant="ghost" disabled={busy} onClick={() => void resolve(response.pendingAction!, false)}>Cancelar</Button></div></div>}
       </div>
 
       <form className="ai-lab-console__compose" onSubmit={submit}>

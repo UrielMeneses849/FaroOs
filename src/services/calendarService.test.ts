@@ -1,9 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { demoData } from '../data/mockData'
-import { normalizeCalendarData, normalizeCalendarRows } from './calendarService'
+import { mergePlanningCalendarItems, normalizeCalendarData, normalizeCalendarRows } from './calendarService'
 
 describe('normalización del calendario', () => {
   afterEach(() => vi.restoreAllMocks())
+
+  it('deduplica una tarea optimista cuando un refetch devuelve el mismo id', () => {
+    const local = normalizeCalendarData({ tasks: [{ ...demoData.tasks[0], id: 'same-task', dueDate: '2026-08-03' }], projects: [], goals: [] })
+    const remote = [{ ...local[0], title: 'Versión remota anterior' }]
+    expect(mergePlanningCalendarItems(remote, local)).toEqual(local)
+  })
 
   it('separa el modelo visual de Tasks, Projects y Goals', () => {
     const task = { ...demoData.tasks[0], dueAt: '2026-07-27T16:00:00.000Z', estimatedMinutes: 60, workspaceId: 'workspace-personal' }

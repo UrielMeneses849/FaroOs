@@ -1,9 +1,20 @@
 import { supabase } from '../lib/supabase/client'
-import { pendingActionSchema, voiceResponseSchema, voiceActionSchema, type PendingVoiceAction } from '../features/voice/voiceSchemas'
+import { pendingActionSchema, voiceResponseSchema, voiceActionSchema, type PendingVoiceAction, type VoiceConversationTurn } from '../features/voice/voiceSchemas'
 
 async function invoke(body: Record<string, unknown>) {
   const { data, error } = await supabase.functions.invoke('faro-voice', { body })
-  if (error) throw new Error(error.message)
+  if (error) {
+    const context = 'context' in error ? error.context : undefined
+    if (context instanceof Response) {
+      try {
+        const payload = await context.clone().json() as { message?: unknown }
+        if (typeof payload.message === 'string' && payload.message) throw new Error(payload.message)
+      } catch (cause) {
+        if (cause instanceof Error && !(cause instanceof SyntaxError)) throw cause
+      }
+    }
+    throw new Error(error.message)
+  }
   return voiceResponseSchema.parse(data)
 }
 
@@ -11,8 +22,8 @@ export const voiceService = {
   health() {
     return invoke({ type: 'health' })
   },
-  send(message: string, source: 'text' | 'voice' = 'text') {
-    return invoke(voiceActionSchema.parse({ requestId: crypto.randomUUID(), source, message }))
+  send(message: string, source: 'text' | 'voice' = 'text', history: VoiceConversationTurn[] = []) {
+    return invoke(voiceActionSchema.parse({ requestId: crypto.randomUUID(), source, message, history }))
   },
   confirm(action: PendingVoiceAction) {
     return invoke({ type: 'confirm', action: pendingActionSchema.parse(action) })
