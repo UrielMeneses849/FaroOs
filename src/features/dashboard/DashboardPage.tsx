@@ -21,7 +21,6 @@ const workspaceAccents: Record<string, string> = {
   personal: '#35c78a', bbva: '#2457ff', bimsa: '#f28c38', nexvora: '#a970ff',
   portfolio: '#c7a34b', 'faro os': '#2ab7ca',
 }
-
 export function DashboardPage() {
   const { capture } = usePageCapture()
   const navigate = useNavigate()
@@ -72,7 +71,6 @@ export function DashboardPage() {
     {weightOpen && <QuickWeightDialog onClose={() => setWeightOpen(false)} onSave={saveHealth} />}
   </div>
 }
-
 function QuickWeightDialog({ onClose, onSave }: { onClose: () => void; onSave: (log: HealthLog) => Promise<HealthLog> }) {
   const [weight, setWeight] = useState('')
   const [date, setDate] = useState(localDate())
