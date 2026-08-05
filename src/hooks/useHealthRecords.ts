@@ -31,10 +31,10 @@ export function useHealthRecords() {
     setLoading(true); setError(undefined)
     try {
       const remote = await healthRepository.list(user.id)
-      const remoteById = new Map(remote.map((item) => [item.id, item]))
+      const remoteByDate = new Map(remote.map((item) => [item.occurredAt.slice(0, 10), item]))
       const pendingLocal = useFaroStore.getState().healthLogs.filter((item) => {
         if (!isRealLog(item)) return false
-        const remoteItem = remoteById.get(item.id)
+        const remoteItem = remoteByDate.get(item.occurredAt.slice(0, 10))
         return !remoteItem || item.updatedAt > remoteItem.updatedAt
       })
       await healthRepository.saveMissing(pendingLocal, user.id)

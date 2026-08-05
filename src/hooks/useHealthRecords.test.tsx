@@ -74,9 +74,9 @@ describe('sincronización de salud', () => {
     expect(result.current.error).toBe('Sin conexión con Supabase.')
   })
 
-  it('replica una edición local más reciente aunque el id ya exista remotamente', async () => {
+  it('replica por fecha una captura local más reciente aunque tenga otro id', async () => {
     const remote = { ...localLog, weightKg: 84.5, updatedAt: '2026-07-30T14:00:00.000Z' }
-    const local = { ...localLog, weightKg: 86, updatedAt: '2026-08-04T10:00:00.000Z' }
+    const local = { ...localLog, id: 'another-local-id', weightKg: 86, updatedAt: '2026-08-04T10:00:00.000Z' }
     useFaroStore.setState({ healthLogs: [local] })
     repository.list.mockResolvedValueOnce([remote]).mockResolvedValueOnce([local])
     repository.saveMissing.mockResolvedValue([local])
