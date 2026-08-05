@@ -14,6 +14,7 @@ import { useTodayTasks } from '../hooks/useTodayTasks'
 import { useWorkspaces } from '../hooks/useWorkspaces'
 import { localDate, timestampToLocalParts } from '../lib/calendarDates'
 import { formatMxn } from '../services/financeService'
+import { todayAgendaItems } from '../services/calendarService'
 import { useFaroStore } from '../store'
 import type { Task, TaskStatus } from '../types'
 
@@ -33,10 +34,7 @@ export function TodayPage() {
   const todayExpenses = finance.transactions.filter((item) => item.transactionDate === today && item.status === 'completed' && (item.type === 'expense' || item.type === 'debt_payment'))
   const todayTasks = tasks.filter((task) => task.dueDate === today || (task.status !== 'done' && Boolean(task.dueDate && task.dueDate < today)))
   const completed = todayTasks.filter((task) => task.status === 'done').length; const pending = todayTasks.length - completed
-  const scheduled = useMemo(() => calendarData.items.filter((item) => {
-    if (item.allDay || (item.sourceType !== 'task' && item.sourceType !== 'event')) return false
-    return timestampToLocalParts(item.start).date === today
-  }).sort((a, b) => a.start.localeCompare(b.start)), [calendarData.items, today])
+  const scheduled = useMemo(() => todayAgendaItems(calendarData.items, today), [calendarData.items, today])
   const unscheduled = todayTasks.filter((task) => task.status !== 'done' && !task.dueAt)
   const openCreate = (workspaceId?: string) => { setCreateWorkspaceId(workspaceId); setEditing('new') }
 
@@ -53,7 +51,7 @@ export function TodayPage() {
         <div className="today-agenda-list">{scheduled.map((item) => {
           const start = parseISO(item.start); const end = item.end ? parseISO(item.end) : undefined
           const state = end && end < now ? 'past' : start <= now && (!end || end >= now) ? 'current' : 'next'
-          return <button key={item.id} data-state={state} onClick={() => item.sourceType === 'task' ? setEditing(tasks.find((task) => task.id === item.sourceId) ?? null) : navigate('/calendar')}><time>{timestampToLocalParts(item.start).time}</time><i style={{ background: activeWorkspaces.find((workspace) => workspace.id === item.workspaceId)?.color }} /><div><strong>{item.title}</strong><span>{activeWorkspaces.find((workspace) => workspace.id === item.workspaceId)?.name ?? 'Sin workspace'}{end ? ` · ${differenceInMinutes(end, start)} min` : ''} · {item.sourceType === 'task' ? 'Tarea' : item.entryKind === 'focus' ? 'Enfoque' : 'Evento'}</span></div></button>
+          return <button key={item.id} data-state={state} onClick={() => item.sourceType === 'task' ? setEditing(tasks.find((task) => task.id === item.sourceId) ?? null) : navigate('/calendar')}><time>{item.allDay?'Todo el día':timestampToLocalParts(item.start).time}</time><i style={{ background:item.source==='google'?'#4285f4':activeWorkspaces.find((workspace) => workspace.id === item.workspaceId)?.color }} /><div><strong>{item.title}</strong><span>{item.source==='google'?(item.calendarName??'Google'):activeWorkspaces.find((workspace) => workspace.id === item.workspaceId)?.name ?? 'Sin workspace'}{end&&!item.allDay ? ` · ${differenceInMinutes(end, start)} min` : ''} · {item.source==='google'?'Google':item.sourceType === 'task' ? 'Tarea' : item.entryKind === 'focus' ? 'Enfoque' : 'Evento'}</span></div></button>
         })}{!scheduled.length && <p>Sin bloques con horario para hoy.</p>}</div>
         <div className="today-unscheduled"><header><div><span className="eyebrow">Sin programar</span><h3>Tareas sin hora</h3></div><span>{unscheduled.length}</span></header>{unscheduled.slice(0, 5).map((task) => <article key={task.id}><div><strong>{task.title}</strong><span>{activeWorkspaces.find((workspace) => workspace.id === task.workspaceId)?.name}</span></div><button onClick={() => setEditing(task)}>Asignar hora</button></article>)}{!unscheduled.length && <p>Todas las tareas de hoy tienen horario.</p>}</div>
       </section>

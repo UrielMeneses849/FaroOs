@@ -20,6 +20,13 @@ describe('dashboard operativo', () => {
     expect(upcoming48Hours(items, now).some((item) => item.id === 'late')).toBe(false)
   })
 
+  it('incluye eventos externos próximos sin alterar métricas de tareas', () => {
+    const now=new Date('2026-08-04T12:00:00.000Z')
+    const google={id:'google:bbva:1',sourceId:'1',sourceType:'event' as const,source:'google' as const,readOnly:true,title:'Junta BBVA',start:'2026-08-04T15:00:00.000Z',allDay:false,status:'scheduled',editable:false}
+    expect(upcoming48Hours([google],now)).toEqual([google])
+    expect(workspaceOpenLoad([],[], '2026-08-04')).toEqual([])
+  })
+
   it('activa la alerta de peso después de dos días', () => {
     expect(weightRegistrationIsStale('2026-08-01', '2026-08-03')).toBe(true)
     expect(weightRegistrationIsStale('2026-08-02', '2026-08-03')).toBe(false)

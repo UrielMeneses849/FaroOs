@@ -483,6 +483,13 @@ input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--accent);
   .finance-feedback { top:12px; right:16px; }
 }
 
+.calendar-google { display:flex; flex:0 0 auto; align-items:center; justify-content:space-between; gap:14px; margin-bottom:10px; padding:10px 12px; border:1px solid #282832; border-radius:9px; background:#0b0b0d; }
+.calendar-google > div:first-child { min-width:0; }.calendar-google strong,.calendar-google span,.calendar-google small { display:block; }.calendar-google strong { font-size:10px; }.calendar-google span { margin-top:3px; overflow:hidden; color:#777780; font-size:8px; text-overflow:ellipsis; white-space:nowrap; }.calendar-google small { margin-top:4px; color:#d08383; font-size:8px; }
+.calendar-google[data-status="active"] { border-color:#294673; box-shadow:inset 2px 0 #4285f4; }
+.calendar-google__select,.calendar-google__actions { display:flex; flex:0 0 auto; align-items:center; gap:8px; }.calendar-google__select select { min-width:220px; min-height:34px; }.calendar-google__select span { max-width:260px; color:#9aabdf; }
+.calendar-event--google { cursor:default!important; background-image:linear-gradient(90deg,rgba(66,133,244,.12),transparent); }.calendar-event--google .fc-event-title::after { content:' · Google'; color:#9bbcff; font-size:.75em; }
+@media(max-width:760px){.calendar-google { align-items:stretch; flex-direction:column; }.calendar-google__select,.calendar-google__actions { align-items:stretch; flex-direction:column; }.calendar-google__select select,.calendar-google__select .button,.calendar-google__actions .button { width:100%; }}
+
 /* Personal health focus and readable operational surfaces */
 .app-shell:not(:has(.calendar-page)):not(:has(.finance-os)):not(:has(.workspace-backlog)):not(:has(.today-context)) {
   height:auto;

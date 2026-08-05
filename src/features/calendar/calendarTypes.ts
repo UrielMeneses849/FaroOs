@@ -16,9 +16,34 @@ export interface CalendarItem {
   projectId?: string
   goalId?: string
   editable: boolean
+  source?: 'faro' | 'google'
+  readOnly?: boolean
+  externalId?: string
+  calendarId?: string
+  calendarName?: string
   entryKind?: 'event' | 'focus'
   description?: string
   linkedTaskId?: string
+}
+
+export interface GoogleCalendarConnection {
+  connected: boolean
+  status: 'disconnected' | 'needs_calendar' | 'active' | 'reconnect_required'
+  accountEmail?: string | null
+  calendarId?: string | null
+  calendarName?: string | null
+  connectedAt?: string | null
+  lastSyncedAt?: string | null
+}
+
+export interface GoogleCalendarChoice { id: string; name: string; primary: boolean; accessRole: string }
+
+export interface GoogleCalendarEvent {
+  id: string
+  summary?: string
+  status?: string
+  start?: { date?: string; dateTime?: string; timeZone?: string }
+  end?: { date?: string; dateTime?: string; timeZone?: string }
 }
 
 export interface CalendarData {
