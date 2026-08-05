@@ -46,6 +46,16 @@ const toRow = (log: HealthLog, userId: string): Insert => ({
   updated_at: log.updatedAt,
 })
 
+const latestPerDate = (logs: HealthLog[]) => {
+  const byDate = new Map<string, HealthLog>()
+  for (const log of logs) {
+    const date = log.occurredAt.slice(0, 10)
+    const current = byDate.get(date)
+    if (!current || log.updatedAt > current.updatedAt) byDate.set(date, log)
+  }
+  return [...byDate.values()]
+}
+
 export const healthRepository = {
   async list(userId: string) {
     const { data, error } = await supabase.from('health_logs').select('*')
@@ -55,15 +65,15 @@ export const healthRepository = {
     return data.map(fromRow)
   },
   async save(log: HealthLog, userId: string) {
-    const { data, error } = await supabase.from('health_logs').upsert(toRow(log, userId), { onConflict: 'id' })
+    const { data, error } = await supabase.from('health_logs').upsert(toRow(log, userId), { onConflict: 'user_id,log_date' })
       .select().single()
     if (error) throw error
     return fromRow(data)
   },
   async saveMissing(logs: HealthLog[], userId: string) {
     if (!logs.length) return []
-    const { data, error } = await supabase.from('health_logs').upsert(logs.map((log) => toRow(log, userId)), {
-      onConflict: 'id',
+    const { data, error } = await supabase.from('health_logs').upsert(latestPerDate(logs).map((log) => toRow(log, userId)), {
+      onConflict: 'user_id,log_date',
     }).select()
     if (error) throw error
     return data.map(fromRow)
