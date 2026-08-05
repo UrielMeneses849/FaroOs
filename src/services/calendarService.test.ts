@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { demoData } from '../data/mockData'
-import { mergePlanningCalendarItems, normalizeCalendarData, normalizeCalendarRows } from './calendarService'
+import { mergeExternalCalendarItems, mergePlanningCalendarItems, normalizeCalendarData, normalizeCalendarRows, normalizeGoogleCalendarEvents, todayAgendaItems } from './calendarService'
 
 describe('normalización del calendario', () => {
   afterEach(() => vi.restoreAllMocks())
@@ -114,5 +114,31 @@ describe('normalización del calendario', () => {
       status: 'scheduled',
       editable: true,
     })
+  })
+
+  it('normaliza eventos Google con hora como externos y de solo lectura', () => {
+    const [event] = normalizeGoogleCalendarEvents([{ id:'google-1',summary:'Junta BBVA',start:{dateTime:'2026-08-04T10:00:00-06:00'},end:{dateTime:'2026-08-04T10:30:00-06:00'} }],'bbva@example.com','BBVA')
+    expect(event).toMatchObject({id:'google:bbva@example.com:google-1',source:'google',readOnly:true,editable:false,externalId:'google-1',calendarId:'bbva@example.com',allDay:false,title:'Junta BBVA',start:'2026-08-04T10:00:00-06:00',end:'2026-08-04T10:30:00-06:00'})
+  })
+
+  it('normaliza eventos Google de todo el día', () => {
+    const [event] = normalizeGoogleCalendarEvents([{id:'all-day',summary:'Asueto',start:{date:'2026-08-04'},end:{date:'2026-08-05'}}],'bbva')
+    expect(event).toMatchObject({start:'2026-08-04',end:'2026-08-05',allDay:true,readOnly:true})
+  })
+
+  it('evita duplicados externos usando calendario e id', () => {
+    const events=normalizeGoogleCalendarEvents([{id:'same',summary:'Primero',start:{date:'2026-08-04'}},{id:'same',summary:'Actualizado',start:{date:'2026-08-04'}}],'bbva')
+    expect(events).toHaveLength(1)
+    const faroEvent = { id:'event:faro-1',sourceType:'event' as const,sourceId:'faro-1',title:'Evento FARO',start:'2026-08-04T12:00:00-06:00',allDay:false,status:'scheduled',editable:true }
+    const merged = mergeExternalCalendarItems([faroEvent,...events],events)
+    expect(merged).toHaveLength(2)
+    expect(merged).toContain(faroEvent)
+    expect(merged.filter(item=>item.id==='google:bbva:same')).toHaveLength(1)
+    expect(events[0].title).toBe('Actualizado')
+  })
+
+  it('Hoy incluye únicamente eventos del día local y conserva all-day de Google', () => {
+    const events=normalizeGoogleCalendarEvents([{id:'today',start:{date:'2026-08-04'}},{id:'tomorrow',start:{dateTime:'2026-08-05T09:00:00-06:00'}}],'bbva')
+    expect(todayAgendaItems(events,'2026-08-04').map(item=>item.externalId)).toEqual(['today'])
   })
 })

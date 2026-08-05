@@ -4,9 +4,16 @@ import { useFaroStore } from '../store'
 import type { HealthLog } from '../types'
 import { useAuth } from './auth'
 
-const isRealLog = (log: HealthLog) => !/^health-\d+$/.test(log.id)
+// Only these four ids belonged to the original demo dataset. Do not discard
+// legitimate legacy captures that may also use a health-<timestamp> id.
+const isRealLog = (log: HealthLog) => !/^health-[1-4]$/.test(log.id)
 const sortLogs = (logs: HealthLog[]) => [...logs].sort((a, b) =>
   b.occurredAt.localeCompare(a.occurredAt) || b.createdAt.localeCompare(a.createdAt))
+const errorMessage = (reason: unknown) => {
+  if (reason instanceof Error) return reason.message
+  if (reason && typeof reason === 'object' && 'message' in reason && typeof reason.message === 'string') return reason.message
+  return 'No se pudieron sincronizar tus registros de salud.'
+}
 
 export function useHealthRecords() {
   const { user } = useAuth()
@@ -24,8 +31,12 @@ export function useHealthRecords() {
     setLoading(true); setError(undefined)
     try {
       const remote = await healthRepository.list(user.id)
-      const remoteIds = new Set(remote.map((item) => item.id))
-      const pendingLocal = useFaroStore.getState().healthLogs.filter((item) => isRealLog(item) && !remoteIds.has(item.id))
+      const remoteById = new Map(remote.map((item) => [item.id, item]))
+      const pendingLocal = useFaroStore.getState().healthLogs.filter((item) => {
+        if (!isRealLog(item)) return false
+        const remoteItem = remoteById.get(item.id)
+        return !remoteItem || item.updatedAt > remoteItem.updatedAt
+      })
       await healthRepository.saveMissing(pendingLocal, user.id)
       const synchronized = pendingLocal.length ? await healthRepository.list(user.id) : remote
       setLogs(sortLogs(synchronized))
@@ -33,7 +44,7 @@ export function useHealthRecords() {
     } catch (reason) {
       const fallback = sortLogs(useFaroStore.getState().healthLogs.filter(isRealLog))
       setLogs(fallback)
-      setError(reason instanceof Error ? reason.message : 'No se pudieron sincronizar tus registros de salud.')
+      setError(errorMessage(reason))
     } finally {
       setLoading(false)
     }
@@ -43,10 +54,20 @@ export function useHealthRecords() {
 
   const save = async (log: HealthLog) => {
     if (!user) throw new Error('No hay una sesión activa.')
-    const saved = await healthRepository.save(log, user.id)
-    const next = sortLogs([saved, ...logs.filter((item) => item.id !== saved.id)])
-    setLogs(next); replaceLocalBackup(next); setError(undefined)
-    return saved
+    const localNext = sortLogs([log, ...logs.filter((item) => item.id !== log.id)])
+    setLogs(localNext); replaceLocalBackup(localNext); setError(undefined)
+    try {
+      const saved = await healthRepository.save(log, user.id)
+      const synchronized = sortLogs([saved, ...localNext.filter((item) => item.id !== saved.id)])
+      setLogs(synchronized); replaceLocalBackup(synchronized)
+      return saved
+    } catch (reason) {
+      const message = errorMessage(reason)
+      setError(message)
+      // The local write is already durable. Let the form finish normally and
+      // surface the cloud failure in the page-level retry notice.
+      return log
+    }
   }
 
   const remove = async (id: string) => {

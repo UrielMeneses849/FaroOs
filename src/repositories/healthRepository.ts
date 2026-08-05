@@ -64,7 +64,6 @@ export const healthRepository = {
     if (!logs.length) return []
     const { data, error } = await supabase.from('health_logs').upsert(logs.map((log) => toRow(log, userId)), {
       onConflict: 'id',
-      ignoreDuplicates: true,
     }).select()
     if (error) throw error
     return data.map(fromRow)

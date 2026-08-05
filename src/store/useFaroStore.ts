@@ -214,14 +214,14 @@ export const useFaroStore = create<FaroStore>()(
           }
           return {
             ...migrated,
-            healthLogs: (migrated.healthLogs ?? []).filter((log) => !/^health-\d+$/.test(log.id)),
+            healthLogs: (migrated.healthLogs ?? []).filter((log) => !/^health-[1-4]$/.test(log.id)),
           } as FaroStore
         }
         const current = persistedState as FaroStore
         return {
           ...current,
           tasks: (current.tasks ?? []).map((task) => ({ ...task, status: task.status === 'inbox' || task.status === 'paused' ? 'todo' : task.status })),
-          healthLogs: (current.healthLogs ?? []).filter((log) => !/^health-\d+$/.test(log.id)),
+          healthLogs: (current.healthLogs ?? []).filter((log) => !/^health-[1-4]$/.test(log.id)),
         }
       },
       merge: (persistedState, currentState) => {

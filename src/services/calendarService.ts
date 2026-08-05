@@ -1,9 +1,10 @@
-import type { CalendarItem, CalendarSourceType } from '../features/calendar/calendarTypes'
+import type { CalendarItem, CalendarSourceType, GoogleCalendarEvent } from '../features/calendar/calendarTypes'
 import {
   calendarEnd,
   inclusiveAllDayEnd,
   normalizeDateOnly,
   normalizeTimestamp,
+  timestampToLocalParts,
 } from '../lib/calendarDates'
 import type { Database } from '../types/database.types'
 import type { CalendarEntry, Goal, Project, Task } from '../types'
@@ -180,6 +181,39 @@ export function normalizeCalendarData(input: {
 export function mergePlanningCalendarItems(remote: CalendarItem[], local: CalendarItem[]) {
   const localIds = new Set(local.map((item) => item.id))
   return [...remote.filter((item) => item.sourceType === 'event' || !localIds.has(item.id)), ...local]
+}
+
+export function normalizeGoogleCalendarEvents(events: GoogleCalendarEvent[], calendarId: string, calendarName?: string): CalendarItem[] {
+  const unique = new Map<string, CalendarItem>()
+  for (const event of events) {
+    if (!event.id || event.status === 'cancelled') continue
+    const allDay = Boolean(event.start?.date)
+    const start = event.start?.dateTime ?? normalizeDateOnly(event.start?.date)
+    const end = event.end?.dateTime ?? normalizeDateOnly(event.end?.date) ?? undefined
+    if (!start) continue
+    const key = `${calendarId}:${event.id}`
+    unique.set(key, {
+      id: `google:${key}`, sourceType: 'event', sourceId: event.id,
+      externalId: event.id, calendarId, calendarName,
+      title: event.summary?.trim() || 'Evento de Google', start, end,
+      allDay, status: 'scheduled', editable: false, readOnly: true,
+      source: 'google', entryKind: 'event',
+    })
+  }
+  return [...unique.values()].sort((a, b) => a.start.localeCompare(b.start))
+}
+
+export function mergeExternalCalendarItems(items: CalendarItem[], external: CalendarItem[]) {
+  const externalKeys = new Set(external.map((item) => `${item.calendarId}:${item.externalId}`))
+  return [...items.filter((item) => item.source !== 'google' || !externalKeys.has(`${item.calendarId}:${item.externalId}`)), ...external]
+}
+
+export function todayAgendaItems(items: CalendarItem[], today: string) {
+  return items.filter((item) => {
+    if (item.sourceType !== 'task' && item.sourceType !== 'event') return false
+    if (item.allDay && item.source !== 'google') return false
+    return (item.allDay ? item.start.slice(0, 10) : timestampToLocalParts(item.start).date) === today
+  }).sort((a, b) => a.start.localeCompare(b.start))
 }
 
 export function normalizeCalendarRows(input: {

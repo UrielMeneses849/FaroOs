@@ -44,7 +44,7 @@ describe('sincronización de salud', () => {
     expect(useFaroStore.getState().healthLogs).toEqual([localLog])
   })
 
-  it('solo actualiza el respaldo local después de guardar correctamente en Supabase', async () => {
+  it('sincroniza el respaldo local y Supabase al guardar correctamente', async () => {
     repository.list.mockResolvedValue([localLog])
     repository.saveMissing.mockResolvedValue([])
     const updated = { ...localLog, weightKg: 84.1, updatedAt: '2026-07-31T10:00:00.000Z' }
@@ -57,5 +57,34 @@ describe('sincronización de salud', () => {
     expect(repository.save).toHaveBeenCalledWith(updated, 'user-1')
     expect(result.current.logs[0]).toEqual(updated)
     expect(useFaroStore.getState().healthLogs[0]).toEqual(updated)
+  })
+
+  it('conserva localmente una captura cuando Supabase falla', async () => {
+    repository.list.mockResolvedValue([localLog])
+    repository.saveMissing.mockResolvedValue([])
+    repository.save.mockRejectedValue({ message: 'Sin conexión con Supabase.' })
+    const pending = { ...localLog, id: 'health-1722800000000', weightKg: 86, updatedAt: '2026-08-04T10:00:00.000Z' }
+
+    const { result } = renderHook(() => useHealthRecords())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await act(async () => { await expect(result.current.save(pending)).resolves.toEqual(pending) })
+
+    expect(result.current.logs).toContainEqual(pending)
+    expect(useFaroStore.getState().healthLogs).toContainEqual(pending)
+    expect(result.current.error).toBe('Sin conexión con Supabase.')
+  })
+
+  it('replica una edición local más reciente aunque el id ya exista remotamente', async () => {
+    const remote = { ...localLog, weightKg: 84.5, updatedAt: '2026-07-30T14:00:00.000Z' }
+    const local = { ...localLog, weightKg: 86, updatedAt: '2026-08-04T10:00:00.000Z' }
+    useFaroStore.setState({ healthLogs: [local] })
+    repository.list.mockResolvedValueOnce([remote]).mockResolvedValueOnce([local])
+    repository.saveMissing.mockResolvedValue([local])
+
+    const { result } = renderHook(() => useHealthRecords())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(repository.saveMissing).toHaveBeenCalledWith([local], 'user-1')
+    expect(result.current.logs).toEqual([local])
   })
 })
