@@ -1,7 +1,9 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { corsHeaders, json } from '../_shared/http.ts'
+import { matchFinanceCandidates, type FinanceCandidate } from '../_shared/financeMatch.ts'
+import { buildFaroSystemPrompt, type FaroSurface } from '../_shared/faroSystemPrompt.ts'
 
-const MUTATIONS = new Set(['createTask', 'updateTaskStatus', 'createExpense', 'createIncome', 'updateFinanceTransactionStatus', 'createRecurringExpense', 'registerRecurringPayment'])
+const MUTATIONS = new Set(['createTask', 'updateTaskStatus', 'createExpense', 'createIncome', 'updateFinanceTransactionStatus', 'completePlannedTransaction', 'updateRecurringAmount', 'createRecurringExpense', 'registerRecurringPayment'])
 const statuses = ['inbox', 'todo', 'doing', 'paused', 'blocked', 'done']
 const financeStatuses = ['planned', 'pending', 'completed', 'cancelled']
 const toolSchemas = [
@@ -20,6 +22,8 @@ const toolSchemas = [
   tool('updateFinanceTransactionStatus', 'Actualiza el estado de un movimiento.', {
     transactionId: string('UUID del movimiento'), status: enumValue(financeStatuses),
   }, ['transactionId', 'status']),
+  tool('completePlannedTransaction', 'Completa un eventual existente usando el importe real del pago o cobro.', { transactionId: string('UUID del eventual'), actualAmount: optionalNumber() }),
+  tool('updateRecurringAmount', 'Cambia el importe base de una recurrencia para periodos futuros.', { recurringId: string('UUID del recurrente'), amount: { type: 'number', exclusiveMinimum: 0 } }),
   tool('searchFinanceTransactions', 'Busca movimientos financieros.', {
     query: optionalString(), startDate: optionalString(), endDate: optionalString(),
     type: { type: ['string', 'null'], enum: ['income', 'expense', 'transfer', 'saving', 'debt_payment', 'refund', null] },
@@ -33,9 +37,10 @@ const toolSchemas = [
     firstExpectedDate: string('YYYY-MM-DD'), dayOfMonth: optionalNumber(), endDate: optionalString(),
   }),
   tool('registerRecurringPayment', 'Registra como pagada la ocurrencia indicada y crea su movimiento financiero.', {
-    recurringId: string('UUID del recurrente'), period: string('Primer día del mes, YYYY-MM-01'), expectedDate: string('YYYY-MM-DD'),
+    recurringId: string('UUID del recurrente'), period: string('Primer día del mes, YYYY-MM-01'), expectedDate: string('YYYY-MM-DD'), actualAmount: optionalNumber(),
   }),
 ]
+const productToolNames = new Set(['createExpense', 'createIncome', 'updateFinanceTransactionStatus', 'completePlannedTransaction', 'updateRecurringAmount', 'searchFinanceTransactions', 'getFinanceSummary', 'listRecurringExpenses', 'createRecurringExpense', 'registerRecurringPayment'])
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -73,26 +78,49 @@ Deno.serve(async (request) => {
       return json({ status: 'completed', message: successMessage(action.toolName), questions: [], result, qa: { intent: action.toolName, entities: action.arguments, toolName: action.toolName, toolArguments: action.arguments } })
     }
 
+    const requestStartedAt = performance.now()
     const requestId = String(body.requestId ?? crypto.randomUUID())
     const message = String(body.message ?? '').trim()
+    const surface: FaroSurface = ['dashboard', 'today', 'finances', 'lab'].includes(body.surface) ? body.surface : 'lab'
     if (!message) return json({ status: 'error', message: 'Escribe o di una solicitud.', questions: [] }, 400)
+    const contextStartedAt = performance.now()
     const context = await loadContext(db, user.id)
+    const contextMs = performance.now() - contextStartedAt
+    const completionText = [...normalizeHistory(body.history).filter((turn) => turn.role === 'user').map((turn) => turn.content), message].join(' ')
+    const matchingStartedAt = performance.now()
+    const existing = resolveExistingFinancial(completionText, context)
+    const matchingMs = performance.now() - matchingStartedAt
+    if (existing?.kind === 'clarify') {
+      diagnostic({ surface, contextMs, matchingMs, totalMs: performance.now() - requestStartedAt, route: 'deterministic_clarification' })
+      await insertLog(db, user.id, requestId, body.source, message, { status: 'needs_clarification', questions: [existing.message], result: { answer: existing.message } })
+      return json({ status: 'needs_clarification', message: existing.message, questions: [existing.message], qa: { intent: 'matchExistingFinance', entities: { matches: existing.ids } } })
+    }
+    if (existing?.kind === 'action') {
+      diagnostic({ surface, contextMs, matchingMs, totalMs: performance.now() - requestStartedAt, route: 'deterministic_action' })
+      const pendingAction = { requestId, toolName: existing.toolName, arguments: existing.arguments, summary: existing.summary }
+      await insertLog(db, user.id, requestId, body.source, message, { status: 'pending_confirmation', parsed_intent: existing.toolName, entities: existing.arguments, tool_name: existing.toolName, tool_arguments: existing.arguments, confirmation_required: true, confirmation_status: 'pending' })
+      return json({ status: 'pending_confirmation', message: existing.prompt, questions: [], pendingAction, qa: { intent: existing.toolName, entities: existing.arguments, toolName: existing.toolName, toolArguments: existing.arguments } })
+    }
     const openaiKey = Deno.env.get('OPENAI_API_KEY')
     if (!openaiKey) return json({ status: 'error', message: 'FARO Voice aún no tiene configurada la clave de OpenAI en Supabase.', questions: [] }, 503)
+    const availableToolSchemas = surface === 'lab' ? toolSchemas : toolSchemas.filter((candidate) => productToolNames.has(candidate.name))
+    const aiStartedAt = performance.now()
     const ai = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: { Authorization: `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: Deno.env.get('OPENAI_TEXT_MODEL') ?? 'gpt-5-mini',
-        instructions: systemPrompt(context),
+        instructions: buildFaroSystemPrompt({ surface, financialContext: contextForSurface(context, surface), availableTools: availableToolSchemas.map((candidate) => candidate.name), today: localToday() }),
         input: [
           ...normalizeHistory(body.history),
           { role: 'user', content: message },
         ],
-        tools: toolSchemas,
+        tools: availableToolSchemas,
         tool_choice: financialToolChoice(message, context) ?? 'auto',
       }),
     })
+    const aiMs = performance.now() - aiStartedAt
+    diagnostic({ surface, contextMs, matchingMs, aiMs, totalMs: performance.now() - requestStartedAt, route: 'openai' })
     if (!ai.ok) throw new Error(`OpenAI respondió ${ai.status}: ${await ai.text()}`)
     const response = await ai.json()
     const call = response.output?.find((item: { type: string }) => item.type === 'function_call')
@@ -148,36 +176,23 @@ function enumValue(values: string[]) { return { type: 'string', enum: values } }
 function financeCreateProperties(kind: string) {
   return { amount: { type: 'number', exclusiveMinimum: 0, description: 'Importe en MXN. Acepta enteros y decimales, por ejemplo 86.64.' }, description: string(), date: string('YYYY-MM-DD'), accountId: string(), categoryId: string(), status: { type: 'string', enum: financeStatuses, default: kind === 'expense' ? 'completed' : 'completed' }, notes: optionalString() }
 }
-function systemPrompt(context: unknown) {
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
-  return `Eres FARO, el asistente personal operativo de Uriel dentro de FARO OS.
-
-IDENTIDAD Y TONO
-- Habla en español mexicano natural. Sé cálido, directo, breve y espontáneo.
-- Compórtate como asistente competente: prioriza acción sobre explicación; no seas coach, no adules y evita lenguaje corporativo.
-- Responde normalmente en una a tres oraciones y no repitas una pregunta en formatos distintos.
-- Las confirmaciones hablables deben ser de una sola oración y mencionar únicamente acción, monto y categoría. Omite fecha, cuenta, descripción y estado cuando ya fueron inferidos correctamente; esos detalles estarán visibles en la interfaz.
-
-SEGURIDAD Y HERRAMIENTAS
-- Usa datos reales y únicamente IDs presentes en el contexto. Nunca inventes UUIDs ni afirmes que actuaste sin éxito de herramienta.
-- Toda escritura requiere la confirmación que mostrará la interfaz. No elimines datos ni cambies saldos iniciales.
-- Si puedes completar un dato con una regla segura, hazlo sin preguntar. Pregunta solo por ambigüedad material y agrupa lo indispensable en una sola pregunta breve.
-
-FINANZAS
-- Los montos aceptan centavos y deben conservar exactamente los decimales expresados; nunca redondees ni trunques por iniciativa propia.
-- “Pagué”, “gasté”, “compré” o “liquidé” => gasto completed. “Pagaré”, “voy a pagar” o “tengo que pagar” => gasto pending.
-- “Me pagaron”, “cobré” o “recibí” => ingreso completed. “Me pagarán” o “voy a cobrar” => ingreso pending.
-- Si no se menciona fecha y la acción está en pasado, usa hoy: ${today}. Si está en futuro y no hay fecha, pregunta cuándo.
-- Si hay una sola cuenta activa, úsala. Si el usuario nombra una cuenta, usa esa. Con varias cuentas y ninguna indicada, pregunta solo qué cuenta usar.
-- Clasifica únicamente con categorías existentes. Usa la coincidencia semántica más razonable; si ninguna es clara, usa “Sin categoría” si existe. Pregunta solo si la categoría cambiaría materialmente el análisis.
-- Una transferencia no es ingreso ni gasto. El ahorro reduce disponible operativo pero permanece en patrimonio. Un pendiente no afecta balance real.
-- No dupliques movimientos. No preguntes por notas ni otros datos opcionales.
-- Para “registra el pago de mi renta/internet/etc.” busca el recurrente del contexto y usa registerRecurringPayment; no crees un gasto eventual separado.
-- “Cada mes”, “semanal”, “quincenal”, “trimestral” o “anual” describen una programación recurrente. Crear la programación requiere confirmación.
-- Si un recurrente ya está pagado en el periodo actual, informa brevemente y no propongas otra acción.
-
-Para consultas o acciones usa herramientas. Si falta un dato obligatorio que no pueda inferirse con estas reglas, pregunta y no llames una herramienta todavía.
-Contexto disponible: ${JSON.stringify(context)}`
+function localToday() { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()) }
+function diagnostic(values: Record<string, string | number>) {
+  if (Deno.env.get('FARO_DIAGNOSTICS') !== 'true') return
+  console.info({ scope: 'faro-voice', ...Object.fromEntries(Object.entries(values).map(([key, value]) => [key, typeof value === 'number' ? Math.round(value) : value])) })
+}
+function contextForSurface(context: FinanceContext, surface: FaroSurface) {
+  const limit = surface === 'finances' || surface === 'lab' ? 75 : surface === 'today' ? 30 : 20
+  return {
+    accounts: context.accounts.slice(0, 20),
+    categories: context.categories.slice(0, 40),
+    recurring: context.recurring.slice(0, limit),
+    recurringOccurrences: context.recurringOccurrences.slice(0, limit),
+    plannedTransactions: context.plannedTransactions.slice(0, limit),
+    recentTransactions: context.recentTransactions.slice(0, surface === 'today' ? 10 : limit),
+    budgets: (surface === 'finances' || surface === 'dashboard' ? context.budgets : []).slice(0, 20),
+    currentPeriod: context.currentPeriod,
+  }
 }
 function normalizeHistory(value: unknown) {
   if (!Array.isArray(value)) return []
@@ -192,14 +207,35 @@ function normalizeHistory(value: unknown) {
 async function loadContext(db: ReturnType<typeof createClient>, userId: string) {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
   const period = `${today.slice(0, 7)}-01`
-  const [workspaces, accounts, categories, recurring, recurringOccurrences] = await Promise.all([
+  const [workspaces, accounts, categories, recurring, recurringOccurrences, plannedTransactions, recentTransactions, budgets] = await Promise.all([
     db.from('workspaces').select('id,name,type').eq('user_id', userId).eq('is_active', true),
     db.from('finance_accounts').select('id,name,type').eq('user_id', userId).eq('is_active', true),
     db.from('finance_categories').select('id,name,type').eq('user_id', userId).eq('is_active', true),
     db.from('finance_recurring_transactions').select('id,description,type,amount,frequency,next_occurrence,day_of_month,is_active,account_id,category_id').eq('user_id', userId),
     db.from('finance_recurring_occurrences').select('id,recurring_transaction_id,period,expected_date,amount,status,transaction_id').eq('user_id', userId).eq('period', period),
+    db.from('finance_transactions').select('id,description,type,amount,status,account_id,category_id,transaction_date').eq('user_id', userId).in('status', ['planned', 'pending']),
+    db.from('finance_transactions').select('id,description,type,amount,status,account_id,category_id,transaction_date').eq('user_id', userId).order('transaction_date', { ascending: false }).limit(20),
+    db.from('finance_budgets').select('id,name,category_id,planned_amount,period_start,period_end').eq('user_id', userId).lte('period_start', today).gte('period_end', today).limit(20),
   ])
-  return { workspaces: workspaces.data ?? [], accounts: accounts.data ?? [], categories: categories.data ?? [], recurring: recurring.data ?? [], recurringOccurrences: recurringOccurrences.data ?? [], currentPeriod: period }
+  return { workspaces: workspaces.data ?? [], accounts: accounts.data ?? [], categories: categories.data ?? [], recurring: recurring.data ?? [], recurringOccurrences: recurringOccurrences.data ?? [], plannedTransactions: plannedTransactions.data ?? [], recentTransactions: recentTransactions.data ?? [], budgets: budgets.data ?? [], currentPeriod: period }
+}
+type FinanceContext = Awaited<ReturnType<typeof loadContext>>
+function resolveExistingFinancial(message: string, context: FinanceContext) {
+  const normalized = foldText(message)
+  const permanent = /\b(a partir de ahora|desde ahora|proximo mes|siguientes periodos)\b/.test(normalized)
+  const completed = /\b(pague|acabo de pagar|acabo de poner|acaban de pagarme|gaste|compre|liquide|me cobraron|me cayo|recibi|cobre|me depositaron|marca como cobrado|cobra)\b/.test(normalized)
+  if ((!completed && !permanent) || /\b(pagare|voy a pagar|tengo que pagar|me van a cobrar|me pagaran|voy a cobrar)\b/.test(normalized)) return null
+  const accounts = new Map(context.accounts.map((x) => [x.id, x.name])); const categories = new Map(context.categories.map((x) => [x.id, x.name])); const candidates: FinanceCandidate[] = []
+  for (const item of context.recurring) { const occurrence = context.recurringOccurrences.find((x) => x.recurring_transaction_id === item.id); if (!item.is_active || (!permanent && (occurrence?.status === 'paid' || occurrence?.transaction_id))) continue; candidates.push({ id: item.id, description: item.description, kind: 'recurring', type: item.type === 'income' ? 'income' : 'expense', amount: Number(permanent ? item.amount : occurrence?.amount ?? item.amount), status: occurrence?.status ?? 'pending', accountName: accounts.get(item.account_id), categoryName: categories.get(item.category_id), period: context.currentPeriod, expectedDate: occurrence?.expected_date ?? item.next_occurrence }) }
+  for (const item of context.plannedTransactions) candidates.push({ id: item.id, description: item.description, kind: 'transaction', type: item.type === 'income' ? 'income' : 'expense', amount: Number(item.amount), status: item.status, accountName: accounts.get(item.account_id), categoryName: categories.get(item.category_id) })
+  const income = /\b(sueldo|quincena|me cayo|recibi|cobre|depositaron|pagaron)\b/.test(normalized); const matches = matchFinanceCandidates(message, candidates.filter((x) => x.type === (income ? 'income' : 'expense')))
+  if (!matches.length) return null
+  if (matches.length > 1 && matches[0].score - matches[1].score < .25) { const options = matches.slice(0, 3).map((x, i) => `${i + 1}. ${x.candidate.description}, $${x.candidate.amount.toLocaleString('es-MX')}`).join('\n'); return { kind: 'clarify' as const, message: `Encontré varias coincidencias:\n${options}\n¿Cuál corresponde?`, ids: matches.slice(0, 3).map((x) => x.candidate.id) } }
+  const found = matches[0].candidate; const amounts = [...normalized.replace(/,/g, '').matchAll(/\b\d+(?:\.\d+)?\b/g)].map((match) => Number(match[0])); const actualAmount = amounts.at(-1); const real = Number.isFinite(actualAmount) ? actualAmount! : found.amount; const verb = found.type === 'income' ? 'cobro' : 'pago'
+  if (permanent && found.kind === 'recurring' && Number.isFinite(actualAmount)) return { kind: 'action' as const, toolName: 'updateRecurringAmount', arguments: { recurringId: found.id, amount: real }, summary: `Cambiar ${found.description} a $${real.toLocaleString('es-MX')} para periodos futuros.`, prompt: `¿Cambio el importe base de “${found.description}” a $${real.toLocaleString('es-MX')} para los siguientes periodos?` }
+  const toolName = found.kind === 'recurring' ? 'registerRecurringPayment' : 'completePlannedTransaction'; const args = found.kind === 'recurring' ? { recurringId: found.id, period: found.period, expectedDate: found.expectedDate, actualAmount: real } : { transactionId: found.id, actualAmount: real }
+  const variation = real !== found.amount ? `, planeado por $${found.amount.toLocaleString('es-MX')}. Registraré $${real.toLocaleString('es-MX')} solo para este periodo` : ` por $${real.toLocaleString('es-MX')}`
+  return { kind: 'action' as const, toolName, arguments: args, summary: `Registrar el ${verb} de ${found.description} por $${real.toLocaleString('es-MX')}.`, prompt: `Encontré “${found.description}”${variation}. ¿Confirmas?` }
 }
 function financialToolChoice(message: string, context: { accounts?: Array<{ name: string }>; recurring?: Array<{ id: string; description: string; type: string }> }) {
   const normalized = foldText(message)
@@ -311,6 +347,10 @@ async function executeTool(db: ReturnType<typeof createClient>, userId: string, 
     return { recurring, occurrence }
   }
   if (name === 'registerRecurringPayment') {
+    if (Number.isFinite(Number(args.actualAmount))) {
+      const { error: amountError } = await db.from('finance_recurring_occurrences').update({ amount: Number(args.actualAmount) }).eq('user_id', userId).eq('recurring_transaction_id', args.recurringId).eq('period', args.period).eq('status', 'pending')
+      if (amountError) throw amountError
+    }
     const { data, error } = await db.rpc('register_finance_recurring_occurrence', {
       target_recurring_id: args.recurringId,
       target_period: args.period,
@@ -318,6 +358,18 @@ async function executeTool(db: ReturnType<typeof createClient>, userId: string, 
     })
     if (error) throw error
     return { transactionId: data, recurringId: args.recurringId, period: args.period }
+  }
+  if (name === 'completePlannedTransaction') {
+    const updates: Record<string, unknown> = { status: 'completed' }
+    if (Number.isFinite(Number(args.actualAmount))) updates.amount = Number(args.actualAmount)
+    const { data, error } = await db.from('finance_transactions').update(updates).eq('id', args.transactionId).eq('user_id', userId).in('status', ['planned', 'pending']).select().single()
+    if (error) throw error
+    return data
+  }
+  if (name === 'updateRecurringAmount') {
+    const { data, error } = await db.from('finance_recurring_transactions').update({ amount: Number(args.amount) }).eq('id', args.recurringId).eq('user_id', userId).select().single()
+    if (error) throw error
+    return data
   }
   if (name === 'updateFinanceTransactionStatus') {
     if (!financeStatuses.includes(String(args.status))) throw new Error('Estado financiero inválido.')

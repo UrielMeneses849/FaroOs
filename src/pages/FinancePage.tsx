@@ -16,6 +16,7 @@ import type {
   FinanceTransactionStatus, FinanceTransactionType,
 } from '../features/finance/financeTypes'
 import { useFinance } from '../hooks/useFinance'
+import { useOptionalFaroVoice } from '../features/voice/FaroVoiceProvider'
 import {
   financeAccountRepository, financeBudgetRepository, financeGoalRepository,
   financePlanningRepository, financeRecurringOccurrenceRepository, financeRecurringRepository, financeTransactionRepository,
@@ -38,6 +39,7 @@ const statusLabel: Record<FinanceTransactionStatus, string> = {
 
 export function FinancePage() {
   const { data, loading, error, refresh, user } = useFinance()
+  const faroVoice = useOptionalFaroVoice()
   const [month, setMonth] = useState(() => new Date())
   const [panel, setPanel] = useState<Panel>(() => {
     const stored = sessionStorage.getItem('faro-finance-panel')
@@ -225,7 +227,7 @@ export function FinancePage() {
       <div><span className="eyebrow">Sistema financiero personal</span><h1>Finanzas</h1><p>Control real, proyección y dirección financiera.</p>
         <div className="finance-period"><button aria-label="Mes anterior" onClick={() => setMonth((value) => subMonths(value, 1))}><ArrowLeft size={15} /></button><label>Periodo<input type="month" value={format(month, 'yyyy-MM')} onChange={(event) => event.target.value && setMonth(parseISO(`${event.target.value}-01`))} /></label><button aria-label="Mes siguiente" onClick={() => setMonth((value) => addMonths(value, 1))}><ArrowRight size={15} /></button><button aria-label="Actualizar datos financieros" title="Actualizar" onClick={() => void refresh()}><RefreshCw size={14} /></button></div>
       </div>
-      <div className="finance-header__actions"><button className="finance-voice-input" type="button" disabled aria-label="Hablar con la IA, próximamente" title="Entrada por voz: próximamente"><Mic size={17} /><span>Hablar con IA</span></button><Button icon={<Plus size={17} />} disabled={!activeAccounts.length} onClick={() => setDialog('movementMenu')}>Nuevo movimiento</Button></div>
+      <div className="finance-header__actions">{faroVoice?.enabled && <button className="finance-voice-input" type="button" aria-label="Hablar con FARO" onClick={() => faroVoice.openFaroVoice({ surface: 'finances' })}><Mic size={17} /><span>Hablar con FARO</span></button>}<Button icon={<Plus size={17} />} disabled={!activeAccounts.length} onClick={() => setDialog('movementMenu')}>Nuevo movimiento</Button></div>
     </header>
     {feedback && <div className="finance-feedback" role="status">{feedback}<button onClick={() => setFeedback('')}>×</button></div>}
     {!data.accounts.length && <section className="finance-onboarding"><WalletCards /><div><strong>Crea tu primera cuenta</strong><p>El saldo inicial será la base de tus cálculos. Después podrás registrar tu primer ingreso sin ingresar datos bancarios sensibles.</p></div><Button onClick={() => setDialog('account')}>Crear cuenta</Button><Button variant="ghost" disabled title="Crea una cuenta antes de registrar el ingreso">Registrar ingreso</Button></section>}

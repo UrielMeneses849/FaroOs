@@ -35,5 +35,8 @@ describe('FARO Voice contracts', () => {
       summary: 'Acción peligrosa',
     })).toThrow()
   })
+  it('acepta importes reales por periodo y cambios base explícitos',()=>{
+    expect(pendingActionSchema.parse({requestId:'48e30c50-e4bb-44a0-bdeb-bf098b2c3547',toolName:'completePlannedTransaction',arguments:{transactionId:'x',actualAmount:1450},summary:'Pago'}).toolName).toBe('completePlannedTransaction')
+    expect(pendingActionSchema.parse({requestId:'48e30c50-e4bb-44a0-bdeb-bf098b2c3547',toolName:'updateRecurringAmount',arguments:{recurringId:'x',amount:7200},summary:'Cambio futuro'}).toolName).toBe('updateRecurringAmount')
+  })
 })
-

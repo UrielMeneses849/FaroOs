@@ -16,6 +16,7 @@ import { upcoming48Hours, weightRegistrationIsStale, workspaceOpenLoad } from '.
 import { accountBalance, calculateFinanceMetrics, formatMxn } from '../../services/financeService'
 import { useFaroStore } from '../../store'
 import type { HealthLog } from '../../types'
+import { FaroVoicePresence } from '../voice/FaroVoicePresence'
 
 const workspaceAccents: Record<string, string> = {
   personal: '#35c78a', bbva: '#2457ff', bimsa: '#f28c38', nexvora: '#a970ff',
@@ -55,7 +56,7 @@ export function DashboardPage() {
   }
 
   return <div className="page dashboard-page dashboard-ops">
-    <PageHeader eyebrow={format(new Date(), "EEEE, d 'de' MMMM", { locale: es })} title="Dashboard" description="Tu centro de situación operativo." onCapture={capture} />
+    <div className="dashboard-voice-heading"><PageHeader eyebrow={format(new Date(), "EEEE, d 'de' MMMM", { locale: es })} title="Dashboard" description="Tu centro de situación operativo." onCapture={capture} /><FaroVoicePresence /></div>
     <div className="dashboard-command">
       <main className="dashboard-command__main">
         <section className="ops-panel ops-calendar"><PanelHead eyebrow="Próximas 48 horas" title="Próximos compromisos" to="/calendar" label="Abrir calendario" />{calendarError ? <EmptyState title="Calendario no disponible" description={calendarError} action={<Button onClick={refreshCalendar}>Reintentar</Button>} /> : <div className="ops-timeline">{upcoming.map((item) => { const workspace = workspaces.find((candidate) => candidate.id === item.workspaceId); const parts = timestampToLocalParts(item.start); const rawMinutes = item.end ? differenceInMinutes(parseISO(item.end), parseISO(item.start)) : undefined; const minutes = rawMinutes && rawMinutes > 0 && rawMinutes <= 1440 ? rawMinutes : undefined; const context=item.source==='google'?(item.calendarName??'Google'):workspace?.name??'Sin workspace'; return <article key={item.id} data-state="upcoming"><i /><time><span>{parts.date === today ? 'Hoy' : 'Mañana'}</span>{parts.time}</time><div><strong>{item.title}</strong><span>{context} · {item.source==='google'?'Google':item.sourceType === 'event' ? item.entryKind === 'focus' ? 'Enfoque' : 'Evento' : 'Tarea'}{minutes ? ` · ${minutes} min` : ''}</span></div></article>})}{!upcoming.length && <p>No tienes compromisos en las próximas 48 horas.</p>}</div>}</section>

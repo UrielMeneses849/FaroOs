@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { allNavigationItems, settingsItem } from '../../app/navigation'
 import { QuickCaptureDialog } from '../../features/capture/QuickCaptureDialog'
-import { VoicePanel } from '../../features/voice/VoicePanel'
+import { useFaroVoice } from '../../features/voice/FaroVoiceProvider'
 import { useAuth } from '../../hooks/auth'
 import { IconButton, Modal } from '../common'
 import { MobileNavigation } from './MobileNavigation'
@@ -13,7 +13,7 @@ export function AppShell() {
   const [collapsed, setCollapsed] = useState(false)
   const [captureOpen, setCaptureOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [voiceOpen, setVoiceOpen] = useState(false)
+  const { enabled: voiceEnabled, openFaroVoice } = useFaroVoice()
   const { signOut } = useAuth()
   const location = useLocation()
   const capture = () => setCaptureOpen(true)
@@ -44,10 +44,9 @@ export function AppShell() {
         <main id="main-content" className="main-content"><Outlet context={{ capture }} /></main>
       </div>
       <button className="capture-fab" aria-label="Capturar" onClick={capture}><Plus size={22} /></button>
-      <button className="voice-fab" aria-label="Hablar con FARO" onClick={() => setVoiceOpen(true)}><MessageCircle size={18} /><span>Hablar con FARO</span></button>
+      {voiceEnabled && <button className="voice-fab" aria-label="Hablar con FARO" onClick={() => openFaroVoice({ surface: location.pathname.startsWith('/today') ? 'today' : location.pathname.startsWith('/finance') ? 'finances' : 'dashboard' })}><MessageCircle size={18} /><span>Hablar con FARO</span></button>}
       <MobileNavigation onMore={() => setMenuOpen(true)} />
       {captureOpen && <QuickCaptureDialog open onClose={() => setCaptureOpen(false)} />}
-      <VoicePanel open={voiceOpen} onClose={() => setVoiceOpen(false)} />
       <Modal open={menuOpen} title="Explorar FARO" onClose={() => setMenuOpen(false)}>
         <nav className="mobile-menu" aria-label="Todas las secciones">
           {allNavigationItems.map(({ path, label, icon: Icon }) => (

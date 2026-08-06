@@ -3,6 +3,7 @@ import { z } from 'zod'
 export const voiceToolNames = [
   'getDailySummary', 'listTodayTasks', 'createTask', 'updateTaskStatus',
   'createExpense', 'createIncome', 'updateFinanceTransactionStatus',
+  'completePlannedTransaction', 'updateRecurringAmount',
   'searchFinanceTransactions', 'getFinanceSummary', 'listRecurringExpenses',
   'createRecurringExpense', 'registerRecurringPayment',
 ] as const
@@ -18,6 +19,7 @@ export const voiceActionSchema = z.object({
     role: z.enum(['user', 'assistant']),
     content: z.string().trim().min(1).max(2000),
   })).max(6).default([]),
+  surface: z.enum(['dashboard', 'today', 'finances', 'lab']).default('lab'),
 })
 export type VoiceConversationTurn = z.infer<typeof voiceActionSchema>['history'][number]
 
@@ -46,6 +48,7 @@ export const voiceResponseSchema = z.object({
     entities: z.record(z.string(), z.unknown()).default({}),
     toolName: voiceToolNameSchema.optional(),
     toolArguments: z.record(z.string(), z.unknown()).optional(),
+    timings: z.record(z.string(), z.number()).optional(),
   }).optional(),
 })
 export type VoiceResponse = z.infer<typeof voiceResponseSchema>

@@ -2,6 +2,7 @@ import { RouterProvider } from 'react-router-dom'
 import { router } from './app/router'
 import { AuthProvider, GoalSyncProvider, LocalMigrationProvider, ProjectSyncProvider, TaskSyncProvider } from './providers'
 import { useAuth } from './hooks/auth'
+import { FaroVoiceProvider } from './features/voice/FaroVoiceProvider'
 
 function FaroRuntime() {
   const { user } = useAuth()
@@ -14,7 +15,7 @@ function FaroRuntime() {
       <GoalSyncProvider>
         <ProjectSyncProvider>
           <TaskSyncProvider>
-            <RouterProvider router={router} />
+            <FaroVoiceProvider><RouterProvider router={router} /></FaroVoiceProvider>
           </TaskSyncProvider>
         </ProjectSyncProvider>
       </GoalSyncProvider>
