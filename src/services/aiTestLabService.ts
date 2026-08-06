@@ -37,4 +37,9 @@ export const aiTestLabService = {
     if (error) throw new Error(error.message)
     return baselineFrom(data)
   },
+  async restoreScenario() {
+    const { data, error } = await rpc('restore_ai_finance_scenario', { p_confirm_is_test_user: true })
+    if (error) throw new Error(error.message)
+    return data
+  },
 }

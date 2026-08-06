@@ -1,6 +1,6 @@
 import { differenceInMinutes, format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { AlertTriangle, CalendarClock, Check, Circle, Ellipsis, FolderKanban, Plus, Scale, Timer, Workflow } from 'lucide-react'
+import { AlertTriangle, CalendarClock, Check, Circle, Ellipsis, FolderKanban, Mic, Plus, Scale, Timer, Workflow } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, EmptyState } from '../components/common'
@@ -17,9 +17,11 @@ import { formatMxn } from '../services/financeService'
 import { todayAgendaItems } from '../services/calendarService'
 import { useFaroStore } from '../store'
 import type { Task, TaskStatus } from '../types'
+import { useFaroVoice } from '../features/voice/FaroVoiceProvider'
 
 export function TodayPage() {
   const { capture } = usePageCapture(); const navigate = useNavigate()
+  const { enabled: voiceEnabled, openFaroVoice } = useFaroVoice()
   const { data: workspaces, loading: workspacesLoading, error: workspaceError, refresh: refreshWorkspaces, restoreDefaults } = useWorkspaces()
   const { data: tasks, loading: tasksLoading, error: tasksError, refresh: refreshTasks } = useTodayTasks(true)
   const { data: calendarData, loading: calendarLoading, error: calendarError, refresh: refreshCalendar } = useCalendarData()
@@ -44,6 +46,7 @@ export function TodayPage() {
 
   return <div className="page today-context">
     <PageHeader eyebrow={format(new Date(), "EEEE, d 'de' MMMM", { locale: es })} title="Hoy" description="Agenda y pendientes, separados con claridad." onCapture={capture} />
+    {voiceEnabled && <button className="surface-voice-access" type="button" onClick={() => openFaroVoice({ surface: 'today' })}><Mic size={15} />Hablar con FARO</button>}
     <section className="today-context__summary"><div><span>Pendientes</span><strong>{pending}</strong></div><div><span>Completadas</span><strong>{completed}</strong></div><button className="today-context__weight" data-missing={!todayHealth?.weightKg} onClick={() => navigate('/health')}><Scale size={16} /><span>{todayHealth?.weightKg ? 'Peso de hoy' : 'Peso pendiente'}</span><strong>{todayHealth?.weightKg ? `${todayHealth.weightKg} kg` : latestWeight ? `Último: ${latestWeight} kg` : 'Registrar peso'}</strong><small>{todayHealth?.weightKg ? 'Capturado hoy' : 'Aún no lo has capturado hoy'}</small></button><button className="today-context__spending" onClick={() => { sessionStorage.setItem('faro-finance-panel', 'transactions'); navigate('/finance') }}><span>Gastado hoy</span><strong>{formatMxn(todayExpenses.reduce((sum, item) => sum + item.amountCents, 0))}</strong></button></section>
     <div className="today-operational-grid">
       <section className="today-agenda-board">
