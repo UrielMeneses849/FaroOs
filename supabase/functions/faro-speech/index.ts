@@ -28,16 +28,20 @@ Deno.serve(async (request) => {
     const modelId = Deno.env.get('ELEVENLABS_MODEL_ID')
     if (!apiKey || !voiceId || !modelId) return json({ error: 'speech_not_configured', message: 'La voz de FARO no está configurada.' }, 503)
 
-    const body = await request.json().catch(() => null) as { type?: unknown; text?: unknown } | null
+    const body = await request.json().catch(() => null) as { type?: unknown; text?: unknown; model?: unknown; stream?: unknown } | null
     if (body?.type === 'health') return json({ status: 'ready' })
     const text = typeof body?.text === 'string' ? body.text.trim().replace(/\s+/g, ' ') : ''
     if (!text) return json({ error: 'invalid_text', message: 'El texto es requerido.' }, 400)
     if (text.length > MAX_TEXT_LENGTH) return json({ error: 'text_too_long', message: `El texto no puede superar ${MAX_TEXT_LENGTH} caracteres.` }, 413)
 
-    const provider = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`, {
+    const requestedModel = body?.model === 'flash' ? 'flash' : 'current'
+    const selectedModel = requestedModel === 'flash' ? 'eleven_flash_v2_5' : modelId
+    const stream = body?.stream !== false
+    const providerStartedAt = performance.now()
+    const provider = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}${stream ? '/stream' : ''}?output_format=mp3_44100_128${stream ? '&optimize_streaming_latency=2' : ''}`, {
       method: 'POST',
       headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
-      body: JSON.stringify({ text, model_id: modelId }),
+      body: JSON.stringify({ text, model_id: selectedModel }),
     })
     if (!provider.ok || !provider.body) {
       const contentType = provider.headers.get('Content-Type')?.toLowerCase() ?? ''
@@ -50,14 +54,21 @@ Deno.serve(async (request) => {
       const providerMessage = providerField(detail.message) ?? providerField(bodyRecord.message) ?? (typeof providerBody === 'string' && providerBody.trim() ? providerBody.slice(0, 500) : 'ElevenLabs rechazó la solicitud.')
       console.error({
         provider: 'elevenlabs', providerStatus: provider.status, providerStatusText: provider.statusText,
-        providerBody: safeProviderBody(providerBody), voiceIdPresent: Boolean(voiceId), modelId, textLength: text.length,
+        providerBody: safeProviderBody(providerBody), voiceIdPresent: Boolean(voiceId), modelId: selectedModel, textLength: text.length,
       })
       return json({ error: 'speech_provider_failed', providerStatus: provider.status, providerCode, providerMessage }, provider.status)
     }
 
     return new Response(provider.body, {
       status: 200,
-      headers: { ...corsHeaders, 'Content-Type': provider.headers.get('Content-Type') ?? 'audio/mpeg', 'Cache-Control': 'no-store' },
+      headers: {
+        ...corsHeaders,
+        'Content-Type': provider.headers.get('Content-Type') ?? 'audio/mpeg',
+        'Cache-Control': 'no-store',
+        'X-FARO-Model-Id': selectedModel,
+        'X-FARO-Provider-Headers-Ms': String(Math.round((performance.now() - providerStartedAt) * 100) / 100),
+        'Access-Control-Expose-Headers': 'X-FARO-Model-Id,X-FARO-Provider-Headers-Ms',
+      },
     })
   } catch (error) {
     console.error('faro-speech failed', { name: error instanceof Error ? error.name : 'UnknownError' })

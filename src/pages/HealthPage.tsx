@@ -1,11 +1,11 @@
 import { format, subDays } from 'date-fns'
+import { es } from 'date-fns/locale'
 import { Activity, Beef, Pencil, Plus, Scale, ShieldAlert, Target, Trash2 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Button, ConfirmDialog, EmptyState, Modal } from '../components/common'
 import { PageHeader } from '../components/layout'
 import { useHealthRecords } from '../hooks/useHealthRecords'
-import { usePageCapture } from '../hooks/usePageCapture'
 import { weightGoalProgress, weightProjectionSeries } from '../lib/healthAnalytics'
 import { useFaroStore } from '../store'
 import type { HealthLog } from '../types'
@@ -23,7 +23,6 @@ const progressLabels = {
 } as const
 
 export function HealthPage() {
-  const { capture } = usePageCapture()
   const { logs, loading, error, refresh, save: saveHealth, remove: removeHealth } = useHealthRecords()
   const treatments = useFaroStore((state) => state.treatmentLogs)
   const createTreatment = useFaroStore((state) => state.createTreatmentLog)
@@ -44,7 +43,7 @@ export function HealthPage() {
   const foodLoggedDays = recent.filter((item) => item.foodQuality != null).length
 
   return <div className="page tracker-page health-focus">
-    <PageHeader eyebrow="Salud" title="Peso, hábitos y dirección." description="Tres señales simples para observar tu avance sin ruido." onCapture={capture} />
+    <PageHeader eyebrow={format(new Date(), "EEEE, d 'de' MMMM", { locale: es })} title="Peso, hábitos y dirección." description="Tres señales simples para observar tu avance sin ruido." />
     {(error || operationError) && <div className="health-sync-notice" role="alert"><span><strong>La sincronización necesita atención.</strong>{operationError || error} Tu respaldo local permanece en este dispositivo.</span><Button variant="secondary" onClick={() => { setOperationError(''); void refresh() }}>Reintentar</Button></div>}
     {loading && <div className="health-sync-state" role="status">Sincronizando tus registros de salud…</div>}
     <nav className="health-tabs" aria-label="Secciones de salud">

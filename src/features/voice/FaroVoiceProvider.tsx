@@ -16,7 +16,7 @@ const FaroVoiceContext = createContext<FaroVoiceContextValue | null>(null)
 export function FaroVoiceProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false)
   const [surface, setSurface] = useState<FaroVoiceSurface>('dashboard')
-  const [visualState, setVisualState] = useState<FaroVoiceVisualState>('idle')
+  const [visualState, setVisualState] = useState<FaroVoiceVisualState>('ready')
   const openFaroVoice = useCallback(({ surface: origin }: { surface: FaroVoiceSurface }) => {
     if (!FARO_VOICE_PRODUCTION_ENABLED) return
     setSurface(origin)
@@ -24,7 +24,7 @@ export function FaroVoiceProvider({ children }: { children: ReactNode }) {
   }, [])
   const closeFaroVoice = useCallback(() => {
     setOpen(false)
-    setVisualState('idle')
+    setVisualState('ready')
   }, [])
   const value = useMemo(() => ({ enabled: FARO_VOICE_PRODUCTION_ENABLED, open, surface, visualState, openFaroVoice, closeFaroVoice }), [closeFaroVoice, open, openFaroVoice, surface, visualState])
 

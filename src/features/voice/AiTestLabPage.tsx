@@ -1,13 +1,14 @@
-import { FlaskConical, Landmark, LogOut, MessageSquareText, Settings2, ShieldCheck } from 'lucide-react'
-import { useState } from 'react'
+import { CalendarDays, FlaskConical, Landmark, LogOut, MessageSquareText, Settings2, ShieldCheck } from 'lucide-react'
+import { lazy, Suspense, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { Button } from '../../components/common'
 import { useAuth } from '../../hooks/auth'
-import { FinancePage } from '../../pages/FinancePage'
 import { AiLabConsole } from './AiLabConsole'
 import { AiTestLab } from './AiTestLab'
 
-type LabView = 'finance' | 'console' | 'setup'
+type LabView = 'finance' | 'calendar' | 'console' | 'setup'
+const FinancePage=lazy(()=>import('../../pages/FinancePage').then(module=>({default:module.FinancePage})))
+const CalendarPage=lazy(()=>import('../../pages/CalendarPage').then(module=>({default:module.CalendarPage})))
 
 export function AiTestLabPage() {
   const { user, signOut } = useAuth()
@@ -30,12 +31,14 @@ export function AiTestLabPage() {
 
       <nav className="lab-page__nav" aria-label="Secciones del laboratorio">
         <button type="button" className={view === 'finance' ? 'is-active' : ''} onClick={() => setView('finance')}><Landmark size={16} /><span>Finanzas de prueba</span></button>
+        <button type="button" className={view === 'calendar' ? 'is-active' : ''} onClick={() => setView('calendar')}><CalendarDays size={16}/><span>Calendar de prueba</span></button>
         <button type="button" className={view === 'console' ? 'is-active' : ''} onClick={() => setView('console')}><MessageSquareText size={16} /><span>Consola FARO</span></button>
         <button type="button" className={view === 'setup' ? 'is-active' : ''} onClick={() => setView('setup')}><Settings2 size={16} /><span>Configuración</span></button>
       </nav>
 
-      {view === 'finance' && <section className="lab-workspace"><div className="lab-workspace__intro"><div><span>MÓDULO REAL · DATOS DE PRUEBA</span><h2>Tus reglas financieras, sin tu información personal</h2><p>Crea, edita, elimina y valida movimientos exactamente como en FARO. Usa NU Pruebas y BBVA Pruebas para identificar este entorno.</p></div><Button icon={<MessageSquareText size={15} />} onClick={() => setView('console')}>Probar con un prompt</Button></div><div className="lab-finance"><FinancePage /></div></section>}
-      {view === 'console' && <AiLabConsole onOpenFinance={() => setView('finance')} />}
+      {view === 'finance' && <section className="lab-workspace"><div className="lab-workspace__intro"><div><span>MÓDULO REAL · DATOS DE PRUEBA</span><h2>Tus reglas financieras, sin tu información personal</h2><p>Crea, edita, elimina y valida movimientos exactamente como en FARO. Usa NU Pruebas y BBVA Pruebas para identificar este entorno.</p></div><Button icon={<MessageSquareText size={15} />} onClick={() => setView('console')}>Probar con un prompt</Button></div><div className="lab-finance"><Suspense fallback={<p>Cargando Finanzas…</p>}><FinancePage /></Suspense></div></section>}
+      {view === 'calendar' && <section className="lab-workspace"><div className="lab-workspace__intro"><div><span>MÓDULO REAL · FIXTURES AISLADOS</span><h2>Agenda de prueba para FARO Voice</h2><p>Valida días vacíos, parciales, completos, conflictos, tareas y eventos sin tocar tu calendario personal.</p></div><Button icon={<MessageSquareText size={15}/>} onClick={()=>setView('console')}>Probar con voz</Button></div><div className="lab-calendar"><Suspense fallback={<p>Cargando Calendar…</p>}><CalendarPage/></Suspense></div></section>}
+      {view === 'console' && <AiLabConsole onOpenFinance={() => setView('finance')} onOpenCalendar={()=>setView('calendar')} />}
       {view === 'setup' && <AiTestLab onPrepared={() => setView('finance')} />}
       <p className="lab-page__footnote">Esta sesión vive en este navegador. Si cierras sesión, perderás el acceso a esta identidad temporal.</p>
     </main>

@@ -8,8 +8,21 @@ export const normalizeVoiceReply = (value: string) => value
   .replace(/\s+/g, ' ')
   .trim()
 
+export const shouldAcceptRealtimeWake = (value: string, speechDurationMs?: number) => {
+  const normalized = normalizeVoiceReply(value)
+  const isIsolatedWake = /^(?:hola|oye)\s+(?:faro|foro|fara|farol)$/.test(normalized)
+  return !isIsolatedWake || speechDurationMs === undefined || speechDurationMs >= 650
+}
+
 const hasExplicitNegative = (value: string) => /\b(no|cancela|cancelar|olvidalo|dejalo)\b/.test(value)
 const hasModification = (value: string) => /\b(pero|mejor|cambia|cambialo|monto|importe|fueron|desde|categoria|ayer)\b/.test(value)
+
+export const isNewCommandDuringConfirmation = (value: string) => {
+  const normalized = normalizeVoiceReply(value)
+  const operation = /\b(que|cual|dime|busca|buscame|encuentra|mueve|muevelo|recorre|crea|agrega|agenda|programa|elimina|borra|registra|muestra|muestrame)\b/.test(normalized)
+  const domain = /\b(evento|eventos|reunion|reuniones|cita|citas|calendario|agenda|tarea|tareas|movimiento|movimientos|gasto|gastos|ingreso|ingresos|finanzas)\b/.test(normalized)
+  return operation && domain
+}
 
 export const isVoiceConfirmation = (value: string) => {
   const normalized = normalizeVoiceReply(value)
@@ -24,7 +37,7 @@ export const isVoiceCancellation = (value: string) => {
 
 export const isVoiceGoodbye = (value: string) => {
   const normalized = normalizeVoiceReply(value)
-  return /^(adios faro|hasta luego faro|gracias faro adios|termina( la)? conversacion)$/.test(normalized)
+  return /^(adios(?: faro)?|hasta luego(?: faro)?|gracias faro(?: adios)?|termina(?: la)? conversacion|eso es todo faro)$/.test(normalized)
 }
 
 export type VoiceInputRoute =
@@ -34,6 +47,7 @@ export type VoiceInputRoute =
   | { kind: 'confirm'; transcript: string }
   | { kind: 'cancel'; transcript: string }
   | { kind: 'modify'; action: PendingVoiceAction; transcript: string }
+  | { kind: 'request_pending_edit'; field: 'title'; transcript: string }
   | { kind: 'pending_unknown'; transcript: string }
   | { kind: 'goodbye'; transcript: string }
 
@@ -51,6 +65,10 @@ const spokenNumber = (value: string) => {
 }
 
 export function updatePendingActionFromVoice(action: PendingVoiceAction, value: string) {
+  const title = value.match(/\b(?:cambia|cámbiale|cambiale|ponle)\s+(?:el\s+)?t[ií]tulo\s+(?:a\s+)?(.+?)\s*$/i)?.[1]?.trim()
+  if (title && ['createCalendarEvent', 'createScheduledTask', 'updateCalendarEvent'].includes(action.toolName)) {
+    return { ...action, arguments: { ...action.arguments, title }, summary: action.summary.replace(/“[^”]+”/, `“${title}”`) }
+  }
   const amount = spokenNumber(value)
   if (amount === undefined || !/(mejor|fueron|cambia|cambialo|monto|importe)/.test(normalizeVoiceReply(value))) return undefined
   const amountKey = action.toolName === 'registerRecurringPayment' || action.toolName === 'completePlannedTransaction' ? 'actualAmount' : 'amount'
@@ -64,15 +82,17 @@ export function updatePendingActionFromVoice(action: PendingVoiceAction, value: 
 export function routeVoiceInput(value: string, options: { pendingAction?: PendingVoiceAction; commandActive: boolean }): VoiceInputRoute {
   const transcript = value.trim()
   if (isVoiceGoodbye(transcript)) return { kind: 'goodbye', transcript }
+  const wake = transcript.match(/^\s*(?:hola|oye)[\s,.:;-]+(?:faro|foro|fara|farol)\b[\s,.:;-]*(.*)$/i)
+  if (wake && !wake[1].trim() && (options.commandActive || options.pendingAction)) return { kind: 'ignore', transcript }
   if (options.pendingAction) {
     if (isVoiceConfirmation(transcript)) return { kind: 'confirm', transcript }
     if (isVoiceCancellation(transcript)) return { kind: 'cancel', transcript }
+    if (/\b(?:cambia|cambiale|ponle)\s+(?:el\s+)?titulo\s+a?\s*$/.test(normalizeVoiceReply(transcript))) return { kind: 'request_pending_edit', field: 'title', transcript }
     const action = updatePendingActionFromVoice(options.pendingAction, transcript)
     if (action) return { kind: 'modify', action, transcript }
     return { kind: 'pending_unknown', transcript }
   }
   if (options.commandActive) return { kind: 'command', command: transcript, transcript }
-  const wake = transcript.match(/^\s*(?:hola\s+)?(?:faro|foro)\b[\s,.:;-]*(.*)$/i)
   if (!wake) return { kind: 'ignore', transcript }
   const command = wake[1].trim()
   return command ? { kind: 'command', command, transcript } : { kind: 'wake', transcript }

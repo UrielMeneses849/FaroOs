@@ -1,7 +1,7 @@
 import { differenceInMinutes, format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { AlertTriangle, CalendarClock, Check, Circle, Ellipsis, FolderKanban, Mic, Plus, Scale, Timer, Workflow } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, EmptyState } from '../components/common'
 import { StatusSelector } from '../components/common/StatusSelector'
@@ -13,7 +13,7 @@ import { usePageCapture } from '../hooks/usePageCapture'
 import { useTodayTasks } from '../hooks/useTodayTasks'
 import { useWorkspaces } from '../hooks/useWorkspaces'
 import { localDate, timestampToLocalParts } from '../lib/calendarDates'
-import { formatMxn } from '../services/financeService'
+import { formatMxn, spentTodayCents } from '../services/financeService'
 import { todayAgendaItems } from '../services/calendarService'
 import { useFaroStore } from '../store'
 import type { Task, TaskStatus } from '../types'
@@ -33,10 +33,10 @@ export function TodayPage() {
   const activeWorkspaces = workspaces.filter((workspace) => workspace.isActive)
   const todayHealth = healthLogs.find((item) => item.occurredAt.slice(0, 10) === today)
   const latestWeight = [...healthLogs].filter((item) => item.weightKg != null).sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))[0]?.weightKg
-  const todayExpenses = finance.transactions.filter((item) => item.transactionDate === today && item.status === 'completed' && (item.type === 'expense' || item.type === 'debt_payment'))
+  const todayExpenses = spentTodayCents(finance.transactions, today)
   const todayTasks = tasks.filter((task) => task.dueDate === today || (task.status !== 'done' && Boolean(task.dueDate && task.dueDate < today)))
   const completed = todayTasks.filter((task) => task.status === 'done').length; const pending = todayTasks.length - completed
-  const scheduled = useMemo(() => todayAgendaItems(calendarData.items, today), [calendarData.items, today])
+  const scheduled = todayAgendaItems(calendarData.items, today)
   const unscheduled = todayTasks.filter((task) => task.status !== 'done' && !task.dueAt)
   const openCreate = (workspaceId?: string) => { setCreateWorkspaceId(workspaceId); setEditing('new') }
 
@@ -47,7 +47,7 @@ export function TodayPage() {
   return <div className="page today-context">
     <PageHeader eyebrow={format(new Date(), "EEEE, d 'de' MMMM", { locale: es })} title="Hoy" description="Agenda y pendientes, separados con claridad." onCapture={capture} />
     {voiceEnabled && <button className="surface-voice-access" type="button" onClick={() => openFaroVoice({ surface: 'today' })}><Mic size={15} />Hablar con FARO</button>}
-    <section className="today-context__summary"><div><span>Pendientes</span><strong>{pending}</strong></div><div><span>Completadas</span><strong>{completed}</strong></div><button className="today-context__weight" data-missing={!todayHealth?.weightKg} onClick={() => navigate('/health')}><Scale size={16} /><span>{todayHealth?.weightKg ? 'Peso de hoy' : 'Peso pendiente'}</span><strong>{todayHealth?.weightKg ? `${todayHealth.weightKg} kg` : latestWeight ? `Último: ${latestWeight} kg` : 'Registrar peso'}</strong><small>{todayHealth?.weightKg ? 'Capturado hoy' : 'Aún no lo has capturado hoy'}</small></button><button className="today-context__spending" onClick={() => { sessionStorage.setItem('faro-finance-panel', 'transactions'); navigate('/finance') }}><span>Gastado hoy</span><strong>{formatMxn(todayExpenses.reduce((sum, item) => sum + item.amountCents, 0))}</strong></button></section>
+    <section className="today-context__summary"><div><span>Pendientes</span><strong>{pending}</strong></div><div><span>Completadas</span><strong>{completed}</strong></div><button className="today-context__weight" data-missing={!todayHealth?.weightKg} onClick={() => navigate('/health')}><Scale size={16} /><span>{todayHealth?.weightKg ? 'Peso de hoy' : 'Peso pendiente'}</span><strong>{todayHealth?.weightKg ? `${todayHealth.weightKg} kg` : latestWeight ? `Último: ${latestWeight} kg` : 'Registrar peso'}</strong><small>{todayHealth?.weightKg ? 'Capturado hoy' : 'Aún no lo has capturado hoy'}</small></button><button className="today-context__spending" onClick={() => { sessionStorage.setItem('faro-finance-panel', 'transactions'); navigate('/finance') }}><span>Gastado hoy</span><strong>{formatMxn(todayExpenses)}</strong></button></section>
     <div className="today-operational-grid">
       <section className="today-agenda-board">
         <header><div><CalendarClock size={16} /><div><span className="eyebrow">Agenda</span><h2>Agenda de hoy</h2></div></div><button onClick={() => navigate('/calendar')}>Ver calendario</button></header>

@@ -48,6 +48,10 @@ export const googleCalendarService = {
       }).finally(() => { pendingEvents = undefined })
     return pendingEvents
   },
+  async freeBusy(timeMin:string,timeMax:string,timeZone:string){
+    return invoke<{busy:Array<{start:string;end:string}>}>('google-calendar-api',{action:'freebusy',timeMin,timeMax,timeZone})
+  },
+  async getEvent(eventId:string){return (await invoke<{event:GoogleCalendarEvent}>('google-calendar-api',{action:'get',eventId})).event},
   async disconnect() {
     eventCache = undefined
     return (await invoke<{ connection: GoogleCalendarConnection }>('google-calendar-api', { action: 'disconnect' })).connection

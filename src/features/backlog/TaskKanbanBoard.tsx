@@ -4,13 +4,13 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { CalendarDays, Clock3, GripVertical, Pencil, Plus, Trash2 } from 'lucide-react'
+import { CalendarDays, CheckCircle2, Clock3, GripVertical, Pencil, Plus, Trash2 } from 'lucide-react'
 import { StatusSelector } from '../../components/common/StatusSelector'
 import type { Project, Task, TaskStatus } from '../../types'
 
 const kanbanColumns: Array<{ id: TaskStatus; label: string }> = [
   { id: 'todo', label: 'Por hacer' }, { id: 'doing', label: 'En progreso' },
-  { id: 'blocked', label: 'Bloqueado' }, { id: 'done', label: 'Completado' },
+  { id: 'blocked', label: 'En revisión' }, { id: 'done', label: 'Completado' },
 ]
 
 export function TaskKanbanBoard({ tasks, projects, showWorkspace, workspaceName, onMove, onStatus, onAdd, onEdit, onDelete, onAddToSprint }: {
@@ -69,7 +69,7 @@ function KanbanCard({ task, project, showWorkspace, workspace, onStatus, onEdit,
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id })
   const overdue = task.status !== 'done' && Boolean(task.dueDate && task.dueDate < new Date().toISOString().slice(0, 10))
   return <article ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className={`kanban-card ${isDragging ? 'kanban-card--dragging' : ''}`}>
-    <button className="kanban-card__grip" aria-label={`Mover ${task.title}`} {...attributes} {...listeners}><GripVertical size={14} /></button>
+    <button className={`kanban-card__grip ${task.status === 'done' ? 'kanban-card__grip--done' : ''}`} aria-label={`Mover ${task.title}`} {...attributes} {...listeners}>{task.status === 'done' ? <CheckCircle2 size={16} /> : <GripVertical size={14} />}</button>
     <strong>{task.title}</strong>
     <div className="kanban-card__meta">{showWorkspace && <span>{workspace}</span>}<span className={`priority priority--${task.priority}`}>{task.priority}</span>{project && <span>{project.title}</span>}{task.dueDate && <span className={overdue ? 'overdue' : ''}><CalendarDays size={10} />{task.dueDate}</span>}{task.estimatedMinutes ? <span><Clock3 size={10} />{task.estimatedMinutes} min</span> : null}</div>
     <footer><StatusSelector task={task} value={task.status} onChange={(status) => onStatus(task, status)} />{onAddToSprint && <select aria-label={`Añadir ${task.title} al sprint`} defaultValue="" onChange={(event) => { if (event.target.value) onAddToSprint(task, event.target.value as 'committed' | 'emergent' | 'optional'); event.target.value = '' }}><option value="" disabled>Sprint +</option><option value="committed">Comprometida</option><option value="emergent">Emergente</option><option value="optional">Opcional</option></select>}<button aria-label={`Editar ${task.title}`} onClick={() => onEdit(task)}><Pencil size={13} /></button><button aria-label={`Eliminar ${task.title}`} onClick={() => onDelete(task)}><Trash2 size={13} /></button></footer>

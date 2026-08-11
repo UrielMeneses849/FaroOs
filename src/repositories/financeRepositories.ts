@@ -247,12 +247,16 @@ export const financeRecurringOccurrenceRepository = {
   },
   async savePeriod(recurringTransactionId: string, period: string, expectedDate: string, amountCents: number, userId: string, description?: string) {
     await assertFinanceUser(userId)
-    const { data, error } = await supabase.from('finance_recurring_occurrences').upsert({
-      user_id: userId, recurring_transaction_id: recurringTransactionId,
-      period, expected_date: expectedDate, amount: centsToNumeric(amountCents), description: description ?? null,
-    }, { onConflict: 'user_id,recurring_transaction_id,period' }).select().single()
+    // Keeps the occurrence and template's next date in the same transaction.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.rpc as any)('save_finance_recurring_period', {
+      target_recurring_id: recurringTransactionId,
+      target_period: period,
+      target_expected_date: expectedDate,
+      target_amount: centsToNumeric(amountCents),
+      target_description: description ?? null,
+    })
     throwIfError(error)
-    return recurringOccurrenceFromRow(data!)
   },
   async markPaid(id: string, transactionId: string, userId: string) {
     await assertFinanceUser(userId)

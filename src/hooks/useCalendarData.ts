@@ -49,6 +49,7 @@ export function useCalendarData() {
   }, [loadGoogle, user])
   const refresh = useCallback(() => refreshData(false), [refreshData])
   useEffect(() => { queueMicrotask(() => void refresh()) }, [refresh])
+  useEffect(() => { const handle=()=>void refreshData(true);window.addEventListener('faro:calendar-updated',handle);return()=>window.removeEventListener('faro:calendar-updated',handle) }, [refreshData])
   const localPlanningItems = normalizeCalendarData({ tasks, projects, goals })
   const synchronizedData: CalendarData = {
     ...data,

@@ -3,12 +3,12 @@ import dayGridPlugin from '@fullcalendar/daygrid'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import listPlugin from '@fullcalendar/list'
-import type { DateSelectArg, DayHeaderContentArg, EventClickArg, EventDropArg, EventInput } from '@fullcalendar/core'
+import type { DateSelectArg, DayHeaderContentArg, EventClickArg, EventContentArg, EventDropArg, EventInput } from '@fullcalendar/core'
 import type { EventResizeDoneArg } from '@fullcalendar/interaction'
-import { differenceInMinutes, format } from 'date-fns'
+import { addMonths, differenceInMinutes, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameDay, isSameMonth, startOfMonth, startOfWeek } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { CalendarClock, FilterX, Pencil, Trash2 } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
+import { CalendarClock, ChevronLeft, ChevronRight, Pencil, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, ConfirmDialog, EmptyState, Modal } from '../components/common'
 import { StatusSelector } from '../components/common/StatusSelector'
@@ -18,7 +18,6 @@ import { CalendarEntryDialog } from '../features/calendar/CalendarEntryDialog'
 import type { CalendarItem, CalendarSourceType } from '../features/calendar/calendarTypes'
 import { useAuth } from '../hooks/auth'
 import { useCalendarData } from '../hooks/useCalendarData'
-import { usePageCapture } from '../hooks/usePageCapture'
 import { useWorkspaces } from '../hooks/useWorkspaces'
 import {
   calendarEnd,
@@ -28,15 +27,46 @@ import {
   parseTimestamp,
   timestampToWallTime,
 } from '../lib/calendarDates'
-import { relativeDayLabel, rollingWeekRange } from '../lib/rollingCalendar'
+import { rollingWeekRange } from '../lib/rollingCalendar'
 import { taskRepository } from '../repositories/taskRepository'
 import { calendarEntryRepository } from '../repositories/calendarEntryRepository'
 import { useFaroStore } from '../store'
 import type { Priority, Task, TaskStatus } from '../types'
 
+const googleCalendarLogoUrl = 'https://www.gstatic.com/calendar/images/dynamiclogo_2020q4/calendar_31_2x.png'
+const calendarWorkspaceOrder = ['BIMSA', 'BBVA', 'FARO OS', 'Nexvora', 'Portfolio', 'Portafolio', 'Personal']
+const calendarWorkspaceColors: Record<string, string> = {
+  BIMSA: '#ff9100',
+  BBVA: '#38aaf2',
+  'FARO OS': '#2868ff',
+  Nexvora: '#8b5cf6',
+  Portfolio: '#8b93a1',
+  Portafolio: '#8b93a1',
+  Personal: '#57a34b',
+}
+
+function calendarWorkspaceLabel(name: string) {
+  return name === 'Portfolio' ? 'Portafolio' : name
+}
+
+function calendarMonthLabel(date: Date) {
+  const month = format(date, 'MMMM', { locale: es })
+  return `${month.charAt(0).toLocaleUpperCase()}${month.slice(1)}`
+}
+
+function calendarTitleFormat(arg: { start: { marker: Date }; end?: { marker: Date } }) {
+  const start = arg.start.marker
+  const end = arg.end?.marker ?? start
+  const sameDay = isSameDay(start, end)
+  const sameMonth = start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth()
+  if (sameDay) return `${format(start, 'd')} de ${calendarMonthLabel(start)} de ${format(start, 'yyyy')}`
+  if (sameMonth) return `${format(start, 'd')} – ${format(end, 'd')} de ${calendarMonthLabel(end)} de ${format(end, 'yyyy')}`
+  if (start.getFullYear() === end.getFullYear()) return `${format(start, 'd')} de ${calendarMonthLabel(start)} – ${format(end, 'd')} de ${calendarMonthLabel(end)} de ${format(end, 'yyyy')}`
+  return `${format(start, 'd')} de ${calendarMonthLabel(start)} de ${format(start, 'yyyy')} – ${format(end, 'd')} de ${calendarMonthLabel(end)} de ${format(end, 'yyyy')}`
+}
+
 export function CalendarPage() {
   const { user } = useAuth()
-  const { capture } = usePageCapture()
   const navigate = useNavigate()
   const { data, loading, error, refresh, google } = useCalendarData()
   const { data: workspaces } = useWorkspaces()
@@ -44,10 +74,15 @@ export function CalendarPage() {
   const updateTask = useFaroStore((state) => state.updateTask)
   const deleteTask = useFaroStore((state) => state.deleteTask)
   const [localItems, setLocalItems] = useState<CalendarItem[] | null>(null)
+  useEffect(() => {
+    const resetLocalSnapshot = () => setLocalItems(null)
+    window.addEventListener('faro:calendar-updated', resetLocalSnapshot)
+    return () => window.removeEventListener('faro:calendar-updated', resetLocalSnapshot)
+  }, [])
   const [workspaceIds, setWorkspaceIds] = useState<string[]>([])
-  const [sourceType, setSourceType] = useState<CalendarSourceType | 'all'>('all')
-  const [status, setStatus] = useState<string>('all')
-  const [priority, setPriority] = useState<Priority | 'all'>('all')
+  const [sourceType] = useState<CalendarSourceType | 'all'>('all')
+  const [status] = useState<string>('all')
+  const [priority] = useState<Priority | 'all'>('all')
   const [creatingAt, setCreatingAt] = useState<string>()
   const [creatingDuration, setCreatingDuration] = useState<number>()
   const [creatingWorkspace, setCreatingWorkspace] = useState<string>()
@@ -56,8 +91,15 @@ export function CalendarPage() {
   const [feedback, setFeedback] = useState(() => new URLSearchParams(window.location.search).get('googleCalendar') === 'error' ? 'No se completó la conexión con Google Calendar. Puedes intentarlo nuevamente.' : '')
   const [googleCalendarId, setGoogleCalendarId] = useState('')
   const [confirmDisconnect, setConfirmDisconnect] = useState(false)
+  const [miniMonth, setMiniMonth] = useState(() => new Date())
+  const [focusedDate, setFocusedDate] = useState(() => new Date())
   const calendarRef = useRef<InstanceType<typeof FullCalendar> | null>(null)
   const activeWorkspaces = workspaces.filter((workspace) => workspace.isActive)
+  const calendarWorkspaces = [...activeWorkspaces].sort((left, right) => {
+    const leftOrder = calendarWorkspaceOrder.indexOf(left.name)
+    const rightOrder = calendarWorkspaceOrder.indexOf(right.name)
+    return (leftOrder < 0 ? Number.MAX_SAFE_INTEGER : leftOrder) - (rightOrder < 0 ? Number.MAX_SAFE_INTEGER : rightOrder)
+  })
   const initialView = window.innerWidth < 700 ? 'listWeek' : window.innerWidth < 1020 ? 'timeGridDay' : 'rollingWeek'
 
   const items = localItems ?? data.items
@@ -69,18 +111,24 @@ export function CalendarPage() {
     && (status === 'all' || item.status === status)
     && (priority === 'all' || item.priority === priority),
   ), [items, priority, sourceType, status, workspaceIds])
-  const colors = new Map(activeWorkspaces.map((workspace) => [workspace.id, workspace.color ?? '#2457ff']))
-  const events: EventInput[] = filtered.map((item) => ({
-    id: item.id, title: item.title,
-    start: item.allDay ? item.start : timestampToWallTime(item.start),
-    end: item.allDay ? item.end : timestampToWallTime(item.end),
-    allDay: item.allDay,
-    editable: item.editable && !item.readOnly, durationEditable: item.editable && !item.readOnly && (item.sourceType === 'task' || item.sourceType === 'event') && !item.allDay,
-    backgroundColor: `${item.source === 'google' ? '#4285f4' : colors.get(item.workspaceId ?? '') ?? '#2457ff'}22`,
-    borderColor: item.source === 'google' ? '#4285f4' : colors.get(item.workspaceId ?? '') ?? '#2457ff',
-    textColor: '#eeeeF2', extendedProps: { item },
-    classNames: [`calendar-event--${item.sourceType}`, `calendar-event--${item.status}`, ...(item.source === 'google' ? ['calendar-event--google'] : []), ...(item.sourceType === 'task' && item.allDay ? ['calendar-event--unscheduled'] : [])],
-  }))
+  const events: EventInput[] = filtered.filter((item) => !item.allDay).map((item) => {
+    const workspace = activeWorkspaces.find((candidate) => candidate.id === item.workspaceId)
+      ?? activeWorkspaces.find((candidate) => item.calendarName?.toLocaleLowerCase().includes(candidate.name.toLocaleLowerCase()))
+    const workspaceName = workspace
+      ? calendarWorkspaceLabel(workspace.name)
+      : item.source === 'google' ? (item.calendarName ?? 'Google') : 'Sin workspace'
+    const eventColor = workspace ? (calendarWorkspaceColors[workspace.name] ?? workspace.color ?? '#2868ff') : '#4285f4'
+    return {
+      id: item.id, title: item.title,
+      start: item.allDay ? item.start : timestampToWallTime(item.start),
+      end: item.allDay ? item.end : timestampToWallTime(item.end),
+      allDay: item.allDay,
+      editable: item.editable && !item.readOnly, durationEditable: item.editable && !item.readOnly && (item.sourceType === 'task' || item.sourceType === 'event') && !item.allDay,
+      backgroundColor: `${eventColor}38`, borderColor: eventColor,
+      textColor: '#f4f6f9', extendedProps: { item, workspaceName },
+      classNames: [`calendar-event--${item.sourceType}`, `calendar-event--${item.status}`, ...(item.source === 'google' ? ['calendar-event--google'] : []), ...(item.sourceType === 'task' && item.allDay ? ['calendar-event--unscheduled'] : [])],
+    }
+  })
   const restoreItem = (previous: CalendarItem, previousTask: Task) => {
     setLocalItems((current) => (current ?? data.items).map((item) => item.id === previous.id ? previous : item))
     useFaroStore.setState((state) => ({ tasks: state.tasks.map((task) => task.id === previousTask.id ? previousTask : task) }))
@@ -159,14 +207,42 @@ export function CalendarPage() {
 
   if (loading && !items.length) return <div className="page"><div className="calendar-skeleton" role="status">Sincronizando calendario…</div></div>
   if (error && !items.length) return <div className="page"><EmptyState title="No pudimos cargar el calendario" description={error} action={<Button onClick={refresh}>Reintentar</Button>} /></div>
-  return <div className="page calendar-page"><PageHeader eyebrow={data.timezone} title="Calendario" description="Tiempo, contexto y ejecución en una sola vista." onCapture={capture} />
-    <section className="calendar-google" data-status={google.connection.status}><div><strong>Google Calendar</strong>{!google.connection.connected&&<span>Conecta un calendario externo en modo lectura.</span>}{google.connection.connected&&!google.connection.calendarId&&<span>Selecciona el calendario laboral que quieres consultar.</span>}{google.connection.calendarId&&<span>{google.connection.calendarName??google.connection.calendarId}{google.connection.lastSyncedAt?` · Actualizado ${format(new Date(google.connection.lastSyncedAt),'dd/MM HH:mm')}`:''}</span>}{google.error&&<small role="alert">{google.error}</small>}</div>{!google.connection.connected||google.connection.status==='reconnect_required'?<Button size="sm" disabled={google.loading} onClick={()=>void google.connect()}>{google.loading?'Conectando…':'Conectar Google Calendar'}</Button>:!google.connection.calendarId?<div className="calendar-google__select"><select aria-label="Calendario de Google" value={googleCalendarId} onChange={event=>setGoogleCalendarId(event.target.value)}><option value="">Selecciona un calendario</option>{google.calendars.map(calendar=><option key={calendar.id} value={calendar.id}>{calendar.name}{calendar.primary?' · Personal':''}</option>)}</select>{googleCalendarId&&<span>Calendario encontrado: {google.calendars.find(calendar=>calendar.id===googleCalendarId)?.name}</span>}<Button size="sm" disabled={!googleCalendarId||google.loading} onClick={()=>void google.select(googleCalendarId)}>Usar este calendario</Button></div>:<div className="calendar-google__actions"><Button size="sm" variant="secondary" disabled={google.loading} onClick={()=>void google.sync()}>{google.loading?'Sincronizando…':'Sincronizar'}</Button><Button size="sm" variant="ghost" disabled={google.loading} onClick={()=>setConfirmDisconnect(true)}>Desconectar</Button></div>}</section>
-    <div className="calendar-filters"><div className="calendar-workspaces"><button className={!workspaceIds.length ? 'active' : ''} onClick={() => setWorkspaceIds([])}>Todos</button>{activeWorkspaces.map((workspace) => <button key={workspace.id} className={workspaceIds.includes(workspace.id) ? 'active' : ''} onClick={() => setWorkspaceIds((current) => current.includes(workspace.id) ? current.filter((id) => id !== workspace.id) : [...current, workspace.id])}><i style={{ background: workspace.color }} />{workspace.name}</button>)}</div><select aria-label="Tipo" value={sourceType} onChange={(event) => setSourceType(event.target.value as CalendarSourceType | 'all')}><option value="all">Todos los tipos</option><option value="task">Tareas</option><option value="project">Proyectos</option><option value="goal">Objetivos</option><option value="event">Eventos</option></select><select aria-label="Estado" value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">Cualquier estado</option><option value="todo">Por hacer</option><option value="doing">En progreso</option><option value="paused">Pausado</option><option value="blocked">Bloqueado</option><option value="done">Completado</option><option value="active">Activo</option></select><select aria-label="Prioridad" value={priority} onChange={(event) => setPriority(event.target.value as Priority | 'all')}><option value="all">Cualquier prioridad</option><option value="critical">Crítica</option><option value="high">Alta</option><option value="medium">Media</option><option value="low">Baja</option></select><button aria-label="Limpiar filtros" onClick={() => { setWorkspaceIds([]); setSourceType('all'); setStatus('all'); setPriority('all') }}><FilterX size={15} /></button></div>
+  return <div className="page calendar-page"><PageHeader eyebrow={format(new Date(), "EEEE, d 'de' MMMM", { locale: es })} title="Calendario" description="Tiempo, contexto y ejecución en una sola vista." />
     {feedback && <div className="calendar-feedback" role="status">{feedback}<button onClick={() => setFeedback('')}>×</button></div>}
-    <div className="calendar-layout"><section className="calendar-surface"><FullCalendar ref={calendarRef} plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, listPlugin]} views={{ rollingWeek: { type: 'timeGrid', duration: { days: 7 }, dateIncrement: { days: 7 }, dateAlignment: 'day', visibleRange: rollingWeekRange } }} initialView={initialView} initialDate={new Date()} locale="es" timeZone="local" firstDay={1} height="100%" stickyHeaderDates expandRows={false} nowIndicator selectable selectMirror editable events={events} select={selectSlot} eventClick={clickEvent} eventDrop={drop} eventResize={resize} customButtons={{ faroToday: { text: 'Hoy', click: () => calendarRef.current?.getApi().gotoDate(new Date()) } }} headerToolbar={{ left: 'prev,next faroToday', center: 'title', right: 'rollingWeek,timeGridWeek,dayGridMonth,timeGridDay,listWeek' }} buttonText={{ rollingWeek: '7 días', month: 'Mes', week: 'Semana', day: 'Día', list: 'Agenda' }} titleFormat={{ day: 'numeric', month: 'long', year: 'numeric' }} dayHeaderContent={calendarDayHeader} dayMaxEvents={2} dayMaxEventRows={2} moreLinkClick="popover" slotMinTime="00:00:00" slotMaxTime="24:00:00" slotDuration="00:30:00" snapDuration="00:30:00" slotLabelInterval="01:00:00" scrollTime={`${String(Math.max(0, new Date().getHours() - 2)).padStart(2, '0')}:00:00`} scrollTimeReset={false} allDayText="Todo el día" eventTimeFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }} /></section></div>
+    <div className="calendar-layout">
+      <aside className="calendar-sidebar">
+        <section className="calendar-google" data-status={google.connection.status}>
+          <div className="calendar-google__identity">
+            <img src={googleCalendarLogoUrl} alt="Google Calendar" />
+            <div>
+              <strong>Google Calendar</strong>
+              {!google.connection.connected && <span>Conecta un calendario externo en modo lectura.</span>}
+              {google.connection.connected && !google.connection.calendarId && <span>Selecciona el calendario laboral que quieres consultar.</span>}
+              {google.connection.calendarId && <span>{google.connection.accountEmail ?? google.connection.calendarName ?? google.connection.calendarId}</span>}
+              {google.connection.lastSyncedAt && <small>Actualizado {format(new Date(google.connection.lastSyncedAt), 'dd/MM HH:mm')}</small>}
+              {google.error && <small className="calendar-google__error" role="alert">{google.error}</small>}
+            </div>
+          </div>
+          {!google.connection.connected || google.connection.status === 'reconnect_required'
+            ? <Button size="sm" disabled={google.loading} onClick={() => void google.connect()}>{google.loading ? 'Conectando…' : 'Conectar Google Calendar'}</Button>
+            : !google.connection.calendarId
+              ? <div className="calendar-google__select"><select aria-label="Calendario de Google" value={googleCalendarId} onChange={(event) => setGoogleCalendarId(event.target.value)}><option value="">Selecciona un calendario</option>{google.calendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.name}{calendar.primary ? ' · Personal' : ''}</option>)}</select>{googleCalendarId && <span>Calendario encontrado: {google.calendars.find((calendar) => calendar.id === googleCalendarId)?.name}</span>}<Button size="sm" disabled={!googleCalendarId || google.loading} onClick={() => void google.select(googleCalendarId)}>Usar este calendario</Button></div>
+              : <div className="calendar-google__status-row"><span className="calendar-google__status"><i />Sincronizado</span><div className="calendar-google__actions"><Button size="sm" variant="secondary" disabled={google.loading} onClick={() => void google.sync()}>{google.loading ? 'Sincronizando…' : 'Sincronizar'}</Button><Button size="sm" variant="ghost" disabled={google.loading} onClick={() => setConfirmDisconnect(true)}>Desconectar</Button></div></div>}
+        </section>
+        <MiniMonthCalendar month={miniMonth} selected={focusedDate} onMonthChange={setMiniMonth} onSelect={(date) => { setFocusedDate(date); setMiniMonth(date); calendarRef.current?.getApi().gotoDate(date) }} />
+        <section className="calendar-workspace-filter">
+          <span>Filtrar por workspace</span>
+          <button className={!workspaceIds.length ? 'active' : ''} onClick={() => setWorkspaceIds([])}><i />Todos <b>{items.length}</b></button>
+          {calendarWorkspaces.map((workspace) => <button key={workspace.id} className={workspaceIds.includes(workspace.id) ? 'active' : ''} onClick={() => setWorkspaceIds((current) => current.includes(workspace.id) ? current.filter((id) => id !== workspace.id) : [...current, workspace.id])}><i style={{ background: calendarWorkspaceColors[workspace.name] ?? workspace.color }} />{calendarWorkspaceLabel(workspace.name)}<b>{items.filter((item) => item.workspaceId === workspace.id).length}</b></button>)}
+        </section>
+      </aside>
+      <section className="calendar-surface">
+        <FullCalendar ref={calendarRef} plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, listPlugin]} views={{ rollingWeek: { type: 'timeGrid', duration: { days: 7 }, dateIncrement: { days: 7 }, dateAlignment: 'day', visibleRange: rollingWeekRange } }} initialView={initialView} initialDate={new Date()} locale="es" timeZone="local" firstDay={1} height="100%" stickyHeaderDates expandRows={false} nowIndicator selectable selectMirror editable events={events} select={selectSlot} eventClick={clickEvent} eventDrop={drop} eventResize={resize} eventContent={calendarEventContent} datesSet={() => { const nextDate = calendarRef.current?.getApi().getDate() ?? new Date(); setFocusedDate(nextDate); setMiniMonth(nextDate) }} customButtons={{ faroToday: { text: 'Hoy', click: () => calendarRef.current?.getApi().gotoDate(new Date()) } }} headerToolbar={{ left: 'prev,next faroToday', center: 'title', right: 'rollingWeek,timeGridWeek,timeGridDay,listWeek' }} buttonText={{ rollingWeek: '7 días', month: 'Mes', week: 'Semana', day: 'Día', list: 'Agenda' }} titleFormat={calendarTitleFormat} dayHeaderContent={calendarDayHeader} dayMaxEvents={2} dayMaxEventRows={2} moreLinkClick="popover" slotMinTime="07:00:00" slotMaxTime="24:00:00" slotDuration="00:30:00" snapDuration="00:30:00" slotLabelInterval="01:00:00" scrollTime="07:00:00" scrollTimeReset allDaySlot={false} eventTimeFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }} />
+      </section>
+    </div>
     {creatingAt && <CalendarEntryDialog open startsAt={creatingAt} estimatedMinutes={creatingDuration} workspaceId={creatingWorkspace} onClose={(saved) => { setCreatingAt(undefined); setCreatingDuration(undefined); setCreatingWorkspace(undefined); if (saved) { setLocalItems(null); queueMicrotask(() => void refresh()) } }} />}
     {editing && <TaskFormDialog open initial={editing} onClose={() => { setEditing(null); setSelected(null); setLocalItems(null); queueMicrotask(() => void refresh()) }} />}
-    {selectedTask && <Modal open title="Detalle de tarea" onClose={() => setSelected(null)}><div className="calendar-detail"><span className="eyebrow">{activeWorkspaces.find((workspace) => workspace.id === selectedTask.workspaceId)?.name ?? 'Sin workspace'}</span><h2>{selectedTask.title}</h2>{selectedTask.description && <p>{selectedTask.description}</p>}<div><StatusSelector task={selectedTask} value={selectedTask.status} onChange={(nextStatus: TaskStatus) => { updateTask(selectedTask.id, { status: nextStatus }); setItems((current) => current.map((item) => item.sourceId === selectedTask.id ? { ...item, status: nextStatus } : item)) }} /><span className={`priority priority--${selectedTask.priority}`}>{selectedTask.priority}</span><span><CalendarClock size={13} />{selectedTaskTimestamp ? format(selectedTaskTimestamp, 'dd/MM/yyyy HH:mm') : selectedTaskDate ?? 'Sin fecha válida'}</span><span>{selectedTask.estimatedMinutes ?? 0} min</span></div>{!selectedTaskTimestamp && <p className="calendar-unscheduled-warning">Esta tarea tiene fecha, pero todavía no tiene una hora asignada.</p>}{selectedTask.notes && <small>{selectedTask.notes}</small>}<footer>{!selectedTaskTimestamp && <Button onClick={() => setEditing(selectedTask)}>Programar</Button>}<Button variant="secondary" icon={<Pencil size={14} />} onClick={() => setEditing(selectedTask)}>Editar</Button>{selectedTask.projectId && <Button variant="secondary" onClick={() => navigate(`/projects/${selectedTask.projectId}`)}>Abrir proyecto</Button>}<Button variant="ghost" icon={<Trash2 size={14} />} onClick={() => { deleteTask(selectedTask.id); setItems((current) => current.filter((item) => item.sourceId !== selectedTask.id)); setSelected(null) }}>Eliminar</Button></footer></div></Modal>}
+    {selectedTask && <Modal open title="Detalle de tarea" onClose={() => setSelected(null)}><div className="calendar-detail"><span className="eyebrow">{activeWorkspaces.find((workspace) => workspace.id === selectedTask.workspaceId)?.name ?? 'Sin workspace'}</span><h2>{selectedTask.title}</h2>{selectedTask.description && <p>{selectedTask.description}</p>}<div><StatusSelector task={selectedTask} value={selectedTask.status} onChange={(nextStatus: TaskStatus) => { updateTask(selectedTask.id, { status: nextStatus }); setItems((current) => current.map((item) => item.sourceId === selectedTask.id ? { ...item, status: nextStatus } : item)) }} /><span className={`priority priority--${selectedTask.priority}`}>{selectedTask.priority}</span><span><CalendarClock size={13} />{selectedTaskTimestamp ? format(selectedTaskTimestamp, 'dd/MM/yyyy HH:mm') : selectedTaskDate ?? 'Sin fecha válida'}</span><span>{selectedTask.estimatedMinutes ?? 0} min</span></div>{!selectedTaskTimestamp && <p className="calendar-unscheduled-warning">Esta tarea tiene fecha, pero todavía no tiene una hora asignada.</p>}{selectedTask.notes && <small>{selectedTask.notes}</small>}<footer>{!selectedTaskTimestamp && <Button onClick={() => { setSelected(null); setEditing(selectedTask) }}>Programar</Button>}<Button variant="secondary" icon={<Pencil size={14} />} onClick={() => { setSelected(null); setEditing(selectedTask) }}>Editar</Button>{selectedTask.projectId && <Button variant="secondary" onClick={() => navigate(`/projects/${selectedTask.projectId}`)}>Abrir proyecto</Button>}<Button variant="ghost" icon={<Trash2 size={14} />} onClick={() => { deleteTask(selectedTask.id); setItems((current) => current.filter((item) => item.sourceId !== selectedTask.id)); setSelected(null) }}>Eliminar</Button></footer></div></Modal>}
     {selected?.sourceType === 'event'&&selected.source==='google'&&<Modal open title="Evento de Google" onClose={()=>setSelected(null)}><div className="calendar-detail"><span className="eyebrow">Google · {selected.calendarName??'Calendario externo'}</span><h2>{selected.title}</h2><div><span><CalendarClock size={13}/>{selected.allDay?selected.start:format(parseTimestamp(selected.start)??new Date(selected.start),'dd/MM/yyyy HH:mm')}</span><span>Solo lectura</span></div></div></Modal>}
     {selected?.sourceType === 'event'&&selected.source!=='google'&&<Modal open title={selected.entryKind === 'focus' ? 'Bloque de enfoque' : 'Evento'} onClose={() => setSelected(null)}><div className="calendar-detail"><span className="eyebrow">{activeWorkspaces.find((workspace) => workspace.id === selected.workspaceId)?.name ?? 'Sin workspace'}</span><h2>{selected.title}</h2>{selected.description && <p>{selected.description}</p>}<div><span><CalendarClock size={13} />{format(parseTimestamp(selected.start) ?? new Date(selected.start), 'dd/MM/yyyy HH:mm')}</span>{selected.linkedTaskId && <span>Tarea vinculada: {tasks.find((task) => task.id === selected.linkedTaskId)?.title ?? 'No disponible'}</span>}</div><footer>{selected.linkedTaskId && <Button variant="secondary" onClick={() => navigate('/today')}>Abrir en Hoy</Button>}<Button variant="ghost" icon={<Trash2 size={14} />} onClick={() => { if (!user) return; void calendarEntryRepository.remove(selected.sourceId, user.id).then(() => { setItems((current) => current.filter((item) => item.id !== selected.id)); setSelected(null); setFeedback('Entrada eliminada') }).catch((reason) => setFeedback(reason instanceof Error ? reason.message : 'No se pudo eliminar.')) }}>Eliminar</Button></footer></div></Modal>}
     <ConfirmDialog open={confirmDisconnect} title="Desconectar Google Calendar" description="Los eventos externos dejarán de aparecer. Tus tareas y eventos de FARO no cambiarán." confirmLabel="Desconectar" onClose={()=>setConfirmDisconnect(false)} onConfirm={async()=>{await google.disconnect();setConfirmDisconnect(false);setFeedback('Google Calendar desconectado.')}}/>
@@ -174,6 +250,26 @@ export function CalendarPage() {
 }
 
 function calendarDayHeader(arg: DayHeaderContentArg) {
-  const relative = relativeDayLabel(arg.date)
-  return <div className="calendar-day-header">{relative && <small>{relative}</small>}<span>{format(arg.date, 'EEE', { locale: es })}</span><strong>{format(arg.date, 'd')}</strong></div>
+  return <div className="calendar-day-header"><span>{format(arg.date, 'EEE', { locale: es })}</span><strong>{format(arg.date, 'd')}</strong></div>
+}
+
+function calendarEventContent(arg: EventContentArg) {
+  return <div className="calendar-event-content"><time>{arg.timeText}</time><strong>{arg.event.title}</strong><span>{String(arg.event.extendedProps.workspaceName ?? '')}</span></div>
+}
+
+function MiniMonthCalendar({ month, selected, onMonthChange, onSelect }: {
+  month: Date
+  selected: Date
+  onMonthChange: (month: Date) => void
+  onSelect: (date: Date) => void
+}) {
+  const days = eachDayOfInterval({
+    start: startOfWeek(startOfMonth(month), { weekStartsOn: 0 }),
+    end: endOfWeek(endOfMonth(month), { weekStartsOn: 0 }),
+  })
+  return <section className="calendar-mini-month" aria-label="Calendario mensual">
+    <header><strong>{format(month, 'MMMM yyyy', { locale: es })}</strong><div><button aria-label="Mes anterior" onClick={() => onMonthChange(addMonths(month, -1))}><ChevronLeft size={14} /></button><button aria-label="Mes siguiente" onClick={() => onMonthChange(addMonths(month, 1))}><ChevronRight size={14} /></button></div></header>
+    <div className="calendar-mini-month__weekdays">{['D', 'L', 'M', 'M', 'J', 'V', 'S'].map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div>
+    <div className="calendar-mini-month__days">{days.map((day) => <button key={day.toISOString()} className={`${!isSameMonth(day, month) ? 'is-outside' : ''} ${isSameDay(day, selected) ? 'is-selected' : ''}`} aria-label={format(day, "d 'de' MMMM 'de' yyyy", { locale: es })} aria-pressed={isSameDay(day, selected)} onClick={() => onSelect(day)}>{format(day, 'd')}</button>)}</div>
+  </section>
 }

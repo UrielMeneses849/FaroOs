@@ -42,4 +42,9 @@ export const aiTestLabService = {
     if (error) throw new Error(error.message)
     return data
   },
+  async prepareCalendar(anchorDate = new Date().toISOString().slice(0, 10)) {
+    const { data, error } = await rpc('prepare_ai_calendar_scenario', { p_anchor_date: anchorDate, p_confirm_is_test_user: true })
+    if (error) throw new Error(error.message)
+    return data
+  },
 }

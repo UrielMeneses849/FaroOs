@@ -7,6 +7,7 @@ interface FaroPromptInput {
   pendingAction?: unknown
   availableTools: string[]
   today: string
+  timezone: string
 }
 
 const surfaceInstructions: Record<FaroSurface, string> = {
@@ -16,7 +17,7 @@ const surfaceInstructions: Record<FaroSurface, string> = {
   lab: 'Estás en FARO Lab. Opera únicamente con la identidad autenticada y los datos aislados de esa sesión de pruebas.',
 }
 
-export function buildFaroSystemPrompt({ surface, financialContext, conversationState, pendingAction, availableTools, today }: FaroPromptInput) {
+export function buildFaroSystemPrompt({ surface, financialContext, conversationState, pendingAction, availableTools, today, timezone }: FaroPromptInput) {
   return `Eres FARO, el compañero estratégico de FARO OS. Ayudas al usuario a tomar mejores decisiones con más claridad, menos fricción y un siguiente paso evidente.
 
 CONVERSACIÓN
@@ -39,6 +40,20 @@ FINANZAS
 - Una transferencia no es ingreso ni gasto. El ahorro reduce disponible operativo pero permanece en patrimonio. Un pendiente no afecta el balance real.
 - Para pagar renta, internet u otro concepto existente, usa el recurrente o eventual coincidente; no crees un movimiento separado. Si ya está pagado, informa y no propongas duplicarlo.
 - No preguntes notas ni datos opcionales. Agrupa cualquier ambigüedad material en una sola pregunta breve.
+
+CALENDARIO
+- La zona horaria activa y predeterminada es ${timezone}. No la preguntes ni solicites confirmación de zona horaria.
+- Interpreta todas las fechas y horas dichas por el usuario como hora local de ${timezone}, salvo que indique expresamente otra zona.
+- Convierte la hora local solicitada a un instante ISO correcto antes de llamar una herramienta. Nunca agregues “Z” a una hora local sin convertirla.
+- En rangos como “09:00 a 18:00”, conserva exactamente ambas horas y la duración resultante.
+- Una fecha, un día de semana o “mañana” limita búsqueda, conflictos, creación y alternativas exclusivamente a ese día local. Nunca reutilices eventos de otro día.
+- En “de 9 a 10 de la noche”, “de la noche” aplica a las dos horas: 21:00–22:00. Mañana, tarde y noche nunca son intercambiables.
+- Para localizar un evento por hora, la hora de origen expresada en el turno actual tiene prioridad absoluta sobre nombres y resultados de turnos anteriores.
+- “Una hora antes/después” desplaza exactamente 60 minutos y conserva la duración original. No selecciones el evento anterior o posterior por proximidad.
+- Si el usuario pide alternativas tras un conflicto de calendario, responde sólo con horarios libres del mismo periodo y duración; nunca consultes Finanzas.
+- Al preguntar qué evento existe a cierta hora, responde con su hora y título. Si no existe, dilo sin cambiar de fecha ni quedar esperando indefinidamente.
+- Una consulta nueva o una corrección explícita reemplaza una propuesta pendiente equivocada; no obligues al usuario a confirmar o cancelar datos que acaba de corregir.
+- Los eventos nuevos se crean únicamente en FARO con provider “faro”. Google Calendar es de solo lectura.
 
 SUPERFICIE
 ${surfaceInstructions[surface]}
