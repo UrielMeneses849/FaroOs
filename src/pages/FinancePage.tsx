@@ -2,10 +2,12 @@ import { addDays, addMonths, endOfMonth, format, isSameDay, parseISO, subMonths 
 import { es } from 'date-fns/locale'
 import {
   ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight,
-  Ban, Check, Copy, Landmark, MoreHorizontal, Pencil, PiggyBank, Plus, RefreshCw, Repeat2,
-  Mic, RotateCcw, Target, Trash2, WalletCards,
+  Ban, Calculator, CalendarDays, ChartNoAxesCombined, Check, Clock3, Copy, CreditCard, Landmark, MoreHorizontal, Pencil, PiggyBank, Plus, RefreshCw, Repeat2,
+  RotateCcw, Target, Trash2, WalletCards,
 } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { Bar, BarChart, CartesianGrid, Cell, LabelList, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import orbUrl from '../assets/faro-orb-v1.png'
 import { Button, ConfirmDialog, EmptyState, Modal, ProgressBar } from '../components/common'
 import { ExpenseCategoryDonut } from '../features/finance/ExpenseCategoryDonut'
 import {
@@ -16,13 +18,13 @@ import type {
   FinanceTransactionStatus, FinanceTransactionType,
 } from '../features/finance/financeTypes'
 import { useFinance } from '../hooks/useFinance'
-import { useOptionalFaroVoice } from '../features/voice/FaroVoiceProvider'
+import { FaroVoicePresence } from '../features/voice/FaroVoicePresence'
 import {
   financeAccountRepository, financeBudgetRepository, financeGoalRepository,
   financePlanningRepository, financeRecurringOccurrenceRepository, financeRecurringRepository, financeTransactionRepository,
 } from '../repositories/financeRepositories'
 import {
-  accountBalance, annualFinanceTotals, budgetPerformance, calculateFinanceMetrics, financeAvailableEvolution, financeFrequencyLabel, financePeriodFlow, financeSummary, personalBudgetForDate,
+  accountBalance, annualFinanceTotals, budgetPerformance, calculateFinanceMetrics, financePeriodFlow, financeSummary, personalBudgetForDate,
   financeGoalProjections, formatFinanceDate, formatMxn, goalAvailableCents, goalProgress, goalSpentCents, goalTargetCents, monthKey, recurringAppliesToMonth, recurringExpectedDate, savingsFundMetrics,
 } from '../services/financeService'
 
@@ -39,7 +41,6 @@ const statusLabel: Record<FinanceTransactionStatus, string> = {
 
 export function FinancePage() {
   const { data, loading, error, refresh, user } = useFinance()
-  const faroVoice = useOptionalFaroVoice()
   const [month, setMonth] = useState(() => new Date())
   const [panel, setPanel] = useState<Panel>(() => {
     const stored = sessionStorage.getItem('faro-finance-panel')
@@ -81,7 +82,16 @@ export function FinancePage() {
 
   const metrics = useMemo(() => calculateFinanceMetrics(data, month), [data, month])
   const periodFlow = useMemo(() => financePeriodFlow(data, month), [data, month])
-  const availableEvolution = useMemo(() => financeAvailableEvolution(data, month), [data, month])
+  const approvedPeriodFlow = useMemo(() => ({
+    incomeCents: periodFlow.incomeCents,
+    expenseCents: periodFlow.expenseCents,
+    netCents: periodFlow.incomeCents - periodFlow.expenseCents,
+  }), [periodFlow])
+  const approvedAvailableEvolution = useMemo(() => ({
+    initialCents: metrics.availableBalanceCents - approvedPeriodFlow.incomeCents + approvedPeriodFlow.expenseCents,
+    ...approvedPeriodFlow,
+    finalCents: metrics.availableBalanceCents,
+  }), [approvedPeriodFlow, metrics.availableBalanceCents])
   const annualTotals = useMemo(() => annualFinanceTotals(data, month.getFullYear()), [data, month])
   const previous = useMemo(() => calculateFinanceMetrics(data, subMonths(month, 1)), [data, month])
   const summary = useMemo(() => financeSummary(data, month), [data, month])
@@ -139,7 +149,9 @@ export function FinancePage() {
   const finish = async (message: string) => {
     setDialog(null); setEditingTransaction(undefined); setEditingAccount(undefined)
     setEditingRecurring(undefined); setEditingGoal(undefined); setSelectedGoal(undefined)
-    await refresh(); setFeedback(message)
+    await refresh()
+    window.dispatchEvent(new Event('faro:finance-updated'))
+    setFeedback(message)
   }
   const status = async (transaction: FinanceTransaction, next: FinanceTransactionStatus) => {
     if (!user) return
@@ -222,29 +234,34 @@ export function FinancePage() {
   if (loading && !data.categories.length) return <div className="page"><div className="planning-skeleton">Sincronizando finanzas…</div></div>
   if (error && !data.categories.length) return <div className="page"><EmptyState title="No pudimos cargar Finanzas" description={error} action={<Button onClick={refresh}>Reintentar</Button>} /></div>
 
-  return <div className="page finance-os">
+  return <div className={`page finance-os finance-os--${panel}`}>
     <header className="finance-header">
-      <div><span className="eyebrow">Sistema financiero personal</span><h1>Finanzas</h1><p>Control real, proyección y dirección financiera.</p>
-        <div className="finance-period"><button aria-label="Mes anterior" onClick={() => setMonth((value) => subMonths(value, 1))}><ArrowLeft size={15} /></button><label>Periodo<input type="month" value={format(month, 'yyyy-MM')} onChange={(event) => event.target.value && setMonth(parseISO(`${event.target.value}-01`))} /></label><button aria-label="Mes siguiente" onClick={() => setMonth((value) => addMonths(value, 1))}><ArrowRight size={15} /></button><button aria-label="Actualizar datos financieros" title="Actualizar" onClick={() => void refresh()}><RefreshCw size={14} /></button></div>
+      <div className="finance-header__copy"><span className="eyebrow">{format(new Date(), "EEEE, d 'de' MMMM", { locale: es })}</span><h1>Finanzas</h1><p>Control real, proyección y dirección financiera.</p>
+        <div className="finance-period"><button aria-label="Mes anterior" onClick={() => setMonth((value) => subMonths(value, 1))}><ArrowLeft size={15} /></button><label><CalendarDays size={16} /><span>{format(month, "MMMM 'de' yyyy", { locale: es })}</span><input aria-label="Periodo" type="month" value={format(month, 'yyyy-MM')} onChange={(event) => event.target.value && setMonth(parseISO(`${event.target.value}-01`))} /></label><button aria-label="Mes siguiente" onClick={() => setMonth((value) => addMonths(value, 1))}><ArrowRight size={15} /></button><button aria-label="Actualizar datos financieros" title="Actualizar" onClick={() => void refresh()}><RefreshCw size={14} /></button></div>
       </div>
-      <div className="finance-header__actions">{faroVoice?.enabled && <button className="finance-voice-input" type="button" aria-label="Hablar con FARO" onClick={() => faroVoice.openFaroVoice({ surface: 'finances' })}><Mic size={17} /><span>Hablar con FARO</span></button>}<Button icon={<Plus size={17} />} disabled={!activeAccounts.length} onClick={() => setDialog('movementMenu')}>Nuevo movimiento</Button></div>
+      <div className="finance-header__orb" aria-hidden="true"><span /><img src={orbUrl} alt="" /></div>
+      <FaroVoicePresence surface="finances" />
     </header>
     {feedback && <div className="finance-feedback" role="status">{feedback}<button onClick={() => setFeedback('')}>×</button></div>}
     {!data.accounts.length && <section className="finance-onboarding"><WalletCards /><div><strong>Crea tu primera cuenta</strong><p>El saldo inicial será la base de tus cálculos. Después podrás registrar tu primer ingreso sin ingresar datos bancarios sensibles.</p></div><Button onClick={() => setDialog('account')}>Crear cuenta</Button><Button variant="ghost" disabled title="Crea una cuenta antes de registrar el ingreso">Registrar ingreso</Button></section>}
-    <FinanceMetrics metrics={metrics} previous={previous} hasPreviousData={hasPreviousData} />
-    <nav className="finance-tabs" aria-label="Secciones financieras">
-      {([['overview', 'Resumen'], ['transactions', 'Movimientos'], ['income', 'Ingresos'], ['recurring', 'Gastos'], ['savings', 'Ahorro'], ['budgets', 'Presupuesto'], ['goals', 'Metas'], ['accounts', 'Cuentas'], ['fund', 'Fondo']] as const).map(([id, label]) =>
-        <button key={id} className={panel === id ? 'active' : ''} onClick={() => changePanel(id)}>{label}</button>)}
-    </nav>
+    <div className="finance-tabs-row">
+      <nav className="finance-tabs" aria-label="Secciones financieras">
+        {([['overview', 'Resumen'], ['transactions', 'Movimientos'], ['income', 'Ingresos'], ['recurring', 'Gastos'], ['savings', 'Ahorro'], ['budgets', 'Presupuesto'], ['goals', 'Metas'], ['accounts', 'Cuentas'], ['fund', 'Fondo']] as const).map(([id, label]) =>
+          <button key={id} className={panel === id ? 'active' : ''} onClick={() => changePanel(id)}>{label}</button>)}
+      </nav>
+      <Button className="finance-new-movement" icon={<Plus size={17} />} disabled={!activeAccounts.length} onClick={() => setDialog('movementMenu')}>Nuevo movimiento</Button>
+    </div>
+    <div className="finance-layout">
     <div className="finance-content">
 
     {panel === 'overview' && <>
       <ProjectionStrip
         compact
         items={[
-          { label: 'Ingresos proyectados', value: incomeProjection.totalCents, tone: 'positive' },
-          { label: 'Gastos proyectados', value: expenseProjection.totalCents, tone: 'negative' },
-          { label: 'Flujo neto proyectado', value: incomeProjection.totalCents - expenseProjection.totalCents, tone: incomeProjection.totalCents >= expenseProjection.totalCents ? 'positive' : 'negative' },
+          { icon: <WalletCards />, label: 'Ingresos proyectados', value: incomeProjection.totalCents, tone: 'positive' },
+          { icon: <Calculator />, label: 'Gastos proyectados', value: expenseProjection.totalCents, tone: 'negative' },
+          { icon: <ChartNoAxesCombined />, label: 'Flujo neto proyectado', value: incomeProjection.totalCents - expenseProjection.totalCents, tone: incomeProjection.totalCents >= expenseProjection.totalCents ? 'positive' : 'negative' },
+          { icon: <PiggyBank />, label: 'Ahorro proyectado', text: `${metrics.savingsRate.toFixed(1)}%`, context: 'del ingreso', tone: 'savings' },
         ]}
       />
       <div className="finance-summary-grid">
@@ -254,9 +271,9 @@ export function FinancePage() {
           {summary.map((row) => <div className="finance-table__row" key={row.label}><strong>{row.label}</strong><span data-label="Planeado">{formatMxn(row.planned)}</span><span data-label="Real">{formatMxn(row.actual)}</span><span data-label="Diferencia" className={row.difference >= 0 ? 'positive' : 'negative'}>{formatMxn(row.difference)}</span></div>)}
         </div>
       </section>
-        <section><header><span className="eyebrow">{format(month, 'MMMM yyyy', { locale: es })}</span><h2>Flujo del periodo</h2></header><div className="finance-flow-ledger"><span>Ingresos completados<strong className="positive">+{formatMxn(periodFlow.incomeCents)}</strong></span><span>Gastos completados<strong className="negative">−{formatMxn(periodFlow.expenseCents)}</strong></span><span>Ahorro apartado<strong>−{formatMxn(periodFlow.savingCents)}</strong></span><span className="total">Resultado neto<strong className={periodFlow.netCents >= 0 ? 'positive' : 'negative'}>{formatMxn(periodFlow.netCents)}</strong></span></div></section>
+        <section className="finance-period-flow"><header><span className="eyebrow">{format(month, 'MMMM yyyy', { locale: es })}</span><h2>Flujo del periodo</h2></header><PeriodFlowChart flow={approvedPeriodFlow} /></section>
         <section><header><span className="eyebrow">Distribución</span><h2>Gasto por categoría</h2></header><ExpenseCategoryDonut data={categoryExpenses} /></section>
-        <section className="finance-available-evolution"><header><span className="eyebrow">Disponible operativo</span><h2>Evolución del disponible</h2></header><div className="finance-waterfall"><span><small>Inicial</small><strong>{formatMxn(availableEvolution.initialCents)}</strong></span><i>+</i><span className="positive"><small>Ingresos</small><strong>{formatMxn(availableEvolution.incomeCents)}</strong></span><i>−</i><span className="negative"><small>Gastos</small><strong>{formatMxn(availableEvolution.expenseCents)}</strong></span><i>−</i><span><small>Ahorro</small><strong>{formatMxn(availableEvolution.savingCents)}</strong></span><i>=</i><span className="final"><small>Final</small><strong>{formatMxn(availableEvolution.finalCents)}</strong></span></div><p>Las transferencias sólo redistribuyen dinero entre cuentas y no alteran este resultado.</p></section>
+        <section className="finance-available-evolution"><header><span className="eyebrow">Disponible operativo</span><h2>Evolución del disponible</h2></header><div className="finance-waterfall"><span><small>Inicial</small><strong>{formatMxn(approvedAvailableEvolution.initialCents)}</strong></span><i>+</i><span className="positive"><small>Ingresos</small><strong>{formatMxn(approvedAvailableEvolution.incomeCents)}</strong></span><i>−</i><span className="negative"><small>Gastos</small><strong>{formatMxn(approvedAvailableEvolution.expenseCents)}</strong></span><i>=</i><span className="final"><small>Final</small><strong>{formatMxn(approvedAvailableEvolution.finalCents)}</strong></span></div><p>Las transferencias sólo redistribuyen dinero entre cuentas y no alteran este resultado.</p></section>
       </div>
     </>}
 
@@ -307,7 +324,7 @@ export function FinancePage() {
       <ProjectionStrip items={projectionItems(incomeProjection)} />
       <section className="finance-expense-panel">
         <SectionHead eyebrow="Entradas previsibles" title="Ingresos recurrentes" action="+" actionLabel="Registrar ingreso recurrente" onClick={() => { setMovementPreset({ type: 'income' }); setDialog('recurring') }} />
-        <div className="finance-expense-list">{recurringForMonth.filter(({ item }) => item.type === 'income').map(({ item, expectedDate, occurrence }) => <RecurringCard key={item.id} item={item} expectedDate={expectedDate} occurrence={occurrence} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={data.categories.find((category) => category.id === item.categoryId)?.name} busy={savingPaymentId === item.id} menuOpen={actionsFor === item.id} onToggleMenu={() => setActionsFor((current) => current === item.id ? undefined : item.id)} onRegister={() => void registerRecurringPayment(item)} onEdit={() => { setEditingRecurring(item); setDialog('recurring'); setActionsFor(undefined) }} onPostpone={() => void setRecurringMonthStatus(item, 'postponed')} onSkip={() => void setRecurringMonthStatus(item, 'skipped')} onToggleActive={async () => { if (!user) return; await financeRecurringRepository.setActive(item.id, !item.isActive, user.id); setActionsFor(undefined); await finish(item.isActive ? 'Ingreso pausado.' : 'Ingreso reanudado.') }} onDelete={() => { setDeletingRecurring(item); setActionsFor(undefined) }} onRevert={() => occurrence && setRevertingOccurrence(occurrence)} />)}</div>
+        <div className="finance-expense-list">{recurringForMonth.filter(({ item }) => item.type === 'income').map(({ item, expectedDate, occurrence }) => <RecurringCard key={item.id} item={item} expectedDate={expectedDate} occurrence={occurrence} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={data.categories.find((category) => category.id === item.categoryId)?.name} busy={savingPaymentId === item.id} menuOpen={actionsFor === item.id} onToggleMenu={() => setActionsFor((current) => current === item.id ? undefined : item.id)} onRegister={() => void registerRecurringPayment(item)} onEdit={() => { setRecurringEditMode('period'); setEditingRecurring(item); setDialog('recurring'); setActionsFor(undefined) }} onPostpone={() => void setRecurringMonthStatus(item, 'postponed')} onSkip={() => void setRecurringMonthStatus(item, 'skipped')} onToggleActive={async () => { if (!user) return; await financeRecurringRepository.setActive(item.id, !item.isActive, user.id); setActionsFor(undefined); await finish(item.isActive ? 'Ingreso pausado.' : 'Ingreso reanudado.') }} onDelete={() => { setDeletingRecurring(item); setActionsFor(undefined) }} onRevert={() => occurrence && setRevertingOccurrence(occurrence)} />)}</div>
         {!recurringForMonth.some(({ item }) => item.type === 'income') && <EmptyState title="Sin ingresos recurrentes" description="Registra sueldo, honorarios o pagos periódicos esperados." />}
       </section>
       <section className="finance-expense-panel">
@@ -348,6 +365,8 @@ export function FinancePage() {
     {panel === 'fund' && <section className="finance-section finance-fund"><SectionHead eyebrow="Reserva flexible" title="Fondo de Ahorro" action="Registrar movimiento" onClick={() => setDialog('fundEntry')} /><div className="finance-fund-hero"><div><PiggyBank size={24} /><span>Saldo disponible en el fondo</span><strong>{formatMxn(fundMetrics.balanceCents)}</strong><small>Dinero reservado sin asignarlo a una meta específica.</small></div><div><span>Ritmo del mes</span><strong>{formatMxn(fundMetrics.monthCents)}</strong><small>{fundMetrics.lastEntry ? `Último movimiento · ${fundMetrics.lastEntry.entryDate}` : 'Haz tu primera aportación'}</small></div></div><div className="finance-fund-kpis"><FinanceKpi label="Aportado este año" value={fundMetrics.yearCents} /><FinanceKpi label="Última aportación" value={fundMetrics.lastEntry?.amountCents ?? 0} context={fundMetrics.lastEntry?.entryDate ?? 'Sin movimientos'} /></div><div className="finance-fund-history"><header><span>Fecha</span><span>Concepto</span><span>Monto</span></header>{data.savingsFundEntries.map(item=><article key={item.id}><time>{item.entryDate}</time><span>{item.description??(item.amountCents>0?'Aportación':'Retiro')}</span><strong className={item.amountCents>=0?'positive':'negative'}>{item.amountCents >= 0 ? '+' : '−'}{formatMxn(Math.abs(item.amountCents))}</strong></article>)}{!data.savingsFundEntries.length&&<EmptyState title="Fondo vacío" description="Reserva dinero sin asignarlo a una meta específica." />}</div></section>}
 
     {panel === 'goals' && <section className="finance-section"><SectionHead eyebrow="Dirección" title="Metas financieras" action="Nueva meta" onClick={() => setDialog('goal')} /><div className="finance-goals">{data.goals.map((goal) => { const progress=goalProgress(goal.id,data);const target=goalTargetCents(goal.id,data);const spent=goalSpentCents(goal.id,data);const available=goalAvailableCents(goal.id,data);return <article className="finance-goal-summary" key={goal.id} onClick={()=>{setSelectedGoal(goal);setDialog('goalDetail')}}><header><Target /><div><strong>{goal.name}</strong><small>{goal.priority} · {goal.status}</small></div><b>{progress.percentage.toFixed(0)}%</b></header><ProgressBar value={progress.percentage}/><div className="finance-goal-metrics"><span>Objetivo total<strong>{formatMxn(target)}</strong></span><span>Total aportado<strong>{formatMxn(progress.savedCents)}</strong></span><span>Total gastado<strong>{formatMxn(spent)}</strong></span><span>Disponible en meta<strong>{formatMxn(available)}</strong></span><span>Pendiente por comprar<strong>{formatMxn(Math.max(0,target-spent))}</strong></span><span>Pendiente por financiar<strong>{formatMxn(Math.max(0,target-progress.savedCents))}</strong></span></div><footer onClick={event=>event.stopPropagation()}><Button variant="secondary" onClick={()=>{setSelectedGoal(goal);setDialog('goalDetail')}}>Ver detalle</Button><Button variant="secondary" onClick={()=>{setSelectedGoal(goal);setDialog('contribution')}}>Registrar aportación</Button><Button variant="ghost" onClick={()=>{setEditingGoal(goal);setDialog('goal')}}>Editar meta</Button>{goal.status==='active'&&<Button variant="ghost" onClick={async()=>{if(!user)return;await financeGoalRepository.save({...goal,status:'paused'},user.id);await finish('Meta pausada.')}}>Pausar</Button>}{goal.status==='paused'&&<Button variant="ghost" onClick={async()=>{if(!user)return;await financeGoalRepository.save({...goal,status:'active'},user.id);await finish('Meta reanudada.')}}>Reanudar</Button>}</footer></article>})}</div>{!data.goals.length&&<EmptyState title="Sin metas financieras" description="Convierte una intención de ahorro en una dirección medible."/>}</section>}
+    </div>
+    <aside className="finance-side-kpis"><FinanceMetrics metrics={metrics} previous={previous} hasPreviousData={hasPreviousData} /></aside>
     </div>
 
     {dialog === 'movementMenu' && <MovementMenu canTransfer={activeAccounts.length > 1} onClose={() => setDialog(null)} onSelect={startMovement} />}
@@ -434,9 +453,8 @@ function RecurringCard({ item, expectedDate, occurrence, account, category, busy
   const income = item.type === 'income'
   const paid = occurrence?.status === 'paid'
   const configured = Boolean(occurrence?.amountCents && expectedDate)
-  const frequency = financeFrequencyLabel[item.frequency]
   return <article className={`finance-expense--${occurrence?.status ?? 'pending'} ${!item.isActive ? 'finance-expense--paused' : ''}`}>
-    <header><Repeat2 /><div><strong>{occurrence?.description ?? item.description}</strong><small>{configured ? `${frequency} · ${formatFinanceDate(expectedDate!)}` : `${frequency} · monto y fecha por definir`}</small></div><b className={income ? 'positive' : ''}>{configured ? formatMxn(occurrence!.amountCents!) : '—'}</b></header>
+    <header><Repeat2 /><div><strong>{occurrence?.description ?? item.description}</strong><small>{configured ? formatFinanceDate(expectedDate!) : 'Monto y fecha por definir'}</small></div><b className={income ? 'positive' : ''}>{configured ? formatMxn(occurrence!.amountCents!) : '—'}</b></header>
     <small>{account}{category ? ` · ${category}` : ''}</small>
     <span className={`finance-occurrence-status finance-occurrence-status--${occurrence?.status ?? 'pending'}`}>{!item.isActive ? 'Pausado' : paid ? income ? 'Cobrado' : 'Pagado' : occurrence?.status === 'skipped' ? 'Omitido' : occurrence?.status === 'postponed' ? 'Pospuesto' : income ? 'Esperado' : 'Pendiente'}</span>
     <footer>
@@ -461,9 +479,38 @@ function FinanceMetrics({ metrics, previous, hasPreviousData }: {
     <FinanceKpi featured icon={<Landmark />} label="Disponible operativo" value={metrics.availableBalanceCents} context="Dinero disponible en cuentas activas" />
     <FinanceKpi icon={<ArrowUpRight />} label="Ingresos del periodo" value={metrics.monthlyIncomeCents} previous={previous.monthlyIncomeCents} hasPrevious={hasPreviousData} />
     <FinanceKpi icon={<ArrowDownRight />} label="Gastos del periodo" value={metrics.monthlyExpensesCents} previous={previous.monthlyExpensesCents} hasPrevious={hasPreviousData} inverse />
-    <FinanceKpi label="Balance proyectado" value={metrics.projectedBalanceCents} context="Saldo real + ingresos pendientes − gastos pendientes" />
-    <FinanceKpi label="Balance real" value={metrics.actualBalanceCents} context="Saldo actual de todas tus cuentas" />
+    <FinanceKpi icon={<Clock3 />} label="Balance proyectado" value={metrics.projectedBalanceCents} context="Saldo real + ingresos pendientes − gastos pendientes" />
+    <FinanceKpi icon={<CreditCard />} label="Balance real" value={metrics.actualBalanceCents} context="Saldo actual de todas tus cuentas" />
   </section>
+}
+
+function PeriodFlowChart({ flow }: { flow: { incomeCents: number; expenseCents: number; netCents: number } }) {
+  const rows = [
+    { name: 'Ingresos completados', value: flow.incomeCents, color: '#159151' },
+    { name: 'Gastos completados', value: -flow.expenseCents, color: '#ff343d' },
+    { name: 'Resultado neto', value: flow.netCents, color: '#1269e8' },
+  ]
+  const compactAxis = (value: number) => {
+    if (value === 0) return '0'
+    const amount = Math.abs(value) / 100000
+    return `${value < 0 ? '−' : ''}${Number.isInteger(amount) ? amount : amount.toFixed(1)}k`
+  }
+  return <div className="finance-period-flow__chart">
+    <ResponsiveContainer width="100%" height="100%">
+      <BarChart data={rows} margin={{ top: 26, right: 18, bottom: 8, left: 2 }}>
+        <CartesianGrid vertical={false} stroke="#17212b" />
+        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#a8b0bb', fontSize: 9 }} interval={0} />
+        <YAxis axisLine={false} tickLine={false} width={42} tick={{ fill: '#9aa4b0', fontSize: 8 }} tickFormatter={compactAxis} />
+        <ReferenceLine y={0} stroke="#6e5930" strokeDasharray="4 4" />
+        <Tooltip cursor={{ fill: 'rgba(255,255,255,.025)' }} formatter={(value) => formatMxn(Number(value))} contentStyle={{ background: '#0d131a', border: '1px solid #263341', borderRadius: 8 }} labelStyle={{ color: '#f3f5f8' }} />
+        <Bar dataKey="value" maxBarSize={92} radius={[2, 2, 0, 0]}>
+          {rows.map((row) => <Cell key={row.name} fill={row.color} />)}
+          <LabelList dataKey="value" position="top" formatter={(value) => formatMxn(Number(value ?? 0))} fill="#e5ebf3" fontSize={9} />
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+    <div className="finance-period-flow__legend"><span><i />Ingresos</span><span><i />Gastos</span><span><i />Resultado neto</span></div>
+  </div>
 }
 
 function SavingsPanel({ metrics, annual, year, goals, contributions }: {
@@ -506,16 +553,16 @@ function FinanceKpi({ icon, label, value, previous, inverse, text, featured, has
 type Projection = { recurringCents: number; eventualCents: number; totalCents: number; realizedCents: number; pendingCents: number }
 function projectionItems(projection: Projection) {
   return [
-    { label: 'Recurrente proyectado', value: projection.recurringCents },
-    { label: 'Eventual proyectado', value: projection.eventualCents },
-    { label: 'Total proyectado', value: projection.totalCents },
-    { label: 'Realizado', value: projection.realizedCents, tone: 'positive' as const },
-    { label: 'Pendiente', value: projection.pendingCents, tone: 'muted' as const },
+    { icon: <Repeat2 />, label: 'Recurrente proyectado', value: projection.recurringCents, tone: 'accent' as const },
+    { icon: <CalendarDays />, label: 'Eventual proyectado', value: projection.eventualCents, tone: 'accent' as const },
+    { icon: <Calculator />, label: 'Total proyectado', value: projection.totalCents },
+    { icon: <Check />, label: 'Realizado', value: projection.realizedCents, tone: 'positive' as const },
+    { icon: <Clock3 />, label: 'Pendiente', value: projection.pendingCents, tone: 'negative' as const },
   ]
 }
-function ProjectionStrip({ items, compact = false }: { items: { label: string; value: number; tone?: 'positive' | 'negative' | 'muted' }[]; compact?: boolean }) {
+function ProjectionStrip({ items, compact = false }: { items: { icon?: React.ReactNode; label: string; value?: number; text?: string; context?: string; tone?: 'accent' | 'positive' | 'negative' | 'muted' | 'savings' }[]; compact?: boolean }) {
   return <section className={`finance-projection-strip${compact ? ' finance-projection-strip--compact' : ''}`} aria-label="Previsión del periodo">
-    {items.map((item) => <article key={item.label}><span>{item.label}</span><strong className={item.tone}>{formatMxn(item.value)}</strong></article>)}
+    {items.map((item) => <article key={item.label}>{item.icon && <i className={`finance-projection-strip__icon finance-projection-strip__icon--${item.tone ?? 'default'}`}>{item.icon}</i>}<span>{item.label}</span><strong className={item.tone}>{item.text ?? formatMxn(item.value ?? 0)}</strong>{item.context && <small>{item.context}</small>}</article>)}
   </section>
 }
 function SectionHead({ eyebrow, title, action, actionLabel, onClick }: { eyebrow: string; title: string; action: string; actionLabel?: string; onClick: () => void }) {

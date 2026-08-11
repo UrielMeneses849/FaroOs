@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { FaroVoicePresence } from './FaroVoicePresence'
 import { FaroVoiceProvider, useFaroVoice } from './FaroVoiceProvider'
 
 const panel = vi.hoisted(() => vi.fn())
@@ -19,5 +20,10 @@ describe('FaroVoiceProvider', () => {
     fireEvent.click(screen.getByText('Hoy')); expect(screen.getByText('today')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Finanzas')); expect(screen.getByText('finances')).toBeInTheDocument()
     expect(screen.getAllByTestId('voice-panel')).toHaveLength(1)
+  })
+
+  it('permite embeber Finanzas en FARO Lab sin el provider productivo', () => {
+    expect(() => render(<FaroVoicePresence surface="finances" />)).not.toThrow()
+    expect(screen.queryByRole('button', { name: /abrir faro voice/i })).not.toBeInTheDocument()
   })
 })

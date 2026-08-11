@@ -1,9 +1,45 @@
 import { supabase } from '../lib/supabase/client'
-import { pendingActionSchema, voiceResponseSchema, voiceActionSchema, type PendingVoiceAction, type VoiceConversationTurn } from '../features/voice/voiceSchemas'
+import {
+  pendingActionSchema,
+  voiceResponseSchema,
+  voiceActionSchema,
+  type PendingVoiceAction,
+  type VoiceConversationTurn,
+  type VoicePipeline,
+  type VoiceSessionContext,
+  type VoiceTrace,
+} from '../features/voice/voiceSchemas'
 import type { FaroVoiceSurface } from '../features/voice/faroVoiceConfig'
+import { normalizeCalendarData } from './calendarService'
+import { useFaroStore } from '../store/useFaroStore'
+
+export function getVoiceCalendarSnapshot() {
+  const { tasks, projects, goals } = useFaroStore.getState()
+  return normalizeCalendarData({ tasks, projects, goals })
+    .filter((item) => item.sourceType === 'task')
+    .slice(0, 250)
+    .map((item) => ({
+      id: item.sourceId,
+      kind: 'task' as const,
+      title: item.title,
+      start: item.start,
+      end: item.end,
+      allDay: item.allDay,
+      workspaceId: item.workspaceId,
+    }))
+}
 
 async function invoke(body: Record<string, unknown>) {
-  const { data, error } = await supabase.functions.invoke('faro-voice', { body })
+  let result = await supabase.functions.invoke('faro-voice', { body })
+  for (let attempt = 0; result.error && attempt < 2; attempt += 1) {
+    const context = 'context' in result.error ? result.error.context : undefined
+    const retryableStatus = context instanceof Response && [408, 429, 502, 503, 504].includes(context.status)
+    const retryableMessage = /failed to send|fetch|network|timeout|temporar/i.test(result.error.message)
+    if (!retryableStatus && !retryableMessage) break
+    await new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1)))
+    result = await supabase.functions.invoke('faro-voice', { body })
+  }
+  const { data, error } = result
   if (error) {
     const context = 'context' in error ? error.context : undefined
     if (context instanceof Response) {
@@ -23,14 +59,53 @@ export const voiceService = {
   health() {
     return invoke({ type: 'health' })
   },
-  send(message: string, source: 'text' | 'voice' = 'text', history: VoiceConversationTurn[] = [], surface: FaroVoiceSurface | 'lab' = 'lab') {
-    return invoke(voiceActionSchema.parse({ requestId: crypto.randomUUID(), source, message, history, surface }))
+  send(message: string, source: 'text' | 'voice' = 'text', history: VoiceConversationTurn[] = [], surface: FaroVoiceSurface | 'lab' = 'lab', options: {
+    requestId?: string
+    sessionId?: string
+    pipeline?: VoicePipeline
+    sessionContext?: VoiceSessionContext
+    trace?: VoiceTrace
+  } = {}) {
+    return invoke(voiceActionSchema.parse({
+      requestId: options.requestId ?? crypto.randomUUID(),
+      sessionId: options.sessionId,
+      source,
+      message,
+      history,
+      surface,
+      pipeline: options.pipeline,
+      sessionContext: options.sessionContext,
+      trace: options.trace,
+      localContext: {
+        now: new Date().toISOString(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Mexico_City',
+        calendarItems: getVoiceCalendarSnapshot(),
+      },
+    }))
   },
   confirm(action: PendingVoiceAction) {
-    return invoke({ type: 'confirm', action: pendingActionSchema.parse(action) })
+    const parsed = pendingActionSchema.parse(action)
+    return invoke({ type: 'confirm', requestId: parsed.requestId })
   },
   cancel(action: PendingVoiceAction) {
-    return invoke({ type: 'cancel', action: pendingActionSchema.parse(action) })
+    const parsed = pendingActionSchema.parse(action)
+    return invoke({ type: 'cancel', requestId: parsed.requestId })
+  },
+  revise(action: PendingVoiceAction) {
+    const parsed = pendingActionSchema.parse(action)
+    if (['createCalendarEvent', 'createScheduledTask', 'updateCalendarEvent'].includes(parsed.toolName)) {
+      return invoke({ type: 'revise', requestId: parsed.requestId, title: parsed.arguments.title })
+    }
+    const value = parsed.arguments.actualAmount ?? parsed.arguments.amount
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) throw new Error('El nuevo monto no es válido.')
+    return invoke({ type: 'revise', requestId: parsed.requestId, amount: value })
+  },
+  async telemetry(requestId: string, timings: Record<string, number>, providerMetadata: Record<string, unknown> = {}) {
+    try {
+      await invoke({ type: 'telemetry', requestId, timings, providerMetadata })
+    } catch (error) {
+      if (import.meta.env.DEV) console.debug('[FARO Voice] telemetry failed', error)
+    }
   },
   async createRealtimeSession(sdp: string) {
     const { data: { session } } = await supabase.auth.getSession()

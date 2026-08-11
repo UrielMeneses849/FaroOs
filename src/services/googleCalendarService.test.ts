@@ -30,4 +30,16 @@ describe('Google Calendar service', () => {
     await expect(googleCalendarService.events('2026-08-01', '2026-08-02', true))
       .rejects.toThrow('Google no permitió leer este calendario.')
   })
+
+  it('envía disponibilidad con zona horaria explícita', async () => {
+    invoke.mockResolvedValue({data:{busy:[]},error:null})
+    await expect(googleCalendarService.freeBusy('2026-08-09T13:00:00Z','2026-08-09T23:00:00Z','America/Mexico_City')).resolves.toEqual({busy:[]})
+    expect(invoke).toHaveBeenCalledWith('google-calendar-api',{body:{action:'freebusy',timeMin:'2026-08-09T13:00:00Z',timeMax:'2026-08-09T23:00:00Z',timeZone:'America/Mexico_City'}})
+  })
+
+  it('no expone operaciones de escritura sobre Google Calendar', () => {
+    expect('insertEvent' in googleCalendarService).toBe(false)
+    expect('patchEvent' in googleCalendarService).toBe(false)
+    expect('deleteEvent' in googleCalendarService).toBe(false)
+  })
 })

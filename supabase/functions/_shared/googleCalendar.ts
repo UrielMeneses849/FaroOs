@@ -1,10 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
-import { googleErrorDetails } from './googleCalendarPure.ts'
+import { googleErrorDetails, googleReadOnlyScopes } from './googleCalendarPure.ts'
 
-export const googleScopes = [
-  'https://www.googleapis.com/auth/calendar.readonly',
-  'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
-]
+export const googleScopes = [...googleReadOnlyScopes]
 
 export const serviceClient = () => createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -81,8 +78,24 @@ export async function accessToken(refreshToken: string) {
   return payload.access_token as string
 }
 
+export async function revokeGoogleToken(token: string) {
+  const response = await fetch('https://oauth2.googleapis.com/revoke', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ token }),
+  })
+  if (!response.ok) throw new Error('Google no pudo revocar la autorización anterior.')
+}
+
 export async function googleJson(url: string, token: string) {
-  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  return googleRequest(url, token)
+}
+
+export async function googleRequest(url: string, token: string, init: RequestInit = {}) {
+  const response = await fetch(url, {
+    ...init,
+    headers: { Authorization: `Bearer ${token}`, ...init.headers },
+  })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
     const details = googleErrorDetails(response.status, payload)

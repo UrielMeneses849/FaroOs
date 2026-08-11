@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { calendarAppUrl, googleErrorDetails, googleEventsUrl } from '../../supabase/functions/_shared/googleCalendarPure'
+import { calendarAppUrl, googleErrorDetails, googleEventsUrl, googleReadOnlyScopes } from '../../supabase/functions/_shared/googleCalendarPure'
 
 describe('Google Calendar Edge helpers', () => {
+  it('solicita únicamente scopes de lectura y disponibilidad', () => {
+    expect(googleReadOnlyScopes).toEqual([
+      'https://www.googleapis.com/auth/calendar.events.readonly',
+      'https://www.googleapis.com/auth/calendar.events.freebusy',
+      'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
+    ])
+    expect(googleReadOnlyScopes).not.toContain('https://www.googleapis.com/auth/calendar.events')
+  })
   it('preserva el subpath de APP_URL al construir el callback', () => {
     expect(calendarAppUrl('https://urielmeneses849.github.io/FaroOs', 'connected').toString())
       .toBe('https://urielmeneses849.github.io/FaroOs/calendar?googleCalendar=connected')

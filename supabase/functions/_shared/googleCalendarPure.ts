@@ -4,6 +4,12 @@ export interface GoogleErrorDetails {
   message: string
 }
 
+export const googleReadOnlyScopes = [
+  'https://www.googleapis.com/auth/calendar.events.readonly',
+  'https://www.googleapis.com/auth/calendar.events.freebusy',
+  'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
+] as const
+
 export function calendarAppUrl(appUrl: string, result: 'connected' | 'error', reason?: string) {
   const normalizedBase = appUrl.endsWith('/') ? appUrl : `${appUrl}/`
   const url = new URL('calendar', normalizedBase)

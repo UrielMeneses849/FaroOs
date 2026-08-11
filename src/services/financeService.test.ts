@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { FinanceData } from '../features/finance/financeTypes'
 import {
   accountBalance, advanceRecurringDate, annualFinanceTotals, budgetPerformance, calculateFinanceMetrics,
-  financeAvailableEvolution, financeDecision, financeFrequencyLabel, financeGoalProjections, financePeriodFlow, financeProjectionBreakdown, formatFinanceDate, goalProgress, monthKey, personalBudgetForDate, recurringAppliesToMonth, recurringExpectedDate,
+  financeAvailableEvolution, financeDecision, financeFrequencyLabel, financeGoalProjections, financePeriodFlow, financeProjectionBreakdown, formatFinanceDate, goalProgress, monthKey, personalBudgetForDate, recurringAppliesToMonth, recurringExpectedDate, spentTodayCents,
 } from './financeService'
 
 const base = '2026-07-01T00:00:00.000Z'
@@ -45,6 +45,32 @@ describe('financeService', () => {
     expect(metrics.monthlyIncomeCents).toBe(2_500_000)
     expect(metrics.monthlyExpensesCents).toBe(100_000)
     expect(accountBalance(data.accounts[0], data.transactions)).toBe(3_350_000)
+  })
+
+  it('recalcula los balances al retirar un movimiento eliminado', () => {
+    const before = calculateFinanceMetrics(data, new Date(2026, 6, 15))
+    const after = calculateFinanceMetrics({
+      ...data,
+      transactions: data.transactions.filter((transaction) => transaction.id !== 'e'),
+    }, new Date(2026, 6, 15))
+    expect(before.monthlyExpensesCents).toBe(100_000)
+    expect(after.monthlyExpensesCents).toBe(0)
+    expect(after.actualBalanceCents).toBe(before.actualBalanceCents + 100_000)
+    expect(after.projectedBalanceCents).toBe(before.projectedBalanceCents + 100_000)
+  })
+
+  it('calcula Gastado hoy sólo con gastos y pagos de deuda completados locales', () => {
+    const transactions = [
+      { ...data.transactions[1], id: 'expense', transactionDate: '2026-08-08', amountCents: 1_200, type: 'expense' as const, status: 'completed' as const },
+      { ...data.transactions[1], id: 'debt', transactionDate: '2026-08-08', amountCents: 800, type: 'debt_payment' as const, status: 'completed' as const },
+      { ...data.transactions[0], id: 'income', transactionDate: '2026-08-08', amountCents: 5_000, type: 'income' as const, status: 'completed' as const },
+      { ...data.transactions[2], id: 'transfer', transactionDate: '2026-08-08', amountCents: 900, type: 'transfer' as const, status: 'completed' as const },
+      { ...data.transactions[1], id: 'saving', transactionDate: '2026-08-08', amountCents: 600, type: 'saving' as const, status: 'completed' as const },
+      { ...data.transactions[1], id: 'planned', transactionDate: '2026-08-08', amountCents: 400, type: 'expense' as const, status: 'planned' as const },
+      { ...data.transactions[1], id: 'cancelled', transactionDate: '2026-08-08', amountCents: 300, type: 'expense' as const, status: 'cancelled' as const },
+      { ...data.transactions[1], id: 'yesterday', transactionDate: '2026-08-07', amountCents: 700, type: 'expense' as const, status: 'completed' as const },
+    ]
+    expect(spentTodayCents(transactions, '2026-08-08')).toBe(2_000)
   })
 
   it('mantiene el ahorro en patrimonio pero lo descuenta del disponible operativo', () => {

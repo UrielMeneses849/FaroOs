@@ -19,6 +19,27 @@ describe('FARO Voice contracts', () => {
     })).toThrow()
   })
 
+  it('accepts the calendar snapshot rendered by the client', () => {
+    const value = voiceActionSchema.parse({
+      requestId: '48e30c50-e4bb-44a0-bdeb-bf098b2c3547',
+      source: 'voice',
+      message: '¿Qué hay mañana?',
+      localContext: {
+        now: '2026-08-08T20:30:00.000Z',
+        timezone: 'America/Mexico_City',
+        calendarItems: [{
+          id: 'task-1',
+          kind: 'task',
+          title: 'Integrar Hotfix de FaroOS',
+          start: '2026-08-09T14:00:00.000Z',
+          end: '2026-08-09T16:00:00.000Z',
+          allDay: false,
+        }],
+      },
+    })
+    expect(value.localContext?.calendarItems[0].title).toBe('Integrar Hotfix de FaroOS')
+  })
+
   it('limits clarification to three questions', () => {
     expect(() => voiceResponseSchema.parse({
       status: 'needs_clarification',

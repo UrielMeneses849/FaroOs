@@ -34,12 +34,16 @@ export interface GoogleCalendarConnection {
   calendarName?: string | null
   connectedAt?: string | null
   lastSyncedAt?: string | null
+  accessRole?: string | null
+  scopes?: string[]
+  writeEnabled?: boolean
 }
 
 export interface GoogleCalendarChoice { id: string; name: string; primary: boolean; accessRole: string }
 
 export interface GoogleCalendarEvent {
   id: string
+  etag?: string
   summary?: string
   status?: string
   start?: { date?: string; dateTime?: string; timeZone?: string }

@@ -1,10 +1,8 @@
-import { Search, SlidersHorizontal } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Button, ConfirmDialog, EmptyState } from '../../components/common'
 import { PageHeader } from '../../components/layout'
 import { TaskFormDialog } from '../planning/PlanningDialogs'
-import { usePageCapture } from '../../hooks/usePageCapture'
 import { useAuth } from '../../hooks/auth'
 import { useWorkspaces } from '../../hooks/useWorkspaces'
 import { useSprints } from '../../hooks/useSprints'
@@ -19,7 +17,6 @@ import { WorkspaceOverviewGrid, type WorkspaceMetrics } from './WorkspaceOvervie
 import { TaskKanbanBoard } from './TaskKanbanBoard'
 
 type Bucket = 'todo' | 'doing' | 'blocked' | 'done'
-const sections: Array<[Bucket, string]> = [['todo', 'Por hacer'], ['doing', 'En progreso'], ['blocked', 'Bloqueado'], ['done', 'Completado']]
 const bucketOf = (item: BacklogItem): Bucket => {
   if (item.status === 'done' || item.status === 'completed' || item.status === 'archived') return 'done'
   if (item.status === 'paused' || item.status === 'inbox') return 'todo'
@@ -30,7 +27,6 @@ const bucketOf = (item: BacklogItem): Bucket => {
 }
 
 export function BacklogPage() {
-  const { capture } = usePageCapture()
   const { user } = useAuth()
   const { data: workspaces, loading, error, refresh } = useWorkspaces()
   const { data: sprintData, refresh: refreshSprints } = useSprints()
@@ -43,13 +39,13 @@ export function BacklogPage() {
   const deleteProject = useFaroStore((state) => state.deleteProject)
   const deleteGoal = useFaroStore((state) => state.deleteGoal)
   const [params, setParams] = useSearchParams()
-  const [query, setQuery] = useState('')
-  const [kind, setKind] = useState<BacklogKind | 'all'>('all')
-  const [priority, setPriority] = useState<Priority | 'all'>('all')
-  const [status, setStatus] = useState('all')
-  const [sort, setSort] = useState<SortKey>('created')
-  const [dateFilter, setDateFilter] = useState<'all' | 'overdue' | 'undated'>('all')
-  const [projectFilter, setProjectFilter] = useState('all')
+  const [query] = useState('')
+  const [kind] = useState<BacklogKind | 'all'>('all')
+  const [priority] = useState<Priority | 'all'>('all')
+  const [status] = useState('all')
+  const [sort] = useState<SortKey>('created')
+  const [dateFilter] = useState<'all' | 'overdue' | 'undated'>('all')
+  const [projectFilter] = useState('all')
   const [creatingStatus, setCreatingStatus] = useState<TaskStatus>()
   const [feedback, setFeedback] = useState('')
   const [editing, setEditing] = useState<BacklogItem | null>(null)
@@ -87,7 +83,7 @@ export function BacklogPage() {
   const metrics = useMemo(() => Object.fromEntries(activeWorkspaces.map((workspace) => {
     const items = allItems.filter((item) => workspaceFor(item) === workspace.id && !item.archivedAt)
     const complete = items.filter((item) => bucketOf(item) === 'done').length
-    return [workspace.id, { pending: items.length - complete, tasks: items.filter((item) => item.kind === 'task').length, projects: items.filter((item) => item.kind === 'project').length, goals: items.filter((item) => item.kind === 'goal').length, progress: items.length ? Math.round(complete / items.length * 100) : 0 } satisfies WorkspaceMetrics]
+    return [workspace.id, { pending: items.length - complete, tasks: items.filter((item) => item.kind === 'task').length, projects: items.filter((item) => item.kind === 'project').length, goals: items.filter((item) => item.kind === 'goal').length } satisfies WorkspaceMetrics]
   })), [activeWorkspaces, allItems, workspaceFor])
   const remove = () => {
     if (!deleting) return
@@ -122,12 +118,10 @@ export function BacklogPage() {
   }
   if (loading && !workspaces.length) return <div className="page"><div className="planning-skeleton" role="status">Preparando workspaces…</div></div>
   if (error && !workspaces.length) return <div className="page"><EmptyState title="No pudimos cargar los workspaces" description={error} action={<Button onClick={refresh}>Reintentar</Button>} /></div>
-  return <div className="page workspace-backlog"><PageHeader eyebrow="Contextos de trabajo" title="Backlog" description="Organiza lo pendiente desde el lugar donde realmente ocurre." onCapture={capture} />
+  return <div className="page workspace-backlog"><PageHeader eyebrow="Contextos de trabajo" title="Backlog" description="Organiza lo pendiente desde el lugar donde realmente ocurre." />
     <WorkspaceOverviewGrid workspaces={activeWorkspaces} activeId={activeWorkspace} metrics={metrics} onSelect={chooseWorkspace} />
-    <div className="workspace-backlog__filters"><label><Search size={14} /><input aria-label="Buscar backlog" placeholder="Buscar elementos…" value={query} onChange={(event) => setQuery(event.target.value)} /></label><select aria-label="Tipo" value={kind} onChange={(event) => setKind(event.target.value as BacklogKind | 'all')}><option value="all">Todos los tipos</option><option value="task">Tareas</option><option value="project">Proyectos</option><option value="goal">Objetivos</option><option value="idea">Ideas</option></select><select aria-label="Prioridad" value={priority} onChange={(event) => setPriority(event.target.value as Priority | 'all')}><option value="all">Cualquier prioridad</option><option value="critical">Crítica</option><option value="high">Alta</option><option value="medium">Media</option><option value="low">Baja</option></select><select aria-label="Estado" value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">Todos los estados</option>{sections.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select><select aria-label="Proyecto" value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="all">Todos los proyectos</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select><select aria-label="Fecha" value={dateFilter} onChange={(event) => setDateFilter(event.target.value as typeof dateFilter)}><option value="all">Cualquier fecha</option><option value="overdue">Vencidas</option><option value="undated">Sin fecha</option></select><select aria-label="Orden" value={sort} onChange={(event) => setSort(event.target.value as SortKey)}><option value="created">Más recientes</option><option value="priority">Prioridad</option><option value="due">Vencimiento</option></select><SlidersHorizontal size={15} /></div>
     {feedback && <div className="kanban-feedback" role="status">{feedback}<button onClick={() => setFeedback('')}>×</button></div>}
     <TaskKanbanBoard tasks={kanbanTasks} projects={projects} showWorkspace={activeWorkspace === 'all'} workspaceName={taskWorkspaceName} onMove={moveTask} onStatus={changeStatus} onAdd={setCreatingStatus} onEdit={(task) => setEditing(allItems.find((item) => item.kind === 'task' && item.id === task.id) ?? null)} onDelete={(task) => setDeleting(allItems.find((item) => item.kind === 'task' && item.id === task.id) ?? null)} onAddToSprint={activeSprint && user ? async (task, commitment) => { await sprintRepository.addTask(activeSprint.id, task.id, commitment, user.id); await refreshSprints(); setFeedback('Tarea añadida al sprint.') } : undefined} />
-    {kind !== 'all' && kind !== 'task' && <EmptyState title="Referencias no arrastrables" description="Proyectos, objetivos e ideas conservan sus propios estados y no se mueven por columnas de tareas." />}
     {creatingStatus && <TaskFormDialog open status={creatingStatus} workspaceId={activeWorkspace === 'all' ? activeWorkspaces.find((workspace) => workspace.name === 'Personal')?.id : activeWorkspace} onClose={() => setCreatingStatus(undefined)} />}
     {editing?.kind === 'task' ? <TaskFormDialog open initial={tasks.find((task) => task.id === editing.id)} onClose={() => setEditing(null)} /> : editing && <EditItemDialog item={editing} onClose={() => setEditing(null)} />}
     <ConfirmDialog open={Boolean(deleting)} title={`Eliminar ${deleting?.title ?? 'elemento'}`} description="Esta acción no se puede deshacer." onClose={() => setDeleting(null)} onConfirm={remove} />

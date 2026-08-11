@@ -54,6 +54,19 @@ export function accountBalance(account: FinanceAccount, transactions: FinanceTra
   }, account.initialBalanceCents)
 }
 
+/**
+ * The daily spend card represents money that actually left an account today.
+ * It deliberately ignores transfers, saving/investing, income and any pending
+ * or cancelled record, while including debt payments as expenses.
+ */
+export function spentTodayCents(transactions: FinanceTransaction[], localToday: string) {
+  return transactions
+    .filter((transaction) => transaction.transactionDate === localToday
+      && completed(transaction)
+      && (transaction.type === 'expense' || transaction.type === 'debt_payment'))
+    .reduce((sum, transaction) => sum + transaction.amountCents, 0)
+}
+
 function nextOccurrence(item: FinanceRecurringTransaction, date: Date) {
   const days = item.frequency === 'weekly' ? 7 : item.frequency === 'biweekly' ? 14 : null
   if (days) {

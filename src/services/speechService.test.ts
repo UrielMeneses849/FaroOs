@@ -24,7 +24,8 @@ function setup() {
 describe('speechService', () => {
   it('comprueba faro-speech sin solicitar audio', async()=>{const {service,fetch}=setup();await expect(service.health()).resolves.toBe(true);expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({type:'health'})})
   it('prepara montos para una lectura natural',()=>expect(speechSafeText('Registré $700.00 el 2026-08-06.')).toBe('Registré setecientos pesos el .'))
-  it('envía sin campos adicionales el texto de diagnóstico aislado',async()=>{const {service,audios,fetch}=setup();const text='Hola. Soy FARO. La conexión de voz está funcionando.';const playback=service.speak(text);await vi.waitFor(()=>expect(audios).toHaveLength(1));expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({text});audios[0].onended?.(new Event('ended'));await playback})
+  it('convierte cada renglón de agenda en una pausa audible',()=>expect(speechSafeText('10 y media de la mañana · Crear App\n2 de la tarde · Salida con Iris\n7 de la noche · Investigar FARO')).toBe('10 y media de la mañana · Crear App; 2 de la tarde · Salida con Iris; 7 de la noche · Investigar FARO'))
+  it('envía el texto de diagnóstico con el modelo y fallback declarados',async()=>{const {service,audios,fetch}=setup();const text='Hola. Soy FARO. La conexión de voz está funcionando.';const playback=service.speak(text);await vi.waitFor(()=>expect(audios).toHaveLength(1));expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({text,model:'current',stream:false});audios[0].onended?.(new Event('ended'));await playback})
   it('conserva el status, código y mensaje seguros del proveedor',async()=>{const {service,fetch}=setup();fetch.mockResolvedValueOnce({ok:false,status:400,json:async()=>({error:'speech_provider_failed',providerStatus:400,providerCode:'voice_not_found',providerMessage:'Voice not found.'})} as Response);const error=await service.speak('Prueba').catch(cause=>cause);expect(error).toBeInstanceOf(SpeechProviderError);expect(error).toMatchObject({providerStatus:400,providerCode:'voice_not_found',providerMessage:'Voice not found.'})})
   it('reproduce el Blob recibido y libera la URL al terminar', async () => {
     const { service, audios, fetch, revokeObjectURL } = setup()
@@ -36,6 +37,8 @@ describe('speechService', () => {
     await playback
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:1')
   })
+
+  it('permite comparar Flash v2.5 sin cambiar el modelo productivo', async()=>{const {service,audios,fetch}=setup();const playback=service.speak('Prueba Flash',{model:'flash',mode:'blob'});await vi.waitFor(()=>expect(audios).toHaveLength(1));expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({text:'Prueba Flash',model:'flash',stream:false});audios[0].onended?.(new Event('ended'));await playback})
 
   it('cancela y limpia la reproducción anterior antes de iniciar otra', async () => {
     const { service, audios, revokeObjectURL } = setup()

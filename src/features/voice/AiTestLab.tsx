@@ -1,4 +1,4 @@
-import { CheckCircle2, FlaskConical, KeyRound, ShieldAlert, Volume2 } from 'lucide-react'
+import { CalendarDays, CheckCircle2, FlaskConical, KeyRound, ShieldAlert, Volume2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '../../components/common'
 import { useAuth } from '../../hooks/auth/useAuth'
@@ -14,7 +14,7 @@ export function AiTestLab({ onPrepared }: { onPrepared?: () => void }) {
   const [bbvaBalance, setBbvaBalance] = useState(15000)
   const [budget, setBudget] = useState(3000)
   const [confirmed, setConfirmed] = useState(false)
-  const [busy, setBusy] = useState<'connection' | 'speech' | 'prepare' | 'baseline' | 'restore' | null>(null)
+  const [busy, setBusy] = useState<'connection' | 'speech' | 'prepare' | 'calendar' | 'baseline' | 'restore' | null>(null)
   const [connection, setConnection] = useState<{ ok: boolean; message: string } | null>(null)
   const [baseline, setBaseline] = useState<AiTestBaseline | null>(null)
   const [error, setError] = useState('')
@@ -61,6 +61,7 @@ export function AiTestLab({ onPrepared }: { onPrepared?: () => void }) {
         onPrepared?.()
       })}>{busy === 'prepare' ? 'Preparando…' : 'Preparar laboratorio'}</Button>
       <Button variant="secondary" disabled={!confirmed || busy !== null} onClick={() => void run('baseline', async () => setBaseline(await aiTestLabService.captureBaseline()))}>Capturar línea base</Button>
+      <Button variant="secondary" icon={<CalendarDays size={15}/>} disabled={!confirmed || busy !== null} onClick={() => void run('calendar', async () => { await aiTestLabService.prepareCalendar(); window.dispatchEvent(new Event('faro:calendar-updated')) })}>{busy==='calendar'?'Preparando…':'Preparar escenarios de Calendar'}</Button>
       <Button variant="secondary" disabled={!confirmed || busy !== null} onClick={() => { if (window.confirm('¿Restaurar únicamente el escenario financiero de esta identidad de laboratorio?')) void run('restore', async () => { await aiTestLabService.restoreScenario(); onPrepared?.() }) }}>{busy === 'restore' ? 'Restaurando…' : 'Restaurar escenario financiero de prueba'}</Button>
     </div>
     <p className="ai-test-lab__seed">Se crean o reactivan: NU Pruebas, BBVA Pruebas; Comida, Personal, Transporte, Servicios y Sin categoría. La operación es repetible y no duplica nombres.</p>

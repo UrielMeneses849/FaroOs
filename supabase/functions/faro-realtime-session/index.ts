@@ -19,10 +19,13 @@ Deno.serve(async (request) => {
   form.set('session', JSON.stringify({
     type: 'realtime',
     model: Deno.env.get('OPENAI_REALTIME_MODEL') ?? 'gpt-realtime',
-    instructions: `Eres FARO, un asistente personal breve, sobrio y claro. Responde en español. Nunca afirmes que guardaste datos: las escrituras se confirman en la interfaz de FARO. Identificador seguro del usuario: ${user.id}.`,
+    instructions: `Transcribe únicamente habla humana claramente audible en español de México. No inventes palabras a partir de chasquidos, tonos, notificaciones, golpes ni ruido ambiente. Si no hay habla inteligible, devuelve una transcripción vacía. Esta sesión no debe generar respuestas ni voz. Identificador seguro del usuario: ${user.id}.`,
+    output_modalities: ['text'],
     audio: {
-      input: { transcription: { model: 'gpt-4o-mini-transcribe', language: 'es' } },
-      output: { voice: 'marin' },
+      input: {
+        transcription: { model: Deno.env.get('OPENAI_TRANSCRIBE_MODEL') ?? 'gpt-4o-mini-transcribe', language: 'es', prompt: 'Habla humana claramente audible en español de México. Omite sonidos del sistema, clics, golpes, tonos, notificaciones y ruido ambiente.' },
+        turn_detection: { type: 'server_vad', create_response: false, interrupt_response: false, threshold: 0.72, prefix_padding_ms: 300, silence_duration_ms: 650 },
+      },
     },
   }))
   const response = await fetch('https://api.openai.com/v1/realtime/calls', {

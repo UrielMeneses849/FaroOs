@@ -25,11 +25,14 @@ Deno.serve(async (request) => {
   const tokens = await response.json()
   if (!response.ok || !tokens.refresh_token) return appRedirect('error', 'token_exchange')
   const protectedToken = await encryptRefreshToken(tokens.refresh_token)
+  const grantedScopes = String(tokens.scope ?? '').split(/\s+/).filter(Boolean)
   const now = new Date().toISOString()
   const { error } = await db.from('google_calendar_connections').upsert({
     user_id: oauthState.user_id, encrypted_refresh_token: protectedToken.encrypted,
     refresh_token_iv: protectedToken.iv, calendar_id: null, calendar_name: null,
-    google_account_email: null, status: 'needs_calendar', connected_at: now, updated_at: now,
+    google_account_email: null, status: 'needs_calendar',
+    granted_scopes: grantedScopes, write_enabled: false,
+    calendar_access_role: null, connected_at: now, updated_at: now,
   }, { onConflict: 'user_id' })
   return error ? appRedirect('error', 'storage') : appRedirect('connected')
 })

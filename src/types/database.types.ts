@@ -2577,13 +2577,22 @@ export type Database = {
           created_at: string
           entities: Json
           error_message: string | null
+          execution_attempts: number
+          execution_status: string
           id: string
+          last_attempt_at: string | null
           parsed_intent: string | null
+          provider_metadata: Json
           questions: Json
           request_id: string
           result: Json | null
+          route: string | null
+          session_id: string | null
+          skill: string | null
           source: string
           status: string
+          surface: string | null
+          timings: Json
           tool_arguments: Json | null
           tool_name: string | null
           transcript: string | null
@@ -2596,13 +2605,22 @@ export type Database = {
           created_at?: string
           entities?: Json
           error_message?: string | null
+          execution_attempts?: number
+          execution_status?: string
           id?: string
+          last_attempt_at?: string | null
           parsed_intent?: string | null
+          provider_metadata?: Json
           questions?: Json
           request_id: string
           result?: Json | null
+          route?: string | null
+          session_id?: string | null
+          skill?: string | null
           source: string
           status: string
+          surface?: string | null
+          timings?: Json
           tool_arguments?: Json | null
           tool_name?: string | null
           transcript?: string | null
@@ -2615,13 +2633,22 @@ export type Database = {
           created_at?: string
           entities?: Json
           error_message?: string | null
+          execution_attempts?: number
+          execution_status?: string
           id?: string
+          last_attempt_at?: string | null
           parsed_intent?: string | null
+          provider_metadata?: Json
           questions?: Json
           request_id?: string
           result?: Json | null
+          route?: string | null
+          session_id?: string | null
+          skill?: string | null
           source?: string
           status?: string
+          surface?: string | null
+          timings?: Json
           tool_arguments?: Json | null
           tool_name?: string | null
           transcript?: string | null

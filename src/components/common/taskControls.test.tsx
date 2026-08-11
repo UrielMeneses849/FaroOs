@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { format } from 'date-fns'
 import { describe, expect, it, vi } from 'vitest'
@@ -37,5 +37,15 @@ describe('controles compactos de tarea', () => {
     await user.click(triggers[0])
     await user.click(screen.getByRole('button', { name: 'Fuera' }))
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+  })
+
+  it('mantiene el menú en una capa global al hacer scroll', async () => {
+    const user = userEvent.setup()
+    render(<StatusSelector value="todo" onChange={vi.fn()} />)
+    await user.click(screen.getByRole('button', { name: /por hacer/i }))
+    const menu = screen.getByRole('menu')
+    expect(menu.parentElement).toBe(document.body)
+    fireEvent.scroll(window)
+    expect(screen.getByRole('menu')).toBeInTheDocument()
   })
 })
