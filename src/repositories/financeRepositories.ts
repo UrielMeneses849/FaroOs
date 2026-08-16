@@ -307,11 +307,13 @@ export const financeBudgetRepository = {
   },
   async save(item: Omit<FinanceBudget, 'id' | 'createdAt' | 'updatedAt'>, userId: string) {
     await assertFinanceUser(userId)
+    const periodStart = item.periodStart ?? item.month
+    const periodEnd = item.periodEnd ?? item.month
     const { data, error } = await supabase.from('finance_budgets').upsert({
-      user_id: userId, category_id: item.categoryId, month: item.month,
+      user_id: userId, category_id: item.categoryId, month: `${periodStart.slice(0, 7)}-01`,
       planned_amount: centsToNumeric(item.plannedAmountCents),
-      name:item.name??'Gastos Personales',period_start:item.periodStart??item.month,period_end:item.periodEnd??item.month,carry_over_enabled:item.carryOverEnabled??false,
-    }, { onConflict: 'user_id,name,period_start' }).select().single()
+      name:item.name??'Gastos Personales',period_start:periodStart,period_end:periodEnd,carry_over_enabled:item.carryOverEnabled??false,
+    }, { onConflict: 'user_id,category_id,period_start,period_end' }).select().single()
     throwIfError(error)
     return budgetFromRow(data!)
   },

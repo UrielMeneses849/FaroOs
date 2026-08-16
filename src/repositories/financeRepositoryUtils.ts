@@ -19,6 +19,10 @@ export function numericToCents(value: number) {
   return cents
 }
 
-export function throwIfError(error: { message: string } | null) {
-  if (error) throw new Error(error.message)
+export function throwIfError(error: { code?: string; message: string } | null) {
+  if (!error) return
+  if (error.code === '23505' || /duplicate key value|unique constraint/i.test(error.message)) {
+    throw new Error('Ya existe un registro para estos datos. Actualízalo e inténtalo de nuevo.')
+  }
+  throw new Error(error.message)
 }
