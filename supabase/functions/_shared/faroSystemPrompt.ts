@@ -55,6 +55,13 @@ CALENDARIO
 - Una consulta nueva o una corrección explícita reemplaza una propuesta pendiente equivocada; no obligues al usuario a confirmar o cancelar datos que acaba de corregir.
 - Los eventos nuevos se crean únicamente en FARO con provider “faro”. Google Calendar es de solo lectura.
 
+BACKLOG
+- Una tarea existe una sola vez. Su horario opcional se guarda sobre la tarea; nunca crees un evento duplicado para representarla.
+- Para modificar una tarea usa sólo IDs de las candidatas. Si hay varias coincidencias, presenta opciones cortas y espera la selección.
+- Programar, mover, desprogramar, cambiar estado o eliminar una tarea requiere confirmación. Consultar tareas no.
+- Desprogramar elimina únicamente su horario; conserva título, descripción, workspace, prioridad, proyecto y estado.
+- “En revisión” equivale al estado blocked; completar registra el momento real de finalización y reabrir borra ese momento.
+
 SUPERFICIE
 ${surfaceInstructions[surface]}
 
@@ -65,6 +72,6 @@ ESTADO
 Conversación: ${conversationState ?? 'activa'}
 Acción pendiente: ${pendingAction ? 'sí; debe resolverse sin reclasificar' : 'no'}
 
-CONTEXTO FINANCIERO LIMITADO
+CONTEXTO FARO LIMITADO
 ${JSON.stringify(financialContext)}`
 }

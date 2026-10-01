@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const invoke = vi.hoisted(() => vi.fn())
 vi.mock('../lib/supabase/client', () => ({ supabase: { functions: { invoke } } }))
 
-import { googleCalendarService } from './googleCalendarService'
+import { GoogleCalendarServiceError, googleCalendarService } from './googleCalendarService'
 
 describe('Google Calendar service', () => {
   beforeEach(() => invoke.mockReset())
@@ -12,6 +12,12 @@ describe('Google Calendar service', () => {
     invoke.mockResolvedValue({ data: null, error: { message: 'Edge Function returned a non-2xx status code' } })
     await expect(googleCalendarService.status()).rejects.toThrow('Edge Function returned a non-2xx status code')
     expect(invoke).toHaveBeenCalledWith('google-calendar-api', { body: { action: 'status' } })
+  })
+
+  it('indica a la Edge Function cuando OAuth se inicia desde Desktop', async () => {
+    invoke.mockResolvedValue({ data: { authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth?state=desktop.test' }, error: null })
+    await expect(googleCalendarService.startAuthorization('desktop')).resolves.toContain('accounts.google.com')
+    expect(invoke).toHaveBeenCalledWith('google-calendar-auth-start', { body: { completionMode: 'desktop' } })
   })
 
   it('expone el mensaje estructurado devuelto por la Edge Function', async () => {
@@ -28,7 +34,7 @@ describe('Google Calendar service', () => {
       },
     })
     await expect(googleCalendarService.events('2026-08-01', '2026-08-02', true))
-      .rejects.toThrow('Google no permitió leer este calendario.')
+      .rejects.toMatchObject({ name: 'GoogleCalendarServiceError', code: 'google_events_failed', message: 'Google no permitió leer este calendario.' } satisfies Partial<GoogleCalendarServiceError>)
   })
 
   it('envía disponibilidad con zona horaria explícita', async () => {

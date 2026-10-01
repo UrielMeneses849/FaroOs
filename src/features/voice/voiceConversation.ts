@@ -9,9 +9,10 @@ export const normalizeVoiceReply = (value: string) => value
   .trim()
 
 export const shouldAcceptRealtimeWake = (value: string, speechDurationMs?: number) => {
-  const normalized = normalizeVoiceReply(value)
-  const isIsolatedWake = /^(?:hola|oye)\s+(?:faro|foro|fara|farol)$/.test(normalized)
-  return !isIsolatedWake || speechDurationMs === undefined || speechDurationMs >= 650
+  // “FARO” is intentionally a short wake word. Server VAD can report it in
+  // less than 650 ms, so duration is not a valid reason to discard it.
+  void speechDurationMs
+  return Boolean(normalizeVoiceReply(value))
 }
 
 const hasExplicitNegative = (value: string) => /\b(no|cancela|cancelar|olvidalo|dejalo)\b/.test(value)
@@ -19,9 +20,9 @@ const hasModification = (value: string) => /\b(pero|mejor|cambia|cambialo|monto|
 
 export const isNewCommandDuringConfirmation = (value: string) => {
   const normalized = normalizeVoiceReply(value)
-  const operation = /\b(que|cual|dime|busca|buscame|encuentra|mueve|muevelo|recorre|crea|agrega|agenda|programa|elimina|borra|registra|muestra|muestrame)\b/.test(normalized)
-  const domain = /\b(evento|eventos|reunion|reuniones|cita|citas|calendario|agenda|tarea|tareas|movimiento|movimientos|gasto|gastos|ingreso|ingresos|finanzas)\b/.test(normalized)
-  return operation && domain
+  const operation = /\b(que|cual|cuanto|dime|busca|buscame|encuentra|mueve|muevelo|recorre|crea|agrega|agenda|programa|elimina|borra|registra|muestra|muestrame)\b/.test(normalized)
+  const domain = /\b(evento|eventos|reunion|reuniones|cita|citas|calendario|agenda|tarea|tareas|movimiento|movimientos|gasto|gastos|gaste|ingreso|ingresos|finanzas)\b/.test(normalized)
+  return operation && domain && !/\b(?:ponlo|cambialo|cambia|mejor)\b/.test(normalized)
 }
 
 export const isVoiceConfirmation = (value: string) => {
@@ -48,8 +49,25 @@ export type VoiceInputRoute =
   | { kind: 'cancel'; transcript: string }
   | { kind: 'modify'; action: PendingVoiceAction; transcript: string }
   | { kind: 'request_pending_edit'; field: 'title'; transcript: string }
-  | { kind: 'pending_unknown'; transcript: string }
+  | { kind: 'pending_turn'; intent: 'modify' | 'clarify' | 'reject_assumption' | 'question'; transcript: string }
+  | { kind: 'new_intent'; transcript: string }
   | { kind: 'goodbye'; transcript: string }
+
+export type PendingTurnIntent = Extract<VoiceInputRoute, { kind: 'pending_turn' }>['intent']
+
+/**
+ * Pending proposals are conversational state, not a yes/no modal.  Keep this
+ * classifier deliberately conservative: it handles only unambiguous local
+ * turns and leaves the controlled field update to the server.
+ */
+export function classifyPendingTurn(value: string): PendingTurnIntent | 'new_intent' {
+  const normalized = normalizeVoiceReply(value)
+  if (isNewCommandDuringConfirmation(normalized)) return 'new_intent'
+  if (/\?$|\b(?:cual|cuanto|por que|porque|que categoria|que encontraste|explicame)\b/.test(normalized)) return 'question'
+  if (/\b(?:no es(?: el)? mismo|no es igual|eso esta mal|te equivocaste|no es ese|no es lo mismo|ese movimiento es otro|ese dice|yo dije|yo te estoy diciendo|no me entendiste|son movimientos diferentes)\b/.test(normalized)) return 'reject_assumption'
+  if (/\b(?:mejor|cambia|cambialo|ponle|ponlo|descripcion|categoria|importe|monto|fueron|ayer|hoy|manana|prioridad|workspace|a las)\b/.test(normalized)) return 'modify'
+  return 'clarify'
+}
 
 const spokenNumber = (value: string) => {
   const numeric = value.replace(/,/g, '').match(/\$?\s*(\d+(?:\.\d{1,2})?)/)
@@ -66,7 +84,7 @@ const spokenNumber = (value: string) => {
 
 export function updatePendingActionFromVoice(action: PendingVoiceAction, value: string) {
   const title = value.match(/\b(?:cambia|cámbiale|cambiale|ponle)\s+(?:el\s+)?t[ií]tulo\s+(?:a\s+)?(.+?)\s*$/i)?.[1]?.trim()
-  if (title && ['createCalendarEvent', 'createScheduledTask', 'updateCalendarEvent'].includes(action.toolName)) {
+  if (title && ['createCalendarEvent', 'createScheduledTask', 'updateCalendarEvent', 'createBacklogTask', 'updateBacklogTask'].includes(action.toolName)) {
     return { ...action, arguments: { ...action.arguments, title }, summary: action.summary.replace(/“[^”]+”/, `“${title}”`) }
   }
   const amount = spokenNumber(value)
@@ -79,18 +97,28 @@ export function updatePendingActionFromVoice(action: PendingVoiceAction, value: 
   }
 }
 
-export function routeVoiceInput(value: string, options: { pendingAction?: PendingVoiceAction; commandActive: boolean }): VoiceInputRoute {
+export function routeVoiceInput(value: string, options: { pendingAction?: PendingVoiceAction; commandActive: boolean; permissiveWake?: boolean }): VoiceInputRoute {
   const transcript = value.trim()
   if (isVoiceGoodbye(transcript)) return { kind: 'goodbye', transcript }
-  const wake = transcript.match(/^\s*(?:hola|oye)[\s,.:;-]+(?:faro|foro|fara|farol)\b[\s,.:;-]*(.*)$/i)
+  // Realtime is prompted for FARO, but short names are where transcription
+  // is least certain. When Mini was explicitly opened by the user, accept a
+  // few close Spanish renderings too; the regular full-panel flow stays
+  // deliberately stricter to avoid accidental wake-ups in a conversation.
+  const wakeWord = options.permissiveWake
+    ? '(?:faro(?:\\s*os)?|faros|farro|foro|fara|farol|claro|caro)'
+    : '(?:faro(?:\\s*os)?|faros|farro|foro|fara|farol)'
+  const wake = transcript.match(new RegExp(`^\\s*(?:(?:hola|oye|hey|ey|eh)[\\s,.:;-]+)?${wakeWord}\\b[\\s,.:;-]*(.*)$`, 'i'))
   if (wake && !wake[1].trim() && (options.commandActive || options.pendingAction)) return { kind: 'ignore', transcript }
   if (options.pendingAction) {
     if (isVoiceConfirmation(transcript)) return { kind: 'confirm', transcript }
+    if (isNewCommandDuringConfirmation(transcript)) return { kind: 'new_intent', transcript }
     if (isVoiceCancellation(transcript)) return { kind: 'cancel', transcript }
     if (/\b(?:cambia|cambiale|ponle)\s+(?:el\s+)?titulo\s+a?\s*$/.test(normalizeVoiceReply(transcript))) return { kind: 'request_pending_edit', field: 'title', transcript }
     const action = updatePendingActionFromVoice(options.pendingAction, transcript)
     if (action) return { kind: 'modify', action, transcript }
-    return { kind: 'pending_unknown', transcript }
+    const pendingIntent = classifyPendingTurn(transcript)
+    if (pendingIntent === 'new_intent') return { kind: 'new_intent', transcript }
+    return { kind: 'pending_turn', intent: pendingIntent, transcript }
   }
   if (options.commandActive) return { kind: 'command', command: transcript, transcript }
   if (!wake) return { kind: 'ignore', transcript }

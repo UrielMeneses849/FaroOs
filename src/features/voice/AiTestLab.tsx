@@ -61,7 +61,7 @@ export function AiTestLab({ onPrepared }: { onPrepared?: () => void }) {
         onPrepared?.()
       })}>{busy === 'prepare' ? 'Preparando…' : 'Preparar laboratorio'}</Button>
       <Button variant="secondary" disabled={!confirmed || busy !== null} onClick={() => void run('baseline', async () => setBaseline(await aiTestLabService.captureBaseline()))}>Capturar línea base</Button>
-      <Button variant="secondary" icon={<CalendarDays size={15}/>} disabled={!confirmed || busy !== null} onClick={() => void run('calendar', async () => { await aiTestLabService.prepareCalendar(); window.dispatchEvent(new Event('faro:calendar-updated')) })}>{busy==='calendar'?'Preparando…':'Preparar escenarios de Calendar'}</Button>
+      <Button variant="secondary" icon={<CalendarDays size={15}/>} disabled={!confirmed || busy !== null} onClick={() => void run('calendar', async () => { await aiTestLabService.prepareCalendar(); window.dispatchEvent(new Event('faro:calendar-updated')); window.dispatchEvent(new Event('faro:backlog-updated')) })}>{busy==='calendar'?'Preparando…':'Preparar escenarios Calendar + Backlog'}</Button>
       <Button variant="secondary" disabled={!confirmed || busy !== null} onClick={() => { if (window.confirm('¿Restaurar únicamente el escenario financiero de esta identidad de laboratorio?')) void run('restore', async () => { await aiTestLabService.restoreScenario(); onPrepared?.() }) }}>{busy === 'restore' ? 'Restaurando…' : 'Restaurar escenario financiero de prueba'}</Button>
     </div>
     <p className="ai-test-lab__seed">Se crean o reactivan: NU Pruebas, BBVA Pruebas; Comida, Personal, Transporte, Servicios y Sin categoría. La operación es repetible y no duplica nombres.</p>

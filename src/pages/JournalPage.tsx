@@ -1,10 +1,12 @@
 import { format, isValid, parseISO } from 'date-fns'
-import { BookHeart, CheckSquare, Eye, Pencil, Plus, Search, Sparkles, Trash2 } from 'lucide-react'
+import { BookHeart, CheckSquare, Eye, Fingerprint, LockKeyhole, Pencil, Plus, Search, ShieldCheck, Sparkles, Trash2 } from 'lucide-react'
 import { useMemo, useState, type FormEvent } from 'react'
 import { Button, ConfirmDialog, EmptyState, Modal } from '../components/common'
 import { PageHeader } from '../components/layout'
 import { useJournal } from '../hooks/useJournal'
+import { useJournalBiometricLock, type JournalBiometricPhase } from '../hooks/useJournalBiometricLock'
 import { usePageCapture } from '../hooks/usePageCapture'
+import { useAuth } from '../hooks/auth'
 import type { JournalEntry } from '../types'
 
 const faroTemplate = `¿Qué sentí hoy?\n\n¿Qué hice por mí?\n\n¿Qué construí?\n\n¿Qué aprendí?\n\n¿Qué necesito mañana?`
@@ -15,6 +17,8 @@ const blank = (): JournalEntry => {
 
 export function JournalPage() {
   const { capture } = usePageCapture()
+  const { user } = useAuth()
+  const biometric = useJournalBiometricLock(user?.id)
   const { entries, loading, error, refresh, save, remove } = useJournal()
   const [query, setQuery] = useState('')
   const [reading, setReading] = useState<JournalEntry>()
@@ -42,6 +46,7 @@ export function JournalPage() {
     const saved = await save({ ...entry, content: lines.join('\n'), updatedAt: new Date().toISOString() })
     if (saved) setReading(saved)
   }
+  if (biometric.phase !== 'unlocked') return <JournalBiometricGate {...biometric} />
   return <div className="page tracker-page journal-page">
     <PageHeader eyebrow="Diario" title="Un lugar para escucharte." description="Escribe para comprender, recordar y seguir adelante." onCapture={capture} />
     <div className="journal-toolbar"><label><Search size={16} /><span className="sr-only">Buscar en diario</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por texto o tag…" /></label><Button variant="secondary" icon={<Sparkles size={14} />} onClick={() => openEditor(undefined, true)}>Plantilla FARO</Button><Button icon={<Plus size={15} />} onClick={() => openEditor()}>Nueva entrada</Button></div>
@@ -81,5 +86,33 @@ export function JournalPage() {
       </Modal>
     )}
     <ConfirmDialog open={Boolean(deleting)} title="Eliminar entrada" description="Esta acción elimina la entrada del diario de forma permanente." onClose={() => setDeleting(undefined)} onConfirm={async () => { if (!deleting) return; await remove(deleting.id); setDeleting(undefined); setReading(undefined); setFeedback('Entrada eliminada.') }} />
+  </div>
+}
+
+function JournalBiometricGate({ phase, error, method, unavailableReason, enroll, unlock, continueWithoutBiometrics }: {
+  phase: JournalBiometricPhase
+  error: string
+  method: 'desktop-touch-id' | 'web-authn' | 'unsupported'
+  unavailableReason: string
+  enroll: () => Promise<void>
+  unlock: () => Promise<void>
+  continueWithoutBiometrics: () => void
+}) {
+  const busy = phase === 'checking' || phase === 'enrolling' || phase === 'unlocking'
+  const setup = phase === 'setup' || phase === 'enrolling'
+  const unsupported = phase === 'unsupported'
+  const desktopTouchId = method === 'desktop-touch-id'
+  return <div className="page tracker-page journal-page journal-page--locked">
+    <PageHeader eyebrow="Diario privado" title="Un lugar para escucharte." />
+    <section className="journal-biometric-gate" aria-live="polite">
+      <div className="journal-biometric-gate__icon">{setup ? <Fingerprint size={30} /> : <LockKeyhole size={28} />}</div>
+      <span className="eyebrow">PRIVACIDAD DEL DIARIO</span>
+      <h2>{setup ? desktopTouchId ? 'Protege tu diario con Touch ID' : 'Protege tu diario con tu huella' : unsupported ? 'La huella no está disponible aquí' : 'Confirma tu identidad para abrir el diario'}</h2>
+      <p>{setup ? desktopTouchId ? 'Usa Touch ID de macOS para proteger tu diario. FARO nunca recibe ni guarda tu huella.' : 'Registra Touch ID o la huella de este dispositivo. Tu información biométrica nunca sale de él.' : unsupported ? unavailableReason || 'Este navegador no expone biometría. Puedes abrir el diario sin este bloqueo en este dispositivo.' : desktopTouchId ? 'Usa Touch ID de macOS para ver tus entradas.' : 'Usa la huella registrada en este dispositivo para ver tus entradas.'}</p>
+      {error && <small className="journal-biometric-gate__error">{error}</small>}
+      {setup ? <Button icon={<Fingerprint size={16} />} disabled={busy} onClick={() => void enroll()}>{phase === 'enrolling' ? desktopTouchId ? 'Esperando Touch ID…' : 'Esperando huella…' : desktopTouchId ? 'Activar Touch ID' : 'Activar huella'}</Button>
+        : unsupported ? <Button variant="secondary" onClick={continueWithoutBiometrics}>Abrir sin huella</Button>
+          : <Button icon={<ShieldCheck size={16} />} disabled={busy} onClick={() => void unlock()}>{busy ? 'Verificando…' : desktopTouchId ? 'Desbloquear con Touch ID' : 'Desbloquear con huella'}</Button>}
+    </section>
   </div>
 }

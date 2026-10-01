@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { format, subDays } from 'date-fns'
+import { format } from 'date-fns'
 import { useAuth } from '../hooks/auth'
 import {
   isSupabaseId,
@@ -26,6 +26,7 @@ const taskChanged = (previous: Task, current: Task) =>
   || previous.dueDate !== current.dueDate
   || previous.dueAt !== current.dueAt
   || previous.estimatedMinutes !== current.estimatedMinutes
+  || previous.completedAt !== current.completedAt
   || previous.sortOrder !== current.sortOrder
   || previous.workspaceId !== current.workspaceId
   || previous.stakeholder !== current.stakeholder
@@ -54,6 +55,7 @@ export function TaskSyncProvider({ children }: { children: ReactNode }) {
 
     let active = true
     let unsubscribe: (() => void) | undefined
+    let removeVoiceRefresh: (() => void) | undefined
     let applyingRemote = false
     let realtimeChannel: ReturnType<typeof supabase.channel> | undefined
     const goalRelationsReady = !goalSync || goalSync.state === 'ready'
@@ -79,14 +81,28 @@ export function TaskSyncProvider({ children }: { children: ReactNode }) {
         const cleanupKeyForToday = format(cleanupDate, 'yyyy-MM-dd')
         const cleanupKey = `faro-backlog-cleanup:${user.id}`
         if (localStorage.getItem(cleanupKey) !== cleanupKeyForToday) {
-          const removedIds = typeof taskRepository.removeCompletedBefore === 'function'
-            ? await taskRepository.removeCompletedBefore(subDays(cleanupDate, 3).toISOString(), user.id)
-            : []
-          if (removedIds.length) {
-            const removed = new Set(removedIds)
-            useFaroStore.setState((current) => ({ tasks: current.tasks.filter((task) => !removed.has(task.id)) }))
+          // Housekeeping must never prevent the canonical remote Backlog read.
+          // A fresh Desktop has no local marker yet, so it may be the first
+          // surface to reach an older deployment where this optional RPC is
+          // not available. In that case the task list is still fully usable.
+          try {
+            const cleanup = await taskRepository.runSmartCleaner(user.id)
+            const removedIds = cleanup.cleanedIds
+            if (removedIds.length) {
+              const removed = new Set(removedIds)
+              useFaroStore.setState((current) => ({ tasks: current.tasks.filter((task) => !removed.has(task.id)) }))
+            }
+            if (import.meta.env.DEV) console.info('[FARO Smart Cleaner]', {
+              scanned: cleanup.scanned,
+              eligible: cleanup.eligible,
+              cleaned: cleanup.cleaned,
+              skipped_missing_completed_at: cleanup.skippedMissingCompletedAt,
+              errors: cleanup.errors,
+            })
+            localStorage.setItem(cleanupKey, cleanupKeyForToday)
+          } catch (cleanupError) {
+            if (import.meta.env.DEV) console.debug('[FARO Smart Cleaner] skipped', cleanupError)
           }
-          localStorage.setItem(cleanupKey, cleanupKeyForToday)
         }
         const remoteTasks = await taskRepository.list(user.id)
         if (!active) return
@@ -207,6 +223,22 @@ export function TaskSyncProvider({ children }: { children: ReactNode }) {
             } finally { applyingRemote = false }
           }).subscribe()
 
+        // Voice mutations happen in the Edge Function. Realtime remains the
+        // canonical sync path, while this refresh makes the Backlog projection
+        // deterministic even if the websocket delivery arrives a moment later.
+        const refreshFromVoice = async () => {
+          try {
+            const latest = await taskRepository.list(user.id)
+            if (!active) return
+            applyingRemote = true
+            useFaroStore.setState({ tasks: latest })
+          } catch (reason) {
+            if (import.meta.env.DEV) console.debug('[FARO Backlog] voice refresh failed', reason)
+          } finally { applyingRemote = false }
+        }
+        window.addEventListener('faro:backlog-updated', refreshFromVoice)
+        removeVoiceRefresh = () => window.removeEventListener('faro:backlog-updated', refreshFromVoice)
+
         setState(uploads.some((result) => result.status === 'rejected') ? 'error' : 'ready')
         if (uploads.some((result) => result.status === 'rejected')) {
           setError('Algunas tareas locales siguen pendientes de sincronización.')
@@ -221,6 +253,7 @@ export function TaskSyncProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false
       unsubscribe?.()
+      removeVoiceRefresh?.()
       if (realtimeChannel) void supabase.removeChannel(realtimeChannel)
     }
   }, [attempt, goalSync, projectSync, user])

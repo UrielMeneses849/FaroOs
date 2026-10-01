@@ -83,7 +83,7 @@ export function BacklogPage() {
   const metrics = useMemo(() => Object.fromEntries(activeWorkspaces.map((workspace) => {
     const items = allItems.filter((item) => workspaceFor(item) === workspace.id && !item.archivedAt)
     const complete = items.filter((item) => bucketOf(item) === 'done').length
-    return [workspace.id, { pending: items.length - complete, tasks: items.filter((item) => item.kind === 'task').length, projects: items.filter((item) => item.kind === 'project').length, goals: items.filter((item) => item.kind === 'goal').length } satisfies WorkspaceMetrics]
+    return [workspace.id, { active: items.filter((item) => item.kind === 'task' && bucketOf(item) !== 'done').length, pending: items.length - complete } satisfies WorkspaceMetrics]
   })), [activeWorkspaces, allItems, workspaceFor])
   const remove = () => {
     if (!deleting) return
@@ -108,7 +108,14 @@ export function BacklogPage() {
     const previousOrder = beforeIndex > 0 ? targetTasks[beforeIndex - 1]?.sortOrder ?? 0 : beforeIndex === 0 ? 0 : targetTasks.at(-1)?.sortOrder ?? 0
     const nextOrder = beforeIndex >= 0 ? targetTasks[beforeIndex]?.sortOrder ?? previousOrder + 2000 : previousOrder + 2000
     const sortOrder = beforeIndex >= 0 ? (previousOrder + nextOrder) / 2 : nextOrder
-    const optimistic = { ...task, status: targetStatus, sortOrder, updatedAt: new Date().toISOString() }
+    const now = new Date().toISOString()
+    const optimistic = {
+      ...task,
+      status: targetStatus,
+      sortOrder,
+      completedAt: targetStatus === 'done' ? (task.status === 'done' ? task.completedAt : now) : undefined,
+      updatedAt: now,
+    }
     useFaroStore.setState((state) => ({ tasks: state.tasks.map((item) => item.id === taskId ? optimistic : item) }))
     try { await taskRepository.update(optimistic, user.id); setFeedback('Tarea movida.') }
     catch (reason) {
@@ -118,7 +125,7 @@ export function BacklogPage() {
   }
   if (loading && !workspaces.length) return <div className="page"><div className="planning-skeleton" role="status">Preparando workspaces…</div></div>
   if (error && !workspaces.length) return <div className="page"><EmptyState title="No pudimos cargar los workspaces" description={error} action={<Button onClick={refresh}>Reintentar</Button>} /></div>
-  return <div className="page workspace-backlog"><PageHeader eyebrow="Contextos de trabajo" title="Backlog" description="Organiza lo pendiente desde el lugar donde realmente ocurre." />
+  return <div className="page workspace-backlog"><PageHeader eyebrow="Contextos de trabajo" title="Backlog" description="Organiza lo pendiente desde el lugar donde realmente ocurre." showVoice={false} />
     <WorkspaceOverviewGrid workspaces={activeWorkspaces} activeId={activeWorkspace} metrics={metrics} onSelect={chooseWorkspace} />
     {feedback && <div className="kanban-feedback" role="status">{feedback}<button onClick={() => setFeedback('')}>×</button></div>}
     <TaskKanbanBoard tasks={kanbanTasks} projects={projects} showWorkspace={activeWorkspace === 'all'} workspaceName={taskWorkspaceName} onMove={moveTask} onStatus={changeStatus} onAdd={setCreatingStatus} onEdit={(task) => setEditing(allItems.find((item) => item.kind === 'task' && item.id === task.id) ?? null)} onDelete={(task) => setDeleting(allItems.find((item) => item.kind === 'task' && item.id === task.id) ?? null)} onAddToSprint={activeSprint && user ? async (task, commitment) => { await sprintRepository.addTask(activeSprint.id, task.id, commitment, user.id); await refreshSprints(); setFeedback('Tarea añadida al sprint.') } : undefined} />

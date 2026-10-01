@@ -32,6 +32,7 @@ export interface GoogleCalendarConnection {
   accountEmail?: string | null
   calendarId?: string | null
   calendarName?: string | null
+  calendars?: GoogleCalendarChoice[]
   connectedAt?: string | null
   lastSyncedAt?: string | null
   accessRole?: string | null
@@ -48,6 +49,8 @@ export interface GoogleCalendarEvent {
   status?: string
   start?: { date?: string; dateTime?: string; timeZone?: string }
   end?: { date?: string; dateTime?: string; timeZone?: string }
+  calendarId?: string
+  calendarName?: string
 }
 
 export interface CalendarData {

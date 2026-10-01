@@ -1,0 +1,335 @@
+/* Audio-reactive layer for FARO Mini. The level is local, transient and not recorded. */
+.faro-mini__halo {
+  box-shadow: 0 0 calc(28px + var(--faro-audio-level, 0) * 24px) rgba(35, 102, 255, calc(.12 + var(--faro-audio-level, 0) * .36));
+  transform: scale(calc(1 + var(--faro-audio-level, 0) * .16));
+  transition: transform .12s ease, box-shadow .12s ease, border-color .2s ease;
+}
+
+/* FARO Mini is deliberately a compact, vertical conversation surface. */
+.faro-mini {
+  grid-template-rows: 26px minmax(214px, 1fr) 48px;
+  gap: 10px;
+  padding: 18px 20px;
+  border-color: rgba(129, 153, 190, .48);
+  border-radius: 30px;
+  background: rgba(4, 8, 15, .98);
+  box-shadow: 0 22px 54px rgba(0, 0, 0, .46), inset 0 1px rgba(255, 255, 255, .035);
+}
+
+.faro-mini[data-confirmation="true"] {
+  grid-template-rows: 28px minmax(182px, 1fr) auto 50px;
+}
+
+.faro-mini::before {
+  box-shadow: inset 0 0 48px rgba(21, 77, 203, .09);
+}
+
+.faro-mini__status {
+  gap: 7px;
+  font-size: 9px;
+  letter-spacing: .13em;
+}
+
+.faro-mini__wave {
+  width: 58px;
+  height: 24px;
+}
+
+.faro-mini__body {
+  grid-template-columns: 1fr;
+  grid-template-rows: 106px minmax(38px, 1fr) 58px;
+  align-items: center;
+  justify-items: center;
+  gap: 7px;
+  overflow: hidden;
+  text-align: center;
+}
+
+.faro-mini__orb {
+  width: 106px;
+  height: 106px;
+}
+
+.faro-mini__orb img {
+  width: 98px;
+  height: 98px;
+  filter: drop-shadow(0 8px 15px rgba(5, 37, 116, .52));
+}
+
+.faro-mini__halo {
+  inset: 5px;
+  border-color: rgba(72, 136, 255, .38);
+}
+
+.faro-mini__transcript {
+  display: grid;
+  width: min(100%, 342px);
+  align-self: start;
+  gap: 5px;
+}
+
+.faro-mini__transcript > span {
+  margin: 0;
+  color: #8395ae;
+  font-size: 8px;
+  letter-spacing: .16em;
+}
+
+.faro-mini__transcript p {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.42;
+  -webkit-line-clamp: 2;
+}
+
+.faro-mini[data-state="standby"] .faro-mini__transcript p {
+  color: #d4dbe5;
+  font-size: 12px;
+}
+
+.faro-mini__body--voice {
+  grid-template-rows: 118px minmax(48px, 1fr);
+}
+
+/* This is intentionally a separate action from the microphone: it starts a
+   local focus timer without opening an audio input or creating a voice turn. */
+.faro-mini__quiet-focus {
+  display: grid;
+  grid-template-columns: 33px minmax(0, 1fr) auto;
+  align-items: center;
+  width: min(100%, 352px);
+  min-height: 58px;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid rgba(77, 139, 255, .32);
+  border-radius: 15px;
+  background: linear-gradient(108deg, rgba(16, 41, 83, .74), rgba(10, 18, 31, .9));
+  box-shadow: inset 0 1px rgba(255, 255, 255, .055), 0 8px 18px rgba(0, 0, 0, .16);
+  text-align: left;
+}
+
+.faro-mini__quiet-focus--active {
+  border-color: rgba(112, 175, 255, .44);
+  background: linear-gradient(108deg, rgba(18, 57, 109, .82), rgba(10, 25, 47, .92));
+}
+
+.faro-mini__quiet-focus-icon {
+  display: grid;
+  width: 33px;
+  height: 33px;
+  place-items: center;
+  border: 1px solid rgba(87, 151, 255, .5);
+  border-radius: 11px;
+  color: #91c2ff;
+  background: rgba(28, 85, 181, .22);
+}
+
+.faro-mini__quiet-focus-copy { display: grid; min-width: 0; gap: 1px; }
+.faro-mini__quiet-focus-copy small { color: #8cb9f5; font-size: 7px; font-weight: 600; letter-spacing: .13em; }
+.faro-mini__quiet-focus-copy strong { overflow: hidden; color: #eef5ff; font-size: 11px; font-weight: 600; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
+.faro-mini__quiet-focus-copy em { overflow: hidden; color: #8d9cb0; font-size: 8px; font-style: normal; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+
+.faro-mini__quiet-focus-action {
+  display: inline-flex;
+  align-items: center;
+  min-width: 68px;
+  min-height: 33px;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 9px;
+  border: 1px solid rgba(103, 161, 255, .9);
+  border-radius: 10px;
+  color: #fff;
+  background: linear-gradient(135deg, #287dff, #2159d9);
+  box-shadow: 0 5px 12px rgba(23, 95, 241, .28);
+  font: 600 9px Poppins, sans-serif;
+  cursor: pointer;
+  transition: transform .16s ease, filter .16s ease, opacity .16s ease;
+}
+
+.faro-mini__quiet-focus-action:hover:not(:disabled) { filter: brightness(1.12); transform: translateY(-1px); }
+.faro-mini__quiet-focus-action:disabled { cursor: default; opacity: .58; }
+.faro-mini__quiet-focus-action:focus-visible { outline: 2px solid #9bc7ff; outline-offset: 2px; }
+
+.faro-mini__controls {
+  justify-content: center;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.faro-mini__controls button {
+  width: 42px;
+  height: 42px;
+  border-color: rgba(143, 161, 190, .24);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .035);
+}
+
+.faro-mini__controls button.faro-mini__microphone--open,
+.faro-mini__controls button.faro-mini__microphone--open:hover {
+  background: rgba(31, 95, 215, .68);
+}
+
+.faro-mini__controls button.faro-mini__microphone--closed,
+.faro-mini__controls button.faro-mini__microphone--closed:hover {
+  border-color: rgba(116, 142, 177, .34);
+  color: #b9c7d8;
+  background: rgba(103, 125, 155, .13);
+}
+
+.faro-mini__confirmation-panel {
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.faro-mini__confirmation-panel > strong {
+  font-size: 11px;
+}
+
+.faro-mini__confirmation button {
+  min-height: 32px;
+}
+
+.faro-mini__menu {
+  right: 18px;
+  bottom: 68px;
+  border-radius: 14px;
+}
+
+/*
+ * Focus lives as a compact HUD rather than an ambiguous status pill. It stays
+ * readable at a glance and keeps every timer action local and silent.
+ */
+.faro-mini--focus-hud {
+  display: grid;
+  grid-template-rows: 20px minmax(0, 1fr) 43px;
+  gap: 5px;
+  padding: 13px 14px;
+  overflow: hidden;
+  border: 1px solid rgba(109, 152, 226, .4);
+  border-radius: 26px;
+  background:
+    radial-gradient(circle at 50% 38%, rgba(38, 104, 232, .21), transparent 42%),
+    linear-gradient(145deg, rgba(12, 25, 47, .98), rgba(4, 9, 18, .98));
+  box-shadow: 0 18px 46px rgba(0, 0, 0, .44), inset 0 1px rgba(255, 255, 255, .075);
+  animation: faro-focus-hud-in .26s ease-out;
+}
+
+.faro-mini--focus-hud::before {
+  border-radius: inherit;
+  box-shadow: inset 0 0 58px rgba(36, 92, 204, .13);
+}
+
+.faro-mini--focus-hud[data-phase="break"] {
+  border-color: rgba(112, 215, 187, .38);
+  background:
+    radial-gradient(circle at 50% 38%, rgba(25, 153, 117, .2), transparent 42%),
+    linear-gradient(145deg, rgba(8, 37, 42, .98), rgba(4, 14, 20, .98));
+}
+
+.faro-mini__focus-hud-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  z-index: 1;
+}
+
+.faro-mini__focus-hud-head > span { display: inline-flex; align-items: center; gap: 6px; color: #a9c7ff; font-size: 8px; font-weight: 600; letter-spacing: .15em; }
+.faro-mini--focus-hud[data-phase="break"] .faro-mini__focus-hud-head > span { color: #9ce4ce; }
+.faro-mini__focus-hud-head > div { display: inline-flex; align-items: center; gap: 10px; }
+.faro-mini__focus-hud-head button { border: 0; padding: 3px 0; color: #a4b3c8; background: transparent; font: 500 8px Poppins, sans-serif; cursor: pointer; }
+.faro-mini__focus-hud-head button:hover { color: #fff; }
+
+.faro-mini__focus-hud-core { position: relative; z-index: 1; display: grid; justify-items: center; align-content: center; min-height: 0; text-align: center; }
+.faro-mini__focus-orbit { position: relative; display: grid; width: 128px; height: 128px; margin-bottom: -8px; place-items: center; }
+.faro-mini__focus-orbit::before { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(#3f91ff var(--faro-focus-progress, 0%), rgba(94, 142, 224, .16) 0); content: ''; mask: radial-gradient(transparent 59%, #000 61%); -webkit-mask: radial-gradient(transparent 59%, #000 61%); filter: drop-shadow(0 0 10px rgba(48, 125, 255, .48)); }
+.faro-mini--focus-hud[data-phase="break"] .faro-mini__focus-orbit::before { background: conic-gradient(#51d2ae var(--faro-focus-progress, 0%), rgba(95, 202, 174, .16) 0); filter: drop-shadow(0 0 10px rgba(53, 197, 151, .38)); }
+.faro-mini__focus-orbit i { position: absolute; border: 1px solid rgba(87, 149, 255, .18); border-radius: 50%; animation: faro-focus-breathe 3.8s ease-in-out infinite; }
+.faro-mini__focus-orbit i:first-child { inset: 8px; }
+.faro-mini__focus-orbit i:nth-child(2) { inset: -10px; animation-delay: .65s; opacity: .58; }
+.faro-mini--focus-hud[data-phase="break"] .faro-mini__focus-orbit i { border-color: rgba(89, 218, 177, .2); }
+.faro-mini--focus-hud[data-paused="true"] .faro-mini__focus-orbit i { animation-play-state: paused; }
+.faro-mini__focus-orbit img { position: relative; z-index: 1; width: 93px; height: 93px; object-fit: contain; filter: drop-shadow(0 8px 14px rgba(23, 79, 202, .48)); animation: faro-focus-orb-drift 10s ease-in-out infinite; }
+.faro-mini--focus-hud[data-paused="true"] .faro-mini__focus-orbit img { animation-play-state: paused; opacity: .72; }
+.faro-mini__focus-hud-core > strong { margin-top: -10px; color: #f5f8ff; font-size: 42px; font-weight: 600; letter-spacing: -.07em; line-height: .96; font-variant-numeric: tabular-nums; }
+.faro-mini__focus-hud-core > p { margin: 5px 0 0; color: #9aaabe; font-size: 9px; font-weight: 500; }
+.faro-mini__focus-hud-core > small { max-width: 270px; margin-top: 5px; color: #b8c8df; font-size: 8px; line-height: 1.25; }
+
+.faro-mini__focus-hud-controls { position: relative; z-index: 1; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; padding-top: 7px; border-top: 1px solid rgba(144, 169, 209, .16); }
+.faro-mini--focus-hud[data-phase="break"] .faro-mini__focus-hud-controls { grid-template-columns:1fr 1fr; }
+.faro-mini__focus-hud-controls button { display: inline-flex; min-height: 31px; align-items: center; justify-content: center; gap: 5px; border: 1px solid rgba(130, 162, 213, .28); border-radius: 10px; color: #d9e6f9; background: rgba(65, 97, 151, .16); font: 600 8px Poppins, sans-serif; cursor: pointer; transition: background .16s ease, border-color .16s ease, transform .16s ease; }
+.faro-mini__focus-hud-controls button:hover:not(:disabled) { border-color: rgba(116, 169, 255, .72); background: rgba(50, 107, 215, .32); transform: translateY(-1px); }
+.faro-mini__focus-hud-controls button:disabled { cursor: wait; opacity: .56; }
+.faro-mini__focus-hud-controls button:focus-visible { outline: 2px solid #8fc3ff; outline-offset: 2px; }
+.faro-mini__focus-hud-controls .faro-mini__focus-hud-cancel { border-color: rgba(207, 130, 144, .25); color: #e3b9c0; background: rgba(136, 54, 71, .13); }
+.faro-mini__focus-hud-controls .faro-mini__focus-hud-cancel:hover:not(:disabled) { border-color: rgba(242, 132, 150, .65); background: rgba(158, 57, 77, .28); }
+.faro-mini__menu--focus { right: 14px; bottom: 58px; }
+
+/* The timer can tuck itself away without disappearing. Its only job is to
+   keep the orb and remaining time visible until the pointer returns. */
+.faro-mini--focus-peek {
+  display: block;
+  padding: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(111, 157, 234, .46);
+  border-radius: 23px;
+  background:
+    radial-gradient(circle at 50% 43%, rgba(45, 117, 242, .18), transparent 54%),
+    linear-gradient(150deg, rgba(13, 29, 54, .99), rgba(4, 9, 18, .99));
+  box-shadow: 0 15px 34px rgba(0, 0, 0, .42), inset 0 1px rgba(255, 255, 255, .07);
+  animation: faro-focus-peek-in .2s ease-out;
+}
+
+.faro-mini--focus-peek[data-phase="break"] {
+  border-color: rgba(105, 213, 177, .44);
+  background:
+    radial-gradient(circle at 50% 43%, rgba(46, 174, 137, .18), transparent 54%),
+    linear-gradient(150deg, rgba(8, 38, 42, .99), rgba(4, 13, 18, .99));
+}
+
+.faro-mini__focus-peek-button {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  grid-template-rows: 14px 1fr auto 12px;
+  justify-items: center;
+  gap: 1px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.faro-mini__focus-peek-status { display: inline-flex; align-items: center; gap: 4px; color: #a9c7ff; font: 600 7px Poppins, sans-serif; letter-spacing: .13em; }
+.faro-mini--focus-peek[data-phase="break"] .faro-mini__focus-peek-status { color: #9ce4ce; }
+.faro-mini__focus-orbit--peek { width: 68px; height: 68px; margin: 0; }
+.faro-mini__focus-orbit--peek i:first-child { inset: 5px; }
+.faro-mini__focus-orbit--peek i:nth-child(2) { inset: -5px; }
+.faro-mini__focus-orbit--peek img { width: 49px; height: 49px; }
+.faro-mini__focus-peek-button > strong { margin-top: -4px; color: #f5f8ff; font-size: 25px; font-weight: 600; letter-spacing: -.065em; line-height: 1; font-variant-numeric: tabular-nums; }
+.faro-mini__focus-peek-button > small { color: #8ea1bb; font-size: 6px; font-weight: 500; letter-spacing: .02em; opacity: .72; transition: opacity .16s ease; }
+.faro-mini__focus-peek:hover .faro-mini__focus-peek-button > small,
+.faro-mini__focus-peek:focus-within .faro-mini__focus-peek-button > small { opacity: 1; }
+.faro-mini__focus-peek-button:focus-visible { outline: 2px solid #94c4ff; outline-offset: 2px; border-radius: 15px; }
+
+@keyframes faro-focus-hud-in {
+  from { opacity: 0; transform: translateY(-8px) scale(.965); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes faro-focus-peek-in {
+  from { opacity: 0; transform: scale(.94); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes faro-focus-breathe {
+  0%,100% { transform: scale(.93); opacity: .34; }
+  50% { transform: scale(1.06); opacity: .76; }
+}
+
+@keyframes faro-focus-orb-drift {
+  0%,100% { transform: rotate(-4deg) scale(.98); }
+  50% { transform: rotate(5deg) scale(1.035); }
+}

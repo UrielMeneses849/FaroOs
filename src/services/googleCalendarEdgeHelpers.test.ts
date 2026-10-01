@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calendarAppUrl, googleErrorDetails, googleEventsUrl, googleReadOnlyScopes } from '../../supabase/functions/_shared/googleCalendarPure'
+import { calendarAppUrl, googleErrorDetails, googleEventsUrl, googleOAuthCompletionMode, googleOAuthState, googleReadOnlyScopes } from '../../supabase/functions/_shared/googleCalendarPure'
 
 describe('Google Calendar Edge helpers', () => {
   it('solicita únicamente scopes de lectura y disponibilidad', () => {
@@ -13,6 +13,13 @@ describe('Google Calendar Edge helpers', () => {
   it('preserva el subpath de APP_URL al construir el callback', () => {
     expect(calendarAppUrl('https://urielmeneses849.github.io/FaroOs', 'connected').toString())
       .toBe('https://urielmeneses849.github.io/FaroOs/calendar?googleCalendar=connected')
+  })
+
+  it('marca el estado OAuth desktop sin cambiar el flujo web', () => {
+    expect(googleOAuthState('random-value', 'desktop')).toBe('desktop.random-value')
+    expect(googleOAuthCompletionMode('desktop.random-value')).toBe('desktop')
+    expect(googleOAuthState('random-value', 'web')).toBe('random-value')
+    expect(googleOAuthCompletionMode('random-value')).toBe('web')
   })
 
   it('codifica un calendarId con correo en la ruta de events.list', () => {

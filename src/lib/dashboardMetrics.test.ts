@@ -27,6 +27,13 @@ describe('dashboard operativo', () => {
     expect(workspaceOpenLoad([],[], '2026-08-04')).toEqual([])
   })
 
+  it('mantiene visibles eventos en curso y los eventos de todo el día', () => {
+    const now = new Date('2026-08-04T12:00:00.000Z')
+    const current = { id:'current', sourceId:'current', sourceType:'event' as const, title:'Bloque actual', start:'2026-08-04T11:30:00.000Z', end:'2026-08-04T13:00:00.000Z', allDay:false, status:'scheduled', editable:true }
+    const allDay = { id:'all-day', sourceId:'all-day', sourceType:'event' as const, title:'Día completo', start:'2026-08-04', end:'2026-08-05', allDay:true, status:'scheduled', editable:true }
+    expect(upcoming48Hours([current, allDay], now).map((item) => item.id)).toEqual(['all-day', 'current'])
+  })
+
   it('activa la alerta de peso después de dos días', () => {
     expect(weightRegistrationIsStale('2026-08-01', '2026-08-03')).toBe(true)
     expect(weightRegistrationIsStale('2026-08-02', '2026-08-03')).toBe(false)

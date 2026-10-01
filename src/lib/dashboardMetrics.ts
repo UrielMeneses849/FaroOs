@@ -1,4 +1,4 @@
-import { addDays, endOfDay, isValid, parseISO } from 'date-fns'
+import { addDays, endOfDay, format, isValid, parseISO } from 'date-fns'
 import type { CalendarItem } from '../features/calendar/calendarTypes'
 import type { Task, Workspace } from '../types'
 
@@ -20,14 +20,30 @@ export function workspaceOpenLoad(tasks: Task[], workspaces: Workspace[], today:
 
 export function upcoming48Hours(items: CalendarItem[], now = new Date()) {
   const end = endOfDay(addDays(now, 1))
+  const today = format(now, 'yyyy-MM-dd')
+  const tomorrow = format(addDays(now, 1), 'yyyy-MM-dd')
   return items.filter((item) => {
     const start = parseISO(item.start)
-    return isValid(start)
-      && (item.sourceType === 'task' || item.sourceType === 'event')
-      && !item.allDay
-      && !['done', 'completed', 'cancelled'].includes(item.status)
-      && start >= now
-      && start <= end
+    if (!isValid(start) || !['task', 'event'].includes(item.sourceType) || ['done', 'completed', 'cancelled'].includes(item.status)) return false
+
+    // Deadlines stay out of the agenda when they have no time, but all-day
+    // calendar events are commitments and must stay visible on their dates.
+    if (item.allDay) {
+      if (item.sourceType !== 'event') return false
+      const startsOn = item.start.slice(0, 10)
+      const endsOn = item.end?.slice(0, 10)
+      // Google supplies an exclusive end date for all-day ranges. A one-day
+      // event without an end is still current on its start date.
+      return startsOn <= tomorrow && (endsOn ? endsOn > today : startsOn >= today)
+    }
+
+    // Do not make an event disappear merely because it already started; keep
+    // it through its end so the dashboard reflects the current commitment.
+    if (item.sourceType === 'event' && item.end) {
+      const eventEnd = parseISO(item.end)
+      return isValid(eventEnd) && eventEnd >= now && start <= end
+    }
+    return start >= now && start <= end
   }).sort((a, b) => a.start.localeCompare(b.start)).slice(0, 5)
 }
 

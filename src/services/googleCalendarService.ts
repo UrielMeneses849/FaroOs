@@ -11,6 +11,13 @@ interface InvokeResult<T> { data: T | null; error: { message: string; context?: 
 let eventCache: { key: string; value: GoogleCalendarEvent[]; lastSyncedAt?: string } | undefined
 let pendingEvents: Promise<{ events: GoogleCalendarEvent[]; lastSyncedAt?: string }> | undefined
 
+export class GoogleCalendarServiceError extends Error {
+  constructor(message: string, public code?: string) {
+    super(message)
+    this.name = 'GoogleCalendarServiceError'
+  }
+}
+
 async function invoke<T>(functionName: string, body: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke(functionName, { body }) as InvokeResult<T & GoogleFunctionErrorPayload>
   let errorPayload: GoogleFunctionErrorPayload | null = data?.error ? data : null
@@ -19,7 +26,10 @@ async function invoke<T>(functionName: string, body: Record<string, unknown>): P
     try { errorPayload = await context.json() as GoogleFunctionErrorPayload }
     catch { errorPayload = null }
   }
-  if (error || !data || data.error) throw new Error(errorPayload?.message ?? error?.message ?? 'No se pudo consultar Google Calendar.')
+  if (error || !data || data.error) throw new GoogleCalendarServiceError(
+    errorPayload?.message ?? error?.message ?? 'No se pudo consultar Google Calendar.',
+    errorPayload?.error,
+  )
   return data
 }
 
@@ -27,16 +37,17 @@ export const googleCalendarService = {
   async status() {
     return (await invoke<{ connection: GoogleCalendarConnection }>('google-calendar-api', { action: 'status' })).connection
   },
-  async startAuthorization() {
-    return (await invoke<{ authorizationUrl: string }>('google-calendar-auth-start', {})).authorizationUrl
+  async startAuthorization(completionMode: 'web' | 'desktop' = 'web') {
+    return (await invoke<{ authorizationUrl: string }>('google-calendar-auth-start', { completionMode })).authorizationUrl
   },
   async listCalendars() {
     return (await invoke<{ calendars: GoogleCalendarChoice[] }>('google-calendar-api', { action: 'list' })).calendars
   },
-  async selectCalendar(calendarId: string) {
+  async selectCalendars(calendarIds: string[]) {
     eventCache = undefined
-    return (await invoke<{ connection: GoogleCalendarConnection }>('google-calendar-api', { action: 'select', calendarId })).connection
+    return (await invoke<{ connection: GoogleCalendarConnection }>('google-calendar-api', { action: 'select', calendarIds })).connection
   },
+  async selectCalendar(calendarId: string) { return this.selectCalendars([calendarId]) },
   async events(timeMin: string, timeMax: string, force = false) {
     const key = `${timeMin}:${timeMax}`
     if (!force && eventCache?.key === key) return { events: eventCache.value, lastSyncedAt: eventCache.lastSyncedAt }

@@ -1,0 +1,38 @@
+html[data-faro-window="mini"],html[data-faro-window="mini"] body,html[data-faro-window="mini"] #root{width:100%;height:100%;margin:0;min-width:0;background:transparent;overflow:hidden;color-scheme:dark}
+.mini-surface{box-sizing:border-box;position:relative;display:grid;grid-template-columns:minmax(0,1fr) 72px;align-content:center;align-items:center;gap:8px 10px;width:calc(100% - 12px);height:calc(100% - 12px);margin:6px;padding:12px;border:1px solid #27364b;border-radius:22px;color:#edf3fc;background:#09101bef;font-family:Poppins,sans-serif;user-select:none;overflow:hidden;box-shadow:0 3px 9px #0003}
+.mini-surface *{box-sizing:border-box}.mini-surface button{font:inherit;cursor:pointer}.mini-surface button:focus-visible{outline:2px solid #79afff;outline-offset:2px}.mini-surface button:disabled{opacity:.5;cursor:wait}
+.mini-surface[data-state="ambient"]{display:grid;place-content:center;grid-template-columns:1fr;width:100%;height:100%;margin:0;padding:4px;border:0;background:transparent;box-shadow:none}
+.mini-orb{grid-column:2;grid-row:1;position:relative;display:grid;place-items:center;justify-self:center;width:72px;height:72px;padding:0;border:0;border-radius:50%;background:transparent;touch-action:none}
+.mini-orb img{width:68px;height:68px;object-fit:contain;pointer-events:none;animation:mini-breathe 9s ease-in-out infinite}.mini-orb-ring{position:absolute;inset:3px;border:1px solid #4b88ed30;border-radius:50%;pointer-events:none;transition:transform 180ms ease,opacity 180ms ease}
+[data-state="ambient"] .mini-orb-ring{opacity:0}.mini-orb-accent{position:absolute;right:4px;bottom:4px;border-radius:50%;padding:2px;box-sizing:content-box;color:#7ee2b4;background:#0c2531}
+.mini-copy{grid-column:1;grid-row:1;min-width:0;animation:mini-content-in 180ms ease-out}.mini-label{display:block;font-size:12px;font-weight:500;line-height:1.4}.mini-copy>span{font-size:10px;color:#8fa3bf}.mini-copy p{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere;margin:5px 0 0;font-size:11px;line-height:1.5;color:#b4c3d9}.mini-meter{display:flex;align-items:center;gap:4px;height:23px;margin-top:7px}.mini-meter i{width:3px;height:21px;border-radius:3px;background:#579cff;transform:scaleY(calc(.12 + var(--audio-level,0) * var(--weight,1)));transition:transform 80ms linear}
+[data-state="listening"] .mini-orb-ring{border-color:#568ff9;transform:scale(calc(1 + var(--audio-level,0) * .12))}
+[data-state="understanding"] .mini-orb img,[data-state="executing"] .mini-orb img{animation:mini-think 2.4s ease-in-out infinite}
+[data-state="consulting"] .mini-orb-ring{animation:mini-wave 1.6s ease-in-out infinite}[data-state="speaking"] .mini-orb-ring{animation:mini-wave .9s ease-in-out infinite;border-color:#72acff}
+[data-state="error"] .mini-orb-ring{border-color:#d49c66}[data-state="success"] .mini-orb-ring{border-color:#71cda1}
+.mini-actions{display:flex;justify-content:center;gap:7px;grid-column:1/-1}.mini-actions button{display:flex;align-items:center;justify-content:center;gap:5px;min-height:31px;padding:6px 10px;border:1px solid #2b405e;border-radius:9px;background:#111f33;color:#d9e8ff;font-size:10px}.mini-actions button:hover{background:#1a3150}.mini-actions .mini-primary{background:#245dd8;border-color:#487de6;color:white;flex:1}
+.mini-stop,.mini-close{position:absolute;right:8px;top:7px;display:grid;place-items:center;width:22px;height:22px;padding:0;border:0;border-radius:50%;color:#9eafc9;background:#162134}.mini-conversation{grid-column:1/-1;justify-self:end;padding:0;border:0;background:none;color:#8ab6ff;font-size:9px}
+[data-state="awaiting_confirmation"]{align-content:space-between}.mini-copy .mini-proposal{-webkit-line-clamp:4;font-size:12px;color:#e4edfb}
+[data-state="focus_compact"],[data-state="focus_expanded"]{grid-template-columns:1fr;justify-items:center;gap:4px;padding:10px}
+[data-state="focus_compact"] .mini-copy{display:none}[data-state="focus_expanded"] .mini-orb{grid-row:2}[data-state="focus_expanded"] .mini-copy{grid-row:1;text-align:center}[data-state="focus_expanded"] .mini-label{text-transform:uppercase;font-size:9px;letter-spacing:.12em;color:#8ca6cd}
+.mini-focus-clock{display:grid;justify-items:center;gap:2px;min-width:88px;border-bottom:2px solid #294065;background:linear-gradient(to right,#4a8cfa var(--focus-progress,0%),transparent 0) bottom / 100% 2px no-repeat;padding-bottom:6px}.mini-focus-clock strong{font-size:25px;font-weight:500;line-height:1.2;font-variant-numeric:tabular-nums}.mini-focus-clock span{font-size:8px;color:#8fa3c2}
+.mini-debug{position:fixed;inset:auto 0 0;font:8px monospace;color:#fff;background:#000c;pointer-events:none}
+@keyframes mini-breathe{0%,100%{transform:scale(.985)}50%{transform:scale(1)}}@keyframes mini-think{0%,100%{transform:rotate(-5deg)}50%{transform:rotate(5deg)}}@keyframes mini-wave{0%,100%{opacity:.45;transform:scale(.98)}50%{opacity:1;transform:scale(1.04)}}@keyframes mini-content-in{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.mini-surface *{animation:none!important;transition:none!important}}
+.mini-surface[data-reduced-motion="true"] *{animation:none!important;transition:none!important}
+
+[data-state="ambient"] .mini-orb,[data-state="focus_compact"] .mini-orb,[data-state="focus_expanded"] .mini-orb{grid-column:1}
+[data-state="focus_compact"] .mini-orb{grid-row:1}
+
+.mini-focus-start{display:flex;align-items:center;gap:5px;margin-top:7px;padding:5px 7px;border:1px solid #355780;border-radius:8px;background:#162a45;color:#dbeaff;font-size:10px!important;white-space:nowrap}.mini-input-status{display:flex;align-items:center;gap:5px;margin-top:5px}
+
+.mini-surface[data-state="focus_compact"]{background:rgba(9,16,27,.38);border-color:#9ab7e329;box-shadow:none;border-radius:18px;padding:7px;gap:3px}
+[data-state="focus_compact"] .mini-orb{width:48px;height:48px}
+[data-state="focus_compact"] .mini-orb img{width:46px;height:46px}
+[data-state="focus_compact"] .mini-focus-clock{min-width:70px;text-shadow:0 1px 4px #000}
+[data-state="focus_compact"] .mini-focus-clock strong{font-size:22px}
+[data-state="focus_compact"] .mini-focus-clock span{color:#d3deef}
+[data-state="focus_expanded"] .mini-actions{flex-wrap:wrap}
+
+[data-state="focus_expanded"] .mini-actions{gap:4px}
+[data-state="focus_expanded"] .mini-actions button{padding:6px;font-size:9px}

@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useEffect, useId, useRef, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { cn } from '../../lib/utils'
 import { IconButton } from './IconButton'
 
@@ -12,8 +13,17 @@ interface ModalProps {
   panelClassName?: string
 }
 
+// One lock and one active keyboard owner, regardless of JSX order or close order.
+const modalStack: HTMLDivElement[] = []
+let bodyOverflow = ''
+let modalLayer = 80
+const updateModalStack = () => {
+  modalStack.forEach((element, index) => { element.inert = index !== modalStack.length - 1 })
+}
+
 export function Modal({ open, title, onClose, children, panelClassName }: ModalProps) {
   const titleId = useId()
+  const backdropRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const closeRef = useRef(onClose)
   const reduceMotion = useReducedMotion()
@@ -23,14 +33,22 @@ export function Modal({ open, title, onClose, children, panelClassName }: ModalP
   }, [onClose])
 
   useEffect(() => {
-    if (!open) return
+    if (!open || !backdropRef.current) return
+    const backdrop = backdropRef.current
+    if (!modalStack.length) {
+      bodyOverflow = document.body.style.overflow
+      modalLayer = 80
+    }
+    backdrop.style.zIndex = String(++modalLayer)
+    modalStack.push(backdrop)
+    updateModalStack()
+    document.body.style.overflow = 'hidden'
     const previous = document.activeElement as HTMLElement | null
     const initialFocus = panelRef.current?.querySelector<HTMLElement>('input, select, textarea')
     if (initialFocus) initialFocus.focus()
     else panelRef.current?.focus()
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
     const handleKeys = (event: KeyboardEvent) => {
+      if (modalStack.at(-1) !== backdrop) return
       if (event.key === 'Escape') {
         event.preventDefault()
         closeRef.current()
@@ -56,24 +74,30 @@ export function Modal({ open, title, onClose, children, panelClassName }: ModalP
     document.addEventListener('keydown', handleKeys)
     return () => {
       document.removeEventListener('keydown', handleKeys)
-      document.body.style.overflow = previousOverflow
-      previous?.focus()
+      const wasTop = modalStack.at(-1) === backdrop
+      const index = modalStack.indexOf(backdrop)
+      if (index >= 0) modalStack.splice(index, 1)
+      backdrop.inert = true
+      updateModalStack()
+      if (!modalStack.length) document.body.style.overflow = bodyOverflow
+      if (wasTop && previous?.isConnected && !previous.closest('[inert]')) previous.focus()
+      else if (wasTop) modalStack.at(-1)?.querySelector<HTMLElement>('[role="dialog"]')?.focus()
     }
   }, [open])
 
-  return (
+  return createPortal(
     <AnimatePresence>
       {open && (
-        <motion.div className="modal-backdrop" initial={reduceMotion ? false : { opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+        <motion.div ref={backdropRef} className="modal-backdrop" initial={reduceMotion ? false : { opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={(event) => event.target === event.currentTarget && modalStack.at(-1) === backdropRef.current && onClose()}>
           <motion.div ref={panelRef} className={cn('modal-panel', panelClassName)} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} initial={reduceMotion ? false : { opacity: 0, y: 20, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 12, scale: 0.98 }}>
             <div className="modal-header">
               <h2 id={titleId}>{title}</h2>
               <IconButton label="Cerrar modal" onClick={onClose}><X size={18} /></IconButton>
             </div>
-            {children}
+            <div className="modal-body">{children}</div>
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>, document.body
   )
 }

@@ -67,6 +67,8 @@ export interface Task extends BaseEntity {
   dueDate?: string
   dueAt?: string
   estimatedMinutes?: number
+  /** Instant in which the task most recently entered `done`. */
+  completedAt?: string
   sortOrder?: number
   workspaceId?: string
   stakeholder?: string
@@ -143,6 +145,7 @@ export interface TreatmentLog extends BaseEntity {
   medicationTaken: boolean
   dosage?: string
   dryness?: number
+  acneProgress?: number
   skinCondition?: string
   sideEffects?: string
   notes?: string

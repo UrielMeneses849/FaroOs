@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase/client'
+import { getFaroRuntimeSurface, type FaroRuntimeSurface } from '../core/platform/runtime'
 import {
   pendingActionSchema,
   voiceResponseSchema,
@@ -63,6 +64,8 @@ export const voiceService = {
     requestId?: string
     sessionId?: string
     pipeline?: VoicePipeline
+    benchmarkScenario?: string
+    runtimeSurface?: FaroRuntimeSurface
     sessionContext?: VoiceSessionContext
     trace?: VoiceTrace
   } = {}) {
@@ -72,8 +75,10 @@ export const voiceService = {
       source,
       message,
       history,
-      surface,
+      surface: options.runtimeSurface ?? getFaroRuntimeSurface(surface),
+      pageSurface: surface,
       pipeline: options.pipeline,
+      benchmarkScenario: options.benchmarkScenario,
       sessionContext: options.sessionContext,
       trace: options.trace,
       localContext: {
@@ -91,14 +96,16 @@ export const voiceService = {
     const parsed = pendingActionSchema.parse(action)
     return invoke({ type: 'cancel', requestId: parsed.requestId })
   },
-  revise(action: PendingVoiceAction) {
+  revise(action: PendingVoiceAction, transcript = '') {
     const parsed = pendingActionSchema.parse(action)
-    if (['createCalendarEvent', 'createScheduledTask', 'updateCalendarEvent'].includes(parsed.toolName)) {
-      return invoke({ type: 'revise', requestId: parsed.requestId, title: parsed.arguments.title })
+    const body: Record<string, unknown> = { type: 'revise', requestId: parsed.requestId, transcript: transcript.slice(0, 2000) }
+    if (['createCalendarEvent', 'createScheduledTask', 'updateCalendarEvent', 'createBacklogTask', 'updateBacklogTask'].includes(parsed.toolName)) {
+      if (typeof parsed.arguments.title === 'string') body.title = parsed.arguments.title
+      return invoke(body)
     }
     const value = parsed.arguments.actualAmount ?? parsed.arguments.amount
-    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) throw new Error('El nuevo monto no es válido.')
-    return invoke({ type: 'revise', requestId: parsed.requestId, amount: value })
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) body.amount = value
+    return invoke(body)
   },
   async telemetry(requestId: string, timings: Record<string, number>, providerMetadata: Record<string, unknown> = {}) {
     try {

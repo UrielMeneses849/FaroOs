@@ -1,6 +1,7 @@
 export * from './goalRepository'
 export * from './healthRepository'
 export * from './journalRepository'
+export * from './needsRepository'
 export * from './projectRepository'
 export * from './studyRepository'
 export * from './taskRepository'

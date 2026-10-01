@@ -98,13 +98,24 @@ export const useFaroStore = create<FaroStore>()(
             task.projectId === id ? { ...task, projectId: undefined, updatedAt: stamp() } : task,
           ),
         })),
-      createTask: (task) => set((state) => ({ tasks: [...state.tasks, task] })),
+      createTask: (task) => set((state) => {
+        const now = stamp()
+        return { tasks: [...state.tasks, task.status === 'done' && !task.completedAt ? { ...task, completedAt: now } : task] }
+      }),
       updateTask: (id, changes) =>
-        set((state) => ({
-          tasks: state.tasks.map((task) =>
-            task.id === id ? { ...task, ...changes, updatedAt: stamp() } : task,
-          ),
-        })),
+        set((state) => {
+          const now = stamp()
+          return {
+            tasks: state.tasks.map((task) => {
+              if (task.id !== id) return task
+              const nextStatus = changes.status ?? task.status
+              const completedAt = nextStatus === 'done'
+                ? task.status === 'done' ? task.completedAt : now
+                : undefined
+              return { ...task, ...changes, completedAt, updatedAt: now }
+            }),
+          }
+        }),
       deleteTask: (id) => set((state) => ({ tasks: state.tasks.filter((task) => task.id !== id) })),
       createHealthLog: (log) => set((state) => ({ healthLogs: [...state.healthLogs, log] })),
       updateHealthLog: (id, changes) => set((state) => ({

@@ -3,6 +3,8 @@ import { router } from './app/router'
 import { AuthProvider, GoalSyncProvider, LocalMigrationProvider, ProjectSyncProvider, TaskSyncProvider } from './providers'
 import { useAuth } from './hooks/auth'
 import { FaroVoiceProvider } from './features/voice/FaroVoiceProvider'
+import { DesktopProactivity } from './desktop/DesktopProactivity'
+import { PwaExperience } from './features/pwa/PwaExperience'
 
 function FaroRuntime() {
   const { user } = useAuth()
@@ -15,7 +17,7 @@ function FaroRuntime() {
       <GoalSyncProvider>
         <ProjectSyncProvider>
           <TaskSyncProvider>
-            <FaroVoiceProvider><RouterProvider router={router} /></FaroVoiceProvider>
+            <FaroVoiceProvider><DesktopProactivity /><RouterProvider router={router} /></FaroVoiceProvider>
           </TaskSyncProvider>
         </ProjectSyncProvider>
       </GoalSyncProvider>
@@ -25,8 +27,11 @@ function FaroRuntime() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <FaroRuntime />
-    </AuthProvider>
+    <>
+      <AuthProvider>
+        <FaroRuntime />
+      </AuthProvider>
+      <PwaExperience />
+    </>
   )
 }

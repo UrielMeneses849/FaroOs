@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { FinanceData } from '../features/finance/financeTypes'
 import {
-  accountBalance, advanceRecurringDate, annualFinanceTotals, budgetPerformance, calculateFinanceMetrics,
-  financeAvailableEvolution, financeDecision, financeFrequencyLabel, financeGoalProjections, financePeriodFlow, financeProjectionBreakdown, formatFinanceDate, goalProgress, monthKey, personalBudgetForDate, recurringAppliesToMonth, recurringExpectedDate, spentTodayCents,
+  accountBalance, advanceRecurringDate, annualFinanceTotals, budgetPerformance, calculateFinanceMetrics, canRegisterEventualIncome, eventualIncomeTransactions,
+  canonicalFinanceBudgetGroups, financeAvailableEvolution, financeDecision, financeFrequencyLabel, financeGoalProjections, financeLiquidityTimeline, financePeriodFlow, financeProjectionBreakdown, formatFinanceDate, goalProgress, monthKey, personalBudgetForDate, personalBudgetReservations, recurringAppliesToMonth, recurringExpectedDate, spentTodayCents,
 } from './financeService'
+import { financeLiquidityProjection } from './financeLiquidityProjection'
 
 const base = '2026-07-01T00:00:00.000Z'
 const data: FinanceData = {
@@ -20,9 +21,78 @@ const data: FinanceData = {
   goals: [{ id: 'g', name: 'Europa', targetAmountCents: 5_000_000, status: 'active', priority: 'high', createdAt: base, updatedAt: base }],
   contributions: [{ id: 'c', goalId: 'g', amountCents: 500_000, contributionDate: '2026-07-05', createdAt: base }],
   budgetClosures: [], savingsFundEntries: [], goalItems: [],
+  liquidityPreference: { minimumOperatingBufferCents: 1_500_000 },
+  liquiditySnapshots: [],
 }
 
 describe('financeService', () => {
+  it('muestra ingresos eventuales cobrados y pendientes, pero no cancelados ni recurrentes', () => {
+    const transactions = [
+      { ...data.transactions[0], id: 'collected', status: 'completed' as const },
+      { ...data.transactions[0], id: 'planned', status: 'planned' as const },
+      { ...data.transactions[0], id: 'pending', status: 'pending' as const },
+      { ...data.transactions[0], id: 'cancelled', status: 'cancelled' as const },
+      { ...data.transactions[0], id: 'recurring', recurringTransactionId: 'salary' },
+      { ...data.transactions[1], id: 'expense' },
+    ]
+
+    expect(eventualIncomeTransactions(transactions).map((item) => item.id)).toEqual(['collected', 'planned', 'pending'])
+    expect(canRegisterEventualIncome(transactions[1])).toBe(true)
+    expect(canRegisterEventualIncome(transactions[2])).toBe(true)
+    expect(canRegisterEventualIncome(transactions[0])).toBe(false)
+  })
+
+  it('unifica duplicados personales y reserva sólo el remanente de cada quincena', () => {
+    const september: FinanceData = {
+      ...data,
+      accounts: [{ ...data.accounts[0], initialBalanceCents: 1_000_000 }],
+      categories: [
+        { id: 'personal-a', name: 'Personal', type: 'expense', isDefault: false, isActive: true },
+        { id: 'personal-b', name: 'Personal', type: 'expense', isDefault: false, isActive: true },
+      ],
+      transactions: [
+        { ...data.transactions[1], id: 'q1-paid', categoryId: 'personal-a', amountCents: 100_000, transactionDate: '2026-09-04', status: 'completed' },
+        { ...data.transactions[1], id: 'q1-planned', categoryId: 'personal-b', amountCents: 50_000, transactionDate: '2026-09-07', status: 'planned' },
+        { ...data.transactions[1], id: 'q2-planned', categoryId: 'personal-a', amountCents: 50_000, transactionDate: '2026-09-18', status: 'planned' },
+      ],
+      budgets: [
+        { id: 'old-q1', categoryId: 'personal-a', month: '2026-09-01', plannedAmountCents: 500_000, name: 'Gastos Personales', periodStart: '2026-09-01', periodEnd: '2026-09-15', createdAt: base, updatedAt: base },
+        { id: 'new-q1', categoryId: 'personal-b', month: '2026-09-01', plannedAmountCents: 500_000, name: 'Gastos Personales', periodStart: '2026-09-01', periodEnd: '2026-09-15', createdAt: base, updatedAt: '2026-09-01T00:00:00.000Z' },
+        { id: 'q2', categoryId: 'personal-a', month: '2026-09-01', plannedAmountCents: 300_000, name: 'Gastos Personales', periodStart: '2026-09-16', periodEnd: '2026-09-30', createdAt: base, updatedAt: base },
+      ],
+    }
+    expect(canonicalFinanceBudgetGroups(september)).toHaveLength(2)
+    expect(budgetPerformance(september, new Date(2026, 8, 1))).toHaveLength(2)
+    expect(personalBudgetReservations(september, new Date(2026, 8, 1), new Date(2026, 8, 1))).toMatchObject([
+      { budgetId: 'new-q1', date: '2026-09-01', amountCents: 350_000 },
+      { budgetId: 'q2', date: '2026-09-16', amountCents: 250_000 },
+    ])
+    const projected = financeProjectionBreakdown(september, new Date(2026, 8, 1), new Date(2026, 8, 1))
+    expect(projected.gastosPendientes).toBe(700_000)
+    expect(projected.balanceProyectado).toBe(200_000)
+  })
+
+  it('acumula el remanente de Q1 con el presupuesto nuevo de Q2', () => {
+    const fortnightData: FinanceData = {
+      ...data,
+      categories: [{ id: 'personal', name: 'Personal', type: 'expense', isDefault: false, isActive: true }],
+      transactions: [
+        { ...data.transactions[1], id: 'q1-use', categoryId: 'personal', amountCents: 300_000, transactionDate: '2026-09-08', status: 'completed' },
+      ],
+      budgets: [
+        { id: 'q1', categoryId: 'personal', month: '2026-09-01', plannedAmountCents: 500_000, name: 'Gastos Personales', periodStart: '2026-09-01', periodEnd: '2026-09-15', createdAt: base, updatedAt: base },
+        { id: 'q2', categoryId: 'personal', month: '2026-09-01', plannedAmountCents: 500_000, name: 'Gastos Personales', periodStart: '2026-09-16', periodEnd: '2026-09-30', carryOverEnabled: true, createdAt: base, updatedAt: base },
+      ],
+    }
+    expect(personalBudgetReservations(fortnightData, new Date(2026, 8, 1), new Date(2026, 8, 1))).toMatchObject([
+      { budgetId: 'q1', amountCents: 200_000 },
+      { budgetId: 'q2', amountCents: 500_000 },
+    ])
+    expect(personalBudgetReservations(fortnightData, new Date(2026, 8, 1), new Date(2026, 8, 16))).toMatchObject([
+      { budgetId: 'q2', amountCents: 700_000 },
+    ])
+  })
+
   it('separa el flujo del periodo de la evolución del disponible', () => {
     const periodData = {
       ...data,
@@ -48,11 +118,12 @@ describe('financeService', () => {
   })
 
   it('recalcula los balances al retirar un movimiento eliminado', () => {
-    const before = calculateFinanceMetrics(data, new Date(2026, 6, 15))
+    const reference = new Date(2026, 6, 15)
+    const before = calculateFinanceMetrics(data, new Date(2026, 6, 15), reference)
     const after = calculateFinanceMetrics({
       ...data,
       transactions: data.transactions.filter((transaction) => transaction.id !== 'e'),
-    }, new Date(2026, 6, 15))
+    }, new Date(2026, 6, 15), reference)
     expect(before.monthlyExpensesCents).toBe(100_000)
     expect(after.monthlyExpensesCents).toBe(0)
     expect(after.actualBalanceCents).toBe(before.actualBalanceCents + 100_000)
@@ -73,8 +144,29 @@ describe('financeService', () => {
     expect(spentTodayCents(transactions, '2026-08-08')).toBe(2_000)
   })
 
+  it('traza la liquidez desde el saldo real y coloca cada compromiso en su fecha', () => {
+    const liquidityData: FinanceData = {
+      ...data,
+      accounts: [{ ...data.accounts[0], initialBalanceCents: 1_000 }],
+      transactions: [
+        { ...data.transactions[1], id: 'paid', amountCents: 200, transactionDate: '2026-07-01', status: 'completed', type: 'expense' },
+        { ...data.transactions[1], id: 'bill', amountCents: 900, transactionDate: '2026-07-12', status: 'planned', type: 'expense', recurringTransactionId: undefined },
+        { ...data.transactions[0], id: 'invoice', amountCents: 600, transactionDate: '2026-07-20', status: 'pending', type: 'income', recurringTransactionId: undefined },
+      ],
+      recurring: [{ id: 'phone', accountId: 'a', type: 'expense', amountCents: 250, description: 'Teléfono', frequency: 'monthly', startDate: '2026-07-01', nextOccurrence: '2026-07-15', isActive: true, createdAt: base, updatedAt: base }],
+      recurringOccurrences: [{ id: 'phone-jul', recurringTransactionId: 'phone', period: '2026-07-01', expectedDate: '2026-07-15', amountCents: 250, status: 'pending', createdAt: base, updatedAt: base }],
+    }
+    const timeline = financeLiquidityTimeline(liquidityData, new Date(2026, 6, 1), new Date(2026, 6, 10))
+    expect(timeline.startBalanceCents).toBe(800)
+    expect(timeline.days.find((day) => day.date === '2026-07-12')?.balanceCents).toBe(-100)
+    expect(timeline.days.find((day) => day.date === '2026-07-15')?.balanceCents).toBe(-350)
+    expect(timeline.days.find((day) => day.date === '2026-07-20')?.balanceCents).toBe(250)
+    expect(timeline.floorCents).toBe(-350)
+    expect(timeline.uncommittedMarginCents).toBe(0)
+  })
+
   it('mantiene el ahorro en patrimonio pero lo descuenta del disponible operativo', () => {
-    const reserved: FinanceData = { ...data, transactions:[...data.transactions,{id:'saving',accountId:'a',categoryId:'food',type:'saving',amountCents:200_000,transactionDate:'2026-07-06',description:'Reserva',status:'completed',createdAt:base,updatedAt:base}], savingsFundEntries:[{id:'f',fundId:'fund',amountCents:100_000,entryDate:'2026-07-06',createdAt:base}] }
+    const reserved: FinanceData = { ...data, accounts:[...data.accounts,{...data.accounts[0],id:'inactive',name:'Archivada',isActive:false}], transactions:[...data.transactions,{id:'saving',accountId:'a',categoryId:'food',type:'saving',amountCents:200_000,transactionDate:'2026-07-06',description:'Reserva',status:'completed',createdAt:base,updatedAt:base},{id:'inactive-saving',accountId:'inactive',categoryId:'food',type:'saving',amountCents:100_000,transactionDate:'2026-07-06',description:'Reserva archivada',status:'completed',createdAt:base,updatedAt:base}], savingsFundEntries:[{id:'f',fundId:'fund',amountCents:100_000,entryDate:'2026-07-06',createdAt:base}] }
     expect(accountBalance(reserved.accounts[0],reserved.transactions)).toBe(3_350_000)
     expect(calculateFinanceMetrics(reserved,new Date(2026,6,15)).availableBalanceCents).toBe(3_150_000)
   })
@@ -189,7 +281,7 @@ describe('financeService', () => {
         expectedDate: '2026-07-01', status: 'paid', transactionId: 'occ',
         paidAt: base, createdAt: base, updatedAt: base,
       }],
-    }, new Date(2026, 6, 15))
+    }, new Date(2026, 6, 15), new Date(2026, 6, 15))
     expect(projected).toEqual({
       saldoRealActual: 1_677_600,
       ingresosPendientes: 0,
@@ -198,6 +290,29 @@ describe('financeService', () => {
       gastosRealizados: 0,
       balanceProyectado: 1_677_600,
     })
+  })
+
+  it('no infla el pendiente con un recurrente que ya generó su movimiento pagado', () => {
+    const rent = {
+      id: 'rent', accountId: 'a', categoryId: 'food', type: 'expense' as const,
+      amountCents: 1_228_700, description: 'Renta', frequency: 'monthly' as const,
+      startDate: '2026-08-01', nextOccurrence: '2026-09-01', isActive: true, createdAt: base, updatedAt: base,
+    }
+    const projected = financeProjectionBreakdown({
+      ...data,
+      accounts: [{ ...data.accounts[0], initialBalanceCents: 2_000_000 }],
+      transactions: [
+        { ...data.transactions[1], id: 'rent-paid', type: 'expense' as const, amountCents: 1_228_700, transactionDate: '2026-08-01', description: 'Renta', status: 'completed' as const, recurringTransactionId: 'rent' },
+        { ...data.transactions[1], id: 'pending', type: 'expense' as const, amountCents: 303_800, transactionDate: '2026-08-20', description: 'Pendiente real', status: 'pending' as const },
+      ],
+      recurring: [rent],
+      recurringOccurrences: [{
+        id: 'rent-paid', recurringTransactionId: 'rent', period: '2026-08-01', expectedDate: '2026-08-01', amountCents: 1_228_700,
+        status: 'paid', transactionId: 'rent-paid', paidAt: base, createdAt: base, updatedAt: base,
+      }],
+    }, new Date(2026, 7, 15))
+    expect(projected.gastosPendientes).toBe(303_800)
+    expect(projected.gastosRealizados).toBe(1_228_700)
   })
 
   it('vuelve a proyectar un recurrente al deshacer o faltar su movimiento', () => {
@@ -215,7 +330,7 @@ describe('financeService', () => {
         expectedDate: '2026-07-01', amountCents: 1_677_600, status: 'pending',
         createdAt: base, updatedAt: base,
       }],
-    }, new Date(2026, 6, 15))
+    }, new Date(2026, 6, 15), new Date(2026, 6, 15))
     expect(projected.saldoRealActual).toBe(0)
     expect(projected.ingresosPendientes).toBe(1_677_600)
     expect(projected.balanceProyectado).toBe(1_677_600)
@@ -264,5 +379,87 @@ describe('financeService', () => {
     expect(financeProjectionBreakdown({ ...baseData, recurring: [template] }, new Date(2026, 7, 15)).balanceProyectado).toBe(0)
     expect(financeProjectionBreakdown({ ...baseData, recurring: [] }, new Date(2026, 7, 15)).balanceProyectado).toBe(0)
     expect(financeProjectionBreakdown({ ...baseData, recurring: [{ ...template, isActive: true }] }, new Date(2026, 6, 15)).balanceProyectado).toBe(0)
+  })
+
+  it('homologa el cierre futuro con el arrastre mensual del radar', () => {
+    const futureData: FinanceData = {
+      ...data,
+      accounts: [{ ...data.accounts[0], initialBalanceCents: 1_000_000 }],
+      transactions: [
+        { ...data.transactions[1], id: 'sep-expense', transactionDate: '2026-09-20', amountCents: 200_000, status: 'planned' },
+        { ...data.transactions[0], id: 'sep-income', transactionDate: '2026-09-30', amountCents: 500_000, status: 'planned' },
+        { ...data.transactions[1], id: 'oct-expense', transactionDate: '2026-10-01', amountCents: 430_000, status: 'planned' },
+        { ...data.transactions[0], id: 'oct-income', transactionDate: '2026-10-30', amountCents: 600_000, status: 'planned' },
+      ],
+      budgets: [],
+    }
+    const referenceDate = new Date(2026, 8, 16)
+    const october = new Date(2026, 9, 1)
+    const breakdown = financeProjectionBreakdown(futureData, october, referenceDate)
+    const metrics = calculateFinanceMetrics(futureData, october, referenceDate)
+    const radarProjection = financeLiquidityProjection({
+      data: futureData,
+      month: october,
+      currentAvailableBalanceCents: 1_000_000,
+      minimumOperatingBufferCents: 0,
+      referenceDate,
+      includePersonalBudgetReservations: true,
+    })
+
+    expect(breakdown.balanceProyectado).toBe(1_470_000)
+    expect(metrics.projectedBalanceCents).toBe(1_470_000)
+    expect(radarProjection.openingBalanceCents).toBe(1_300_000)
+    expect(radarProjection.closingBalanceCents).toBe(metrics.projectedBalanceCents)
+  })
+
+  it('separa patrimonio total de ahorro operativo proyectado', () => {
+    const savingData: FinanceData = {
+      ...data,
+      accounts: [{ ...data.accounts[0], initialBalanceCents: 1_000_000 }],
+      transactions: [],
+      budgets: [],
+      recurring: [{
+        id: 'monthly-saving', accountId: 'a', categoryId: 'saving', type: 'saving',
+        amountCents: 200_000, description: 'Ahorro mensual', frequency: 'monthly',
+        startDate: '2026-07-01', nextOccurrence: '2026-07-15', isActive: true,
+        createdAt: base, updatedAt: base,
+      }],
+      recurringOccurrences: [{
+        id: 'saving-july', recurringTransactionId: 'monthly-saving', period: '2026-07-01',
+        expectedDate: '2026-07-15', amountCents: 200_000, status: 'pending',
+        createdAt: base, updatedAt: base,
+      }],
+    }
+    const referenceDate = new Date(2026, 6, 10)
+    const month = new Date(2026, 6, 1)
+    const total = financeProjectionBreakdown(savingData, month, referenceDate)
+    const operational = financeLiquidityProjection({
+      data: savingData,
+      month,
+      currentAvailableBalanceCents: 1_000_000,
+      minimumOperatingBufferCents: 0,
+      referenceDate,
+    })
+
+    expect(total.balanceProyectado).toBe(1_000_000)
+    expect(operational.closingBalanceCents).toBe(800_000)
+  })
+
+  it('muestra un cierre histórico realizado para meses pasados', () => {
+    const historicalData: FinanceData = {
+      ...data,
+      accounts: [{ ...data.accounts[0], initialBalanceCents: 1_000_000 }],
+      transactions: [
+        { ...data.transactions[1], id: 'aug-paid', transactionDate: '2026-08-10', amountCents: 200_000, status: 'completed' },
+        { ...data.transactions[1], id: 'aug-stale', transactionDate: '2026-08-20', amountCents: 900_000, status: 'planned' },
+        { ...data.transactions[0], id: 'sep-paid', transactionDate: '2026-09-05', amountCents: 500_000, status: 'completed' },
+      ],
+      budgets: [],
+    }
+    const august = financeProjectionBreakdown(historicalData, new Date(2026, 7, 1), new Date(2026, 8, 16))
+
+    expect(august.saldoRealActual).toBe(1_300_000)
+    expect(august.gastosPendientes).toBe(900_000)
+    expect(august.balanceProyectado).toBe(800_000)
   })
 })

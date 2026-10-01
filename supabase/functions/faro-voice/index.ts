@@ -4,19 +4,32 @@ import { matchFinanceCandidates, type FinanceCandidate } from '../_shared/financ
 import { buildFaroSystemPrompt, type FaroSurface } from '../_shared/faroSystemPrompt.ts'
 import { resolveFastFinance, type FastFinanceResolution } from '../_shared/voice/financialSkill.ts'
 import { resolveFastCalendar, type CalendarResolution } from '../_shared/voice/calendarSkill.ts'
+import { resolveFastBacklog, type BacklogResolution } from '../_shared/voice/backlogSkill.ts'
 import { ServerVoiceTrace } from '../_shared/voice/trace.ts'
 import { formatTimeForSpeech } from '../_shared/voice/timeForSpeech.ts'
 import { assertFaroCalendarMutation } from '../_shared/voice/calendarAuthorization.ts'
 import { addCalendarDays, calendarLocalDate, extractCalendarTimeRange, resolveExplicitCalendarDate, zonedCalendarIso } from '../_shared/voice/calendarDateTime.ts'
 import { routeCalendarIntent } from '../_shared/voice/calendarFastPath.ts'
+import { fallbackFromDeterministic, featureForDecision, routeFaroModel, type FaroRouteDecision } from '../_shared/voice/routing/modelRouter.ts'
+import { upsertFaroRequestMetric } from '../_shared/voice/observability/requestMetric.ts'
+import { assessFinanceDuplicate, type FinanceDuplicateMatch } from '../_shared/voice/financeDuplicate.ts'
+import { AI_TIER } from '../_shared/ai/config.ts'
+import { executeFaroAI } from '../_shared/ai/execute.ts'
+import { createOpenAIProvider } from '../_shared/ai/providers/openAiProvider.ts'
+import { buildFaroContextPlan } from '../_shared/ai/contextEngine.ts'
 
 const MUTATIONS = new Set([
   'createExpense', 'createIncome', 'updateFinanceTransactionStatus', 'updateFinanceTransaction',
   'deleteFinanceTransaction', 'completePlannedTransaction', 'updateRecurringAmount',
   'createRecurringExpense', 'registerRecurringPayment',
   'createCalendarEvent', 'updateCalendarEvent', 'deleteCalendarEvent', 'createScheduledTask',
+  'createBacklogTask', 'updateBacklogTask', 'updateBacklogTaskStatus', 'deleteBacklogTask',
+  'scheduleBacklogTask', 'unscheduleBacklogTask',
 ])
 const CALENDAR_MUTATIONS = new Set(['createCalendarEvent', 'updateCalendarEvent', 'deleteCalendarEvent', 'createScheduledTask'])
+const BACKLOG_MUTATIONS = new Set(['createBacklogTask', 'updateBacklogTask', 'updateBacklogTaskStatus', 'deleteBacklogTask', 'scheduleBacklogTask', 'unscheduleBacklogTask'])
+const SCHEDULE_MUTATIONS = new Set(['createScheduledTask', 'scheduleBacklogTask', 'unscheduleBacklogTask'])
+const BACKLOG_TOOLS = new Set(['listBacklogTasks', 'findBacklogTask', 'listTasksByWorkspace', 'listTasksByStatus', 'listTasksDueToday', 'listOverdueTasks', 'getCurrentTask', 'getScheduledTasks', ...BACKLOG_MUTATIONS])
 const financeStatuses = ['planned', 'pending', 'completed', 'cancelled']
 const toolSchemas = [
   tool('createExpense', 'Registra un gasto.', financeCreateProperties(), ['amount', 'description', 'date', 'accountId', 'categoryId']),
@@ -50,11 +63,26 @@ const toolSchemas = [
   tool('updateCalendarEvent', 'Mueve o renombra un evento o tarea internos de FARO.', { targetId:string(), targetKind:enumValue(['event','task']), provider:enumValue(['faro']), start:string(), end:string(), title:optionalString() }),
   tool('deleteCalendarEvent', 'Elimina un evento o tarea internos de FARO.', { targetId:string(), targetKind:enumValue(['event','task']), provider:enumValue(['faro']) }),
   tool('createScheduledTask', 'Crea una tarea FARO programada.', { taskId:string(), title:string(), start:string(), end:string(), durationMinutes:{type:'number'}, workspaceId:optionalString() }),
+  tool('listBacklogTasks', 'Lista tareas de Backlog.', { status: optionalString(), workspaceId: optionalString() }),
+  tool('findBacklogTask', 'Busca tareas de Backlog por título.', { query: string() }),
+  tool('listTasksByWorkspace', 'Lista tareas de un workspace.', { workspaceId: string() }),
+  tool('listTasksByStatus', 'Lista tareas por estado.', { status: enumValue(['todo', 'doing', 'blocked', 'done']) }),
+  tool('listTasksDueToday', 'Lista tareas cuyo objetivo vence hoy.', { date: string() }),
+  tool('listOverdueTasks', 'Lista tareas vencidas.', { today: string() }),
+  tool('getCurrentTask', 'Obtiene la tarea que está en progreso.', {}),
+  tool('getScheduledTasks', 'Lista tareas con o sin horario.', { scheduled: { type: 'boolean' } }),
+  tool('createBacklogTask', 'Crea una sola tarea de Backlog, opcionalmente ya programada.', { taskId: string(), title: string(), description: optionalString(), workspaceId: optionalString(), priority: enumValue(['low', 'medium', 'high', 'critical']), durationMinutes: optionalNumber(), dueAt: optionalString(), start: optionalString(), end: optionalString(), offerSchedule: { type: 'boolean' } }),
+  tool('updateBacklogTask', 'Actualiza título, descripción, workspace, proyecto, prioridad, duración o fecha objetivo de una tarea.', { taskId: string(), title: optionalString(), description: optionalString(), workspaceId: optionalString(), projectId: optionalString(), priority: { type: ['string', 'null'], enum: ['low', 'medium', 'high', 'critical', null] }, durationMinutes: optionalNumber(), dueAt: optionalString() }),
+  tool('updateBacklogTaskStatus', 'Mueve el estado de una tarea.', { taskId: string(), status: enumValue(['todo', 'doing', 'blocked', 'done']) }),
+  tool('deleteBacklogTask', 'Elimina una tarea de Backlog.', { taskId: string() }),
+  tool('scheduleBacklogTask', 'Programa o mueve la misma tarea de Backlog, sin crear otra.', { taskId: string(), start: string(), end: string(), durationMinutes: { type: 'number' } }),
+  tool('unscheduleBacklogTask', 'Quita únicamente el horario de la tarea y la conserva en Backlog.', { taskId: string() }),
 ]
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   const trace = new ServerVoiceTrace()
+  let requestForMetric: { db: Db; userId: string; meta: RequestMeta } | undefined
   try {
     const auth = request.headers.get('Authorization') ?? ''
     const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: auth } } })
@@ -72,7 +100,11 @@ Deno.serve(async (request) => {
     const sessionId = validUuid(body.sessionId) ? String(body.sessionId) : null
     const message = String(body.message ?? '').trim()
     const source = body.source === 'voice' ? 'voice' : 'text'
-    const surface: FaroSurface = ['dashboard', 'today', 'finances', 'lab'].includes(body.surface) ? body.surface : 'lab'
+    const legacyPageSurface: FaroSurface | undefined = ['dashboard', 'today', 'finances', 'lab'].includes(body.surface) ? body.surface : undefined
+    const surface = ['lab', 'web', 'desktop', 'mobile'].includes(body.surface) ? body.surface as FaroRuntimeSurface : legacyPageSurface === 'lab' ? 'lab' : 'web'
+    const pageSurface: FaroSurface = ['dashboard', 'today', 'finances', 'lab'].includes(body.pageSurface)
+      ? body.pageSurface
+      : legacyPageSurface ?? (surface === 'lab' ? 'lab' : 'dashboard')
     const pipeline = body.pipeline === 'legacy' ? 'legacy' : 'optimized'
     const localContext = normalizedLocalContext(body.localContext)
     if (!message) return json({ status: 'error', message: 'Escribe o di una solicitud.', questions: [] }, 400)
@@ -80,22 +112,61 @@ Deno.serve(async (request) => {
     const replay = await findReplay(db, user.id, requestId)
     if (replay) return json(replay)
 
-    if (pipeline === 'optimized') {
-      const calendar = await resolveFastCalendar(db, user.id, message, body.sessionContext, localContext, trace)
-      if (calendar) return fastResponse(db, user.id, { requestId, sessionId, source, message, surface, pipeline, timezone: localContext.timezone, sessionContext: asRecord(body.sessionContext) }, calendar, trace, 'calendar')
-      const fast = await resolveFastFinance(db, user.id, message, body.sessionContext, trace)
-      if (fast) return fastResponse(db, user.id, { requestId, sessionId, source, message, surface, pipeline }, fast, trace, 'finance')
+    const sessionContext = asRecord(body.sessionContext)
+    const modelTarget = { provider: 'openai', model: Deno.env.get('OPENAI_TEXT_MODEL') ?? 'gpt-5-mini' }
+    const routed = trace.measureSync('routing', () => routeFaroModel({
+      transcript: message, surface, sessionId,
+      skillHint: sessionContext.lastSkill === 'finance' || sessionContext.lastSkill === 'calendar' || sessionContext.lastSkill === 'backlog' ? sessionContext.lastSkill : undefined,
+      shortContext: { lastSkill: typeof sessionContext.lastSkill === 'string' ? sessionContext.lastSkill : undefined, pendingClarification: asRecord(sessionContext.pendingClarification) },
+      modelTarget,
+    }))
+    // Legacy remains a controlled baseline: it records the deterministic assessment
+    // but deliberately preserves the pre-router LLM behavior for A/B comparisons.
+    let decision: FaroRouteDecision = pipeline === 'legacy'
+      ? {
+        ...routed, route: 'smart_model', provider: modelTarget.provider, model: modelTarget.model,
+        tierRequested: AI_TIER.STANDARD, tierUsed: AI_TIER.PREMIUM, escalated: true,
+        fallbackReason: 'provider_not_configured', reason: 'legacy_baseline_no_router',
+      }
+      : routed
+    const meta: RequestMeta = { requestId, sessionId, source, message, surface, pageSurface, pipeline, timezone: localContext.timezone, sessionContext, decision, benchmarkScenario: validBenchmarkScenario(body.benchmarkScenario) }
+    requestForMetric = { db, userId: user.id, meta }
+
+    if (pipeline === 'optimized' && decision.route === 'deterministic') {
+      if (decision.skill === 'backlog') {
+        const backlog = await resolveFastBacklog(db, user.id, message, body.sessionContext, localContext, trace)
+        if (backlog) return fastResponse(db, user.id, meta, backlog, trace, 'backlog')
+      }
+      if (decision.skill === 'calendar') {
+        const calendar = await resolveFastCalendar(db, user.id, message, body.sessionContext, localContext, trace)
+        if (calendar) return fastResponse(db, user.id, meta, calendar, trace, 'calendar')
+      }
+      if (decision.skill === 'finance') {
+        const fast = await resolveFastFinance(db, user.id, message, body.sessionContext, trace)
+        if (fast) return fastResponse(db, user.id, meta, fast, trace, 'finance')
+      }
+      decision = fallbackFromDeterministic(decision)
     }
 
-    return llmPipeline(db, user.id, { requestId, sessionId, source, message, surface, pipeline, history: normalizeHistory(body.history), localContext }, trace)
+    requestForMetric.meta = { ...meta, decision }
+    return llmPipeline(db, user.id, { ...meta, decision, history: normalizeHistory(body.history), localContext }, trace)
   } catch (error) {
     console.error('faro-voice failed', { name: error instanceof Error ? error.name : 'UnknownError' })
+    if (requestForMetric) {
+      await persistFaroMetric(observabilityDb(requestForMetric.db), requestForMetric.userId, requestForMetric.meta, {
+        status: 'error', execution_status: 'failed', error_message: 'request_failed', timings: trace.finish(),
+      })
+    }
     return json({ status: 'error', message: error instanceof Error ? error.message : 'FARO no pudo procesar la solicitud.', questions: [] }, 500)
   }
 })
 
 type Db = ReturnType<typeof createClient>
-type RequestMeta = { requestId: string; sessionId: string | null; source: string; message: string; surface: FaroSurface; pipeline: 'legacy' | 'optimized'; timezone?: string; sessionContext?: Record<string, any> }
+type FaroRuntimeSurface = 'lab' | 'web' | 'desktop' | 'mobile'
+type RequestMeta = {
+  requestId: string; sessionId: string | null; source: string; message: string; surface: FaroRuntimeSurface; pageSurface: FaroSurface; pipeline: 'legacy' | 'optimized'
+  timezone?: string; sessionContext?: Record<string, any>; decision?: FaroRouteDecision; benchmarkScenario?: string
+}
 
 async function health() {
   const key = Deno.env.get('OPENAI_API_KEY')
@@ -115,32 +186,54 @@ async function telemetry(db: Db, userId: string, body: Record<string, unknown>) 
   const timings = { ...asRecord(data.timings), ...numericRecord(body.timings) }
   const providerMetadata = { ...asRecord(data.provider_metadata), ...asRecord(body.providerMetadata) }
   await updateLog(db, userId, String(body.requestId), { timings, provider_metadata: providerMetadata })
+  await updateMetricTelemetry(observabilityDb(db), userId, String(body.requestId), timings, providerMetadata)
   return json({ status: 'completed', message: 'Telemetría registrada.', questions: [], result: { timings } })
 }
 
 async function reviseAction(db: Db, userId: string, body: Record<string, unknown>) {
   if (!validUuid(body.requestId)) return json({ status: 'error', message: 'La revisión no es válida.', questions: [] }, 400)
-  const { data, error } = await db.from('voice_action_logs').select('tool_name,tool_arguments,confirmation_status,execution_status').eq('user_id', userId).eq('request_id', body.requestId).maybeSingle()
+  const { data, error } = await db.from('voice_action_logs').select('tool_name,tool_arguments,pending_context,confirmation_status,execution_status').eq('user_id', userId).eq('request_id', body.requestId).maybeSingle()
   if (error) throw error
   if (!data || data.confirmation_status !== 'pending' || !['received', 'pending', 'failed'].includes(data.execution_status)) return json({ status: 'error', message: 'La acción ya no puede modificarse.', questions: [] }, 409)
+  const toolName = String(data.tool_name ?? '')
   const args = asRecord(data.tool_arguments)
-  if (['createCalendarEvent', 'createScheduledTask', 'updateCalendarEvent'].includes(String(data.tool_name))) {
-    const title = String(body.title ?? '').trim()
-    if (!title || title.length > 120) return json({ status: 'error', message: 'El nuevo título no es válido.', questions: [] }, 400)
-    args.title = title
-    const message = `Usaré el título “${title}”. ¿Confirmas?`
-    const { error: updateError } = await db.from('voice_action_logs').update({ tool_arguments: args, entities: args, result: { answer: message } }).eq('user_id', userId).eq('request_id', body.requestId).eq('confirmation_status', 'pending')
-    if (updateError) throw updateError
-    return json({ status: 'pending_confirmation', message, questions: [], pendingAction: { requestId: body.requestId, toolName: data.tool_name, arguments: args, summary: `Título actualizado a “${title}”.` }, qa: { intent: 'revisePendingAction', entities: { title }, toolName: data.tool_name, toolArguments: args, route: 'server_revision' } })
+  const transcript = String(body.transcript ?? '').trim().slice(0, 2000)
+  const pending = asRecord(data.pending_context)
+  const turn = classifyPendingTurn(transcript)
+  const priorCandidates = Array.isArray(pending.relevantCandidates) ? pending.relevantCandidates.map(asRecord) : []
+  const rejectedCandidateIds = Array.isArray(pending.rejectedCandidateIds) ? pending.rejectedCandidateIds.filter((id): id is string => typeof id === 'string') : []
+
+  if (turn === 'question') {
+    const candidate = priorCandidates[0]
+    const answer = candidate?.description
+      ? `Encontré “${String(candidate.description)}” por ${money(Number(candidate.amount))} del ${String(candidate.date)}. ${pendingSummary(toolName, args, String(pending.summary ?? 'Mantengo tu propuesta.'))} ¿Quieres ajustar algo o confirmas?`
+      : `${pendingSummary(toolName, args, String(pending.summary ?? 'Mantengo tu propuesta.'))} ¿Qué dato quieres revisar?`
+    return json({ status: 'pending_confirmation', message: answer, questions: [], pendingAction: pendingActionResponse(String(body.requestId), toolName, args, String(pending.summary ?? pendingSummary(toolName, args, '')), candidate), qa: { intent: 'questionPendingAction', entities: {}, toolName, toolArguments: args, route: 'pending_turn:question' } })
   }
-  if (!Number.isFinite(Number(body.amount)) || Number(body.amount) <= 0) return json({ status: 'error', message: 'El nuevo monto no es válido.', questions: [] }, 400)
-  const amountKey = data.tool_name === 'registerRecurringPayment' || data.tool_name === 'completePlannedTransaction' ? 'actualAmount' : 'amount'
-  if (!['createExpense', 'createIncome', 'registerRecurringPayment', 'completePlannedTransaction', 'updateRecurringAmount', 'updateFinanceTransaction'].includes(String(data.tool_name))) return json({ status: 'error', message: 'Esta acción no admite cambiar el monto.', questions: [] }, 400)
-  args[amountKey] = Number(body.amount)
-  const { error: updateError } = await db.from('voice_action_logs').update({ tool_arguments: args, entities: args, result: { answer: `Actualizaré el importe a ${money(Number(body.amount))}. ¿Confirmas?` } }).eq('user_id', userId).eq('request_id', body.requestId).eq('confirmation_status', 'pending')
+
+  const modifications = await applyPendingChanges(db, userId, toolName, args, transcript, body)
+  const rejected = turn === 'reject_assumption'
+  const excluded = rejected && priorCandidates[0]?.id ? [...rejectedCandidateIds, String(priorCandidates[0].id)] : rejectedCandidateIds
+  const duplicate = isFinanceCreate(toolName)
+    ? await findPotentialDuplicate(db, userId, toolName, args, excluded)
+    : undefined
+  const possibleDuplicate = rejected ? undefined : duplicate
+  const context = await loadContext(db, userId)
+  const summary = confirmationSummary(toolName, args, context)
+  const message = pendingRevisionMessage({ toolName, args, context, turn, changes: modifications, rejected, candidate: priorCandidates[0], possibleDuplicate, summary })
+  const nextPending = {
+    ...pending,
+    originalUserRequest: typeof pending.originalUserRequest === 'string' ? pending.originalUserRequest : null,
+    proposedAction: { toolName, arguments: args },
+    summary,
+    relevantCandidates: possibleDuplicate ? [possibleDuplicate] : [],
+    assumptions: possibleDuplicate ? ['possible_duplicate'] : [],
+    rejectedCandidateIds: excluded,
+    modifications: [...(Array.isArray(pending.modifications) ? pending.modifications : []), ...(modifications.length || rejected ? [{ fields: modifications, kind: rejected ? 'reject_assumption' : 'modify', at: new Date().toISOString() }] : [])].slice(-12),
+  }
+  const { error: updateError } = await db.from('voice_action_logs').update({ tool_arguments: args, entities: args, result: { answer: message }, pending_context: nextPending }).eq('user_id', userId).eq('request_id', body.requestId).eq('confirmation_status', 'pending')
   if (updateError) throw updateError
-  const summary = `Importe actualizado a ${money(Number(body.amount))}.`
-  return json({ status: 'pending_confirmation', message: `Actualizaré el importe a ${money(Number(body.amount))}. ¿Confirmas?`, questions: [], pendingAction: { requestId: body.requestId, toolName: data.tool_name, arguments: args, summary }, qa: { intent: 'revisePendingAction', entities: { [amountKey]: Number(body.amount) }, toolName: data.tool_name, toolArguments: args, route: 'server_revision' } })
+  return json({ status: 'pending_confirmation', message, questions: [], pendingAction: pendingActionResponse(String(body.requestId), toolName, args, summary, possibleDuplicate), qa: { intent: rejected ? 'rejectPendingAssumption' : modifications.length ? 'revisePendingAction' : 'clarifyPendingAction', entities: Object.fromEntries(modifications.map((field) => [field, args[field]])), toolName, toolArguments: args, route: `pending_turn:${turn}` } })
 }
 
 async function confirmAction(db: Db, userId: string, body: Record<string, unknown>, trace: ServerVoiceTrace) {
@@ -155,7 +248,7 @@ async function confirmAction(db: Db, userId: string, body: Record<string, unknow
   if (claim.state === 'executing') return json({ status: 'error', message: 'La acción ya se está ejecutando.', questions: [] }, 409)
   if (claim.state === 'cancelled') return json({ status: 'error', message: 'La acción fue cancelada.', questions: [] }, 409)
   const toolName = String(claim.toolName ?? '')
-  const skill = CALENDAR_MUTATIONS.has(toolName) ? 'calendar' : 'finance'
+  const skill = BACKLOG_MUTATIONS.has(toolName) ? 'backlog' : CALENDAR_MUTATIONS.has(toolName) ? 'calendar' : 'finance'
   const args = asRecord(claim.arguments)
   if (claim.state !== 'claimed' || !MUTATIONS.has(toolName)) return json({ status: 'error', message: 'La acción no existe o no puede ejecutarse.', questions: [] }, 409)
   let result: unknown
@@ -163,7 +256,7 @@ async function confirmAction(db: Db, userId: string, body: Record<string, unknow
     result = await trace.measure('execution', () => executeTool(db, userId, toolName, args))
   } catch (error) {
     await updateLog(db, userId, String(body.requestId), { status: 'pending_confirmation', execution_status: 'failed', error_message: error instanceof Error ? error.message : 'Ejecución fallida', timings: trace.finish() })
-    const message = CALENDAR_MUTATIONS.has(toolName)
+    const message = CALENDAR_MUTATIONS.has(toolName) || SCHEDULE_MUTATIONS.has(toolName)
       ? 'No pude guardar el cambio en el calendario. No hice ningún cambio.'
       : error instanceof Error ? error.message : 'No pude guardar el cambio.'
     return json({ status: 'error', message, questions: [], qa: { intent: toolName, skill, route: 'confirmed_server_action_failed' } }, 500)
@@ -174,7 +267,11 @@ async function confirmAction(db: Db, userId: string, body: Record<string, unknow
   } catch (error) {
     console.error('FARO Voice persisted the action but could not finalize its log.', { toolName, requestId: body.requestId, error: error instanceof Error ? error.name : 'UnknownError' })
   }
-  return json({ status: 'completed', message: successMessage(toolName, args), questions: [], result, qa: { intent: toolName, entities: args, toolName, toolArguments: args, timings, traceId: body.requestId, skill, route: 'confirmed_server_action' } })
+  const followUp = toolName === 'createBacklogTask' && args.offerSchedule
+    ? { intent: 'schedule_backlog_task', missingFields: ['schedule_offer'], entities: { taskId: asRecord(result).reference?.id, durationMinutes: args.durationMinutes ?? null, date: null } }
+    : undefined
+  const message = followUp ? `${successMessage(toolName, args)} ¿Quieres que también busque un espacio en tu calendario?` : successMessage(toolName, args)
+  return json({ status: 'completed', message, questions: [], result: { ...asRecord(result), ...(followUp ? { pendingClarification: followUp } : {}) }, qa: { intent: toolName, entities: args, toolName, toolArguments: args, timings, traceId: body.requestId, skill, route: 'confirmed_server_action' } })
 }
 
 async function cancelAction(db: Db, userId: string, body: Record<string, unknown>) {
@@ -191,7 +288,7 @@ async function cancelAction(db: Db, userId: string, body: Record<string, unknown
   return json({ status: 'completed', message: 'Acción cancelada. No se modificó ningún dato.', questions: [], result: { cancelled: true } })
 }
 
-async function fastResponse(db: Db, userId: string, meta: RequestMeta, fast: FastFinanceResolution | CalendarResolution, trace: ServerVoiceTrace, skill: 'finance' | 'calendar') {
+async function fastResponse(db: Db, userId: string, meta: RequestMeta, fast: FastFinanceResolution | CalendarResolution | BacklogResolution, trace: ServerVoiceTrace, skill: 'finance' | 'calendar' | 'backlog') {
   const route = `fast_path:${skill}:${fast.intent}`
   if (fast.kind === 'read') {
     const timings = trace.finish()
@@ -226,77 +323,100 @@ async function fastResponse(db: Db, userId: string, meta: RequestMeta, fast: Fas
       actionArguments.workspaceId = matches[0].id
     }
   }
-  const pendingAction = { requestId: meta.requestId, toolName: fast.toolName, arguments: actionArguments, summary: fast.summary, ...(fast.possibleDuplicate ? { possibleDuplicate: fast.possibleDuplicate } : {}) }
+  const duplicateCandidate = 'duplicateAssessment' in fast ? fast.duplicateAssessment : fast.possibleDuplicate
+  const pendingAction = pendingActionResponse(meta.requestId, fast.toolName, actionArguments, fast.summary, fast.possibleDuplicate)
   const timings = trace.finish()
-  await insertLog(db, userId, meta, { skill, status: 'pending_confirmation', parsed_intent: fast.intent, entities: actionArguments, tool_name: fast.toolName, tool_arguments: actionArguments, confirmation_required: true, confirmation_status: 'pending', execution_status: 'pending', result: { answer: fast.prompt }, timings, route })
+  await insertLog(db, userId, meta, { skill, status: 'pending_confirmation', parsed_intent: fast.intent, entities: actionArguments, tool_name: fast.toolName, tool_arguments: actionArguments, pending_context: pendingContext(meta, fast.toolName, actionArguments, fast.summary, duplicateCandidate), confirmation_required: true, confirmation_status: 'pending', execution_status: 'pending', result: { answer: fast.prompt }, timings, route })
   return json({ status: 'pending_confirmation', message: fast.prompt, questions: [], pendingAction, qa: { ...qa(meta, fast.intent, timings, route, skill), entities: actionArguments, toolName: fast.toolName, toolArguments: actionArguments } })
 }
 
 async function llmPipeline(db: Db, userId: string, meta: RequestMeta & { history: Array<{ role: 'user' | 'assistant'; content: string }>; localContext: ReturnType<typeof normalizedLocalContext> }, trace: ServerVoiceTrace) {
-  const context = await trace.measure('context', () => loadContext(db, userId))
+  const context = await trace.measure('context', () => loadContext(db, userId, meta.decision))
   const completionText = meta.message
   const existing = trace.measureSync('matching', () => resolveExistingFinancial(completionText, context))
   if (existing?.kind === 'clarify') {
-    const timings = trace.finish(); const route = 'deterministic_recurring:clarification'
-    await insertLog(db, userId, meta, { status: 'needs_clarification', questions: [existing.message], result: { answer: existing.message }, execution_status: 'completed', timings, route })
+    const timings = trace.finish(); const route = 'deterministic_recurring:clarification'; const decision = deterministicFinanceDecision(meta.decision, 'match_existing_finance')
+    await insertLog(db, userId, { ...meta, decision }, { status: 'needs_clarification', skill: 'finance', parsed_intent: 'matchExistingFinance', questions: [existing.message], result: { answer: existing.message }, execution_status: 'completed', timings, route })
     return json({ status: 'needs_clarification', message: existing.message, questions: [existing.message], qa: qa(meta, 'matchExistingFinance', timings, route) })
   }
   if (existing?.kind === 'action') {
     const args = idempotentArguments(existing.toolName, existing.arguments)
-    const pendingAction = { requestId: meta.requestId, toolName: existing.toolName, arguments: args, summary: existing.summary }
-    const timings = trace.finish(); const route = 'deterministic_recurring:action'
-    await insertLog(db, userId, meta, { status: 'pending_confirmation', parsed_intent: existing.toolName, entities: args, tool_name: existing.toolName, tool_arguments: args, confirmation_required: true, confirmation_status: 'pending', execution_status: 'pending', result: { answer: existing.prompt }, timings, route })
+    const pendingAction = pendingActionResponse(meta.requestId, existing.toolName, args, existing.summary)
+    const timings = trace.finish(); const route = 'deterministic_recurring:action'; const decision = deterministicFinanceDecision(meta.decision, 'match_existing_finance')
+    await insertLog(db, userId, { ...meta, decision }, { status: 'pending_confirmation', skill: 'finance', parsed_intent: existing.toolName, entities: args, tool_name: existing.toolName, tool_arguments: args, pending_context: pendingContext(meta, existing.toolName, args, existing.summary), confirmation_required: true, confirmation_status: 'pending', execution_status: 'pending', result: { answer: existing.prompt }, timings, route })
     return json({ status: 'pending_confirmation', message: existing.prompt, questions: [], pendingAction, qa: { ...qa(meta, existing.toolName, timings, route), entities: args, toolName: existing.toolName, toolArguments: args } })
   }
 
   const key = Deno.env.get('OPENAI_API_KEY')
   if (!key) return json({ status: 'error', message: 'FARO Voice aún no tiene configurada la clave de OpenAI en Supabase.', questions: [] }, 503)
-  const ai = await trace.measure('llm', async () => {
-    const response = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: Deno.env.get('OPENAI_TEXT_MODEL') ?? 'gpt-5-mini',
-        instructions: buildFaroSystemPrompt({ surface: meta.surface, financialContext: contextForSurface(context, meta.surface), availableTools: toolSchemas.map((candidate) => candidate.name), today: calendarLocalDate(new Date(meta.localContext.now), meta.localContext.timezone), timezone: meta.localContext.timezone }),
-        input: [...meta.history, { role: 'user', content: meta.message }], tools: toolSchemas, tool_choice: 'auto',
-      }),
-    })
-    if (!response.ok) throw new Error(`OpenAI respondió ${response.status}: ${await response.text()}`)
-    return response.json()
-  })
-  const call = ai.output?.find((item: { type: string }) => item.type === 'function_call')
-  const route = `${meta.pipeline === 'legacy' ? 'legacy' : 'optimized'}:llm_fallback`
+  const provider = createOpenAIProvider(key, Deno.env.get('OPENAI_TEXT_MODEL') ?? 'gpt-5-mini')
+  const execution = await trace.measure('llm', () => executeFaroAI({
+    feature: featureForDecision(meta.decision ?? { intent: 'conversation', route: 'smart_model' }),
+    module: meta.decision?.skill ?? 'unknown',
+    intent: meta.decision?.intent ?? 'conversation',
+    preferredTier: meta.decision?.tierRequested,
+    confidence: meta.decision?.confidence,
+    providers: [provider],
+    // The currently configured text adapter is deliberately Standard. Set a
+    // separate PREMIUM target only when a premium model is explicitly added.
+    providerTargets: [{ id: provider.id, model: provider.model, tier: AI_TIER.STANDARD }],
+    mode: meta.decision?.route === 'reasoning_model' ? 'reasoning' : 'structured',
+    request: {
+      instructions: buildFaroSystemPrompt({ surface: meta.pageSurface, financialContext: contextForRoute(context, meta.pageSurface, meta.decision?.route), availableTools: toolSchemas.map((candidate) => candidate.name), today: calendarLocalDate(new Date(meta.localContext.now), meta.localContext.timezone), timezone: meta.localContext.timezone }),
+      input: [...meta.history, { role: 'user', content: meta.message }], tools: toolSchemas,
+    },
+  }))
+  const ai = execution.result
+  const finalDecision: FaroRouteDecision = {
+    ...(meta.decision ?? { skill: 'unknown', intent: 'conversation', route: 'smart_model', confidence: 0, provider: null, model: null, reason: 'unclassified' }),
+    provider: execution.routing.provider,
+    model: execution.routing.model,
+    tierRequested: execution.routing.tierRequested,
+    tierUsed: execution.routing.tierUsed,
+    escalated: execution.routing.escalated,
+    fallbackReason: execution.routing.fallbackReason,
+    reason: execution.routing.reason,
+  }
+  const routedMeta = { ...meta, decision: finalDecision }
+  const providerMetadata = { provider: provider.id, model: provider.model, usage: ai.usage, routing: execution.routing }
+  const call = ai.output.find((item: { type: string }) => item.type === 'function_call')
+  const route = `${routedMeta.pipeline}:${routedMeta.decision?.route ?? 'smart_model'}`
   if (!call) {
-    const answer = ai.output_text || ai.output?.flatMap((item: { content?: Array<{ text?: string }> }) => item.content ?? []).map((item: { text?: string }) => item.text).filter(Boolean).join(' ') || 'Necesito un poco más de información.'
+    const answer = ai.outputText || ai.output.flatMap((item: { content?: Array<{ text?: string }> }) => item.content ?? []).map((item: { text?: string }) => item.text).filter(Boolean).join(' ') || 'Necesito un poco más de información.'
     const questions = extractQuestions(answer).slice(0, 3); const timings = trace.finish()
-    await insertLog(db, userId, meta, { status: questions.length ? 'needs_clarification' : 'completed', questions, result: { answer }, completed_at: questions.length ? null : new Date().toISOString(), execution_status: 'completed', timings, route })
-    return json({ status: questions.length ? 'needs_clarification' : 'completed', message: answer, questions, qa: qa(meta, 'conversation', timings, route) })
+    await insertLog(db, userId, routedMeta, { skill: routedMeta.decision?.skill ?? 'unknown', parsed_intent: routedMeta.decision?.intent ?? 'conversation', status: questions.length ? 'needs_clarification' : 'completed', questions, result: { answer }, completed_at: questions.length ? null : new Date().toISOString(), execution_status: 'completed', timings, route, provider_metadata: providerMetadata })
+    return json({ status: questions.length ? 'needs_clarification' : 'completed', message: answer, questions, qa: qa(routedMeta, 'conversation', timings, route) })
   }
   const args = normalizeCalendarFallbackArguments(call.name, idempotentArguments(call.name, JSON.parse(call.arguments || '{}')), meta.message, meta.localContext)
   if (MUTATIONS.has(call.name)) {
-    const possibleDuplicate = call.name === 'createExpense' || call.name === 'createIncome' ? await findPotentialDuplicate(db, userId, call.name, args) : undefined
+    const duplicateAssessment = call.name === 'createExpense' || call.name === 'createIncome' ? await findFinanceDuplicateAssessment(db, userId, call.name, args) : undefined
+    const possibleDuplicate = duplicateAssessment?.confidence === 'high' ? duplicateAssessment : undefined
     const summary = confirmationSummary(call.name, args, context)
-    const pendingAction = { requestId: meta.requestId, toolName: call.name, arguments: args, summary, ...(possibleDuplicate ? { possibleDuplicate } : {}) }
+    const pendingAction = pendingActionResponse(routedMeta.requestId, call.name, args, summary, possibleDuplicate)
     const timings = trace.finish()
-    await insertLog(db, userId, meta, { status: 'pending_confirmation', parsed_intent: call.name, entities: args, tool_name: call.name, tool_arguments: args, confirmation_required: true, confirmation_status: 'pending', execution_status: 'pending', result: { answer: confirmationPrompt(call.name, args, context, Boolean(possibleDuplicate)) }, timings, route })
-    return json({ status: 'pending_confirmation', message: confirmationPrompt(call.name, args, context, Boolean(possibleDuplicate)), questions: [], pendingAction, qa: { ...qa(meta, call.name, timings, route), entities: args, toolName: call.name, toolArguments: args } })
+    const prompt = duplicateAssessment?.confidence === 'medium'
+      ? `Encontré una coincidencia parecida (“${duplicateAssessment.description}”), pero tiene información distinta. ${confirmationPrompt(call.name, args, context, false)}`
+      : confirmationPrompt(call.name, args, context, Boolean(possibleDuplicate))
+    await insertLog(db, userId, routedMeta, { skill: skillForTool(call.name, routedMeta.decision?.skill), status: 'pending_confirmation', parsed_intent: call.name, entities: args, tool_name: call.name, tool_arguments: args, pending_context: pendingContext(routedMeta, call.name, args, summary, duplicateAssessment), confirmation_required: true, confirmation_status: 'pending', execution_status: 'pending', result: { answer: prompt }, timings, route, provider_metadata: providerMetadata })
+    return json({ status: 'pending_confirmation', message: prompt, questions: [], pendingAction, qa: { ...qa(routedMeta, call.name, timings, route), entities: args, toolName: call.name, toolArguments: args } })
   }
   const result = await trace.measure('execution', () => executeTool(db, userId, call.name, args)); const timings = trace.finish()
   const message = readResultMessage(call.name, result)
-  await insertLog(db, userId, meta, { status: 'completed', parsed_intent: call.name, entities: args, tool_name: call.name, tool_arguments: args, result: { answer: message, data: result }, completed_at: new Date().toISOString(), execution_status: 'completed', timings, route })
-  return json({ status: 'completed', message, questions: [], result, qa: { ...qa(meta, call.name, timings, route), entities: args, toolName: call.name, toolArguments: args } })
+  await insertLog(db, userId, routedMeta, { skill: skillForTool(call.name, routedMeta.decision?.skill), status: 'completed', parsed_intent: call.name, entities: args, tool_name: call.name, tool_arguments: args, result: { answer: message, data: result }, completed_at: new Date().toISOString(), execution_status: 'completed', timings, route, provider_metadata: providerMetadata })
+  return json({ status: 'completed', message, questions: [], result, qa: { ...qa(routedMeta, call.name, timings, route), entities: args, toolName: call.name, toolArguments: args } })
 }
 
-function qa(meta: RequestMeta, intent: string, timings: Record<string, number>, route: string, skill: 'finance' | 'calendar' = 'finance') {
-  return { intent, entities: {}, timings, traceId: meta.requestId, pipeline: meta.pipeline, skill, route }
+function qa(meta: RequestMeta, intent: string, timings: Record<string, number>, route: string, skill: 'finance' | 'calendar' | 'backlog' = 'finance') {
+  return { intent, entities: {}, timings, traceId: meta.requestId, pipeline: meta.pipeline, skill, route, router: meta.decision }
 }
 
 async function findReplay(db: Db, userId: string, requestId: string) {
-  const { data, error } = await db.from('voice_action_logs').select('status,result,questions,tool_name,tool_arguments,confirmation_status,timings,route').eq('user_id', userId).eq('request_id', requestId).maybeSingle()
+  const { data, error } = await db.from('voice_action_logs').select('status,result,questions,tool_name,tool_arguments,pending_context,confirmation_status,timings,route').eq('user_id', userId).eq('request_id', requestId).maybeSingle()
   if (error) throw error
   if (!data) return null
   const result = asRecord(data.result)
   const message = typeof result.answer === 'string' ? result.answer : data.status === 'completed' ? 'Esta solicitud ya fue procesada.' : 'Esta solicitud ya está registrada.'
-  if (data.status === 'pending_confirmation' && data.tool_name) return { status: 'pending_confirmation', message, questions: [], pendingAction: { requestId, toolName: data.tool_name, arguments: asRecord(data.tool_arguments), summary: confirmationSummary(data.tool_name, asRecord(data.tool_arguments), {}) }, qa: { timings: numericRecord(data.timings), route: 'request_replay' } }
+  if (data.status === 'pending_confirmation' && data.tool_name) { const pending = asRecord(data.pending_context); return { status: 'pending_confirmation', message, questions: [], pendingAction: pendingActionResponse(requestId, data.tool_name, asRecord(data.tool_arguments), String(pending.summary ?? confirmationSummary(data.tool_name, asRecord(data.tool_arguments), {})), Array.isArray(pending.relevantCandidates) ? pending.relevantCandidates[0] : undefined), qa: { timings: numericRecord(data.timings), route: 'request_replay' } } }
   return { status: data.status, message, questions: Array.isArray(data.questions) ? data.questions : [], result }
 }
 
@@ -384,6 +504,96 @@ async function executeTool(db: Db, userId: string, name: string, args: Record<st
     const expense = completed.filter((item) => ['expense', 'debt_payment'].includes(item.type)).reduce((sum, item) => sum + Number(item.amount), 0)
     return { income, expense, balance: income - expense, count: completed.length }
   }
+  if (['listBacklogTasks', 'findBacklogTask', 'listTasksByWorkspace', 'listTasksByStatus', 'listTasksDueToday', 'listOverdueTasks', 'getCurrentTask', 'getScheduledTasks'].includes(name)) {
+    let query = db.from('tasks').select('id,title,description,status,priority,due_at,estimated_minutes,workspace_id,project_id,completed_at,updated_at').eq('user_id', userId).is('archived_at', null)
+    if (name === 'listTasksByWorkspace' && validUuid(args.workspaceId)) query = query.eq('workspace_id', String(args.workspaceId))
+    if (name === 'listTasksByStatus' && typeof args.status === 'string') query = query.eq('status', args.status)
+    if (name === 'getCurrentTask') query = query.eq('status', 'doing')
+    if (name === 'findBacklogTask' && typeof args.query === 'string') query = query.ilike('title', `%${String(args.query).replace(/[%_]/g, '')}%`)
+    const { data, error } = await query.order('updated_at', { ascending: false }).limit(name === 'getCurrentTask' ? 1 : 100)
+    if (error) throw error
+    let tasks = data ?? []
+    const date = String(args.date ?? args.today ?? localToday()).slice(0, 10)
+    if (name === 'listBacklogTasks') tasks = tasks.filter((task) => task.status !== 'done')
+    if (name === 'listTasksDueToday') tasks = tasks.filter((task) => task.status !== 'done' && task.due_at?.slice(0, 10) === date)
+    if (name === 'listOverdueTasks') tasks = tasks.filter((task) => task.status !== 'done' && Boolean(task.due_at) && task.due_at!.slice(0, 10) < date)
+    if (name === 'getScheduledTasks') tasks = tasks.filter((task) => Boolean(args.scheduled) ? task.due_at?.includes('T') : !task.due_at?.includes('T'))
+    return tasks
+  }
+  if (name === 'createBacklogTask') {
+    const id = validUuid(args.taskId) ? String(args.taskId) : crypto.randomUUID()
+    let workspaceId = validUuid(args.workspaceId) ? String(args.workspaceId) : undefined
+    if (workspaceId) {
+      const { data: workspace, error } = await db.from('workspaces').select('id').eq('user_id', userId).eq('id', workspaceId).eq('is_active', true).maybeSingle()
+      if (error) throw error
+      if (!workspace) throw new Error('El workspace seleccionado no pertenece a tu cuenta.')
+    } else {
+      const { data: workspace, error } = await db.from('workspaces').select('id').eq('user_id', userId).eq('is_active', true).order('sort_order').limit(1).maybeSingle()
+      if (error) throw error
+      workspaceId = workspace?.id
+    }
+    if (!workspaceId) throw new Error('Crea o activa un workspace antes de agregar la tarea.')
+    const dueAt = typeof args.start === 'string' ? args.start : typeof args.dueAt === 'string' ? args.dueAt : null
+    const { data, error } = await db.from('tasks').upsert({
+      id, user_id: userId, title: String(args.title).trim(), description: typeof args.description === 'string' ? args.description : null,
+      notes: typeof args.description === 'string' ? args.description : null, area: 'personal', status: 'todo',
+      priority: ['low', 'medium', 'high', 'critical'].includes(String(args.priority)) ? args.priority : 'medium',
+      due_at: dueAt, estimated_minutes: Number.isFinite(Number(args.durationMinutes)) ? Math.max(15, Number(args.durationMinutes)) : null,
+      workspace_id: workspaceId,
+    }, { onConflict: 'id' }).select().single()
+    if (error) throw error
+    if (!data || data.id !== id || data.user_id !== userId) throw new Error('No se pudo verificar la persistencia de la tarea.')
+    return { item: data, reference: { id: data.id, type: 'backlog_task', title: data.title, subtitle: data.due_at ?? 'sin horario' } }
+  }
+  if (name === 'updateBacklogTask' || name === 'updateBacklogTaskStatus' || name === 'scheduleBacklogTask' || name === 'unscheduleBacklogTask') {
+    const taskId = String(args.taskId ?? '')
+    const { data: existing, error: existingError } = await db.from('tasks').select('id,title,workspace_id,project_id,status,due_at,estimated_minutes').eq('user_id', userId).eq('id', taskId).maybeSingle()
+    if (existingError) throw existingError
+    if (!existing) throw new Error('La tarea ya no existe.')
+    const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (name === 'updateBacklogTaskStatus') updates.status = args.status
+    if (name === 'scheduleBacklogTask') {
+      const start = new Date(String(args.start))
+      const end = new Date(String(args.end))
+      if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end <= start) throw new Error('El horario de la tarea no es válido.')
+      updates.due_at = start.toISOString()
+      updates.estimated_minutes = Math.max(15, Math.round(Number(args.durationMinutes) || (end.getTime() - start.getTime()) / 60000))
+    }
+    if (name === 'unscheduleBacklogTask') updates.due_at = null
+    if (name === 'updateBacklogTask') {
+      if (typeof args.title === 'string' && args.title.trim()) updates.title = args.title.trim().slice(0, 120)
+      if (typeof args.description === 'string') { updates.description = args.description; updates.notes = args.description }
+      if (['low', 'medium', 'high', 'critical'].includes(String(args.priority))) updates.priority = args.priority
+      if (Number.isFinite(Number(args.durationMinutes))) updates.estimated_minutes = Math.max(15, Number(args.durationMinutes))
+      if (typeof args.dueAt === 'string') updates.due_at = args.dueAt || null
+      if (validUuid(args.workspaceId)) {
+        const { data: workspace, error } = await db.from('workspaces').select('id').eq('user_id', userId).eq('id', String(args.workspaceId)).maybeSingle()
+        if (error) throw error
+        if (!workspace) throw new Error('El workspace seleccionado no pertenece a tu cuenta.')
+        updates.workspace_id = workspace.id
+      }
+      if (validUuid(args.projectId)) {
+        const { data: project, error } = await db.from('projects').select('id,workspace_id').eq('user_id', userId).eq('id', String(args.projectId)).maybeSingle()
+        if (error) throw error
+        if (!project) throw new Error('El proyecto seleccionado no pertenece a tu cuenta.')
+        updates.project_id = project.id
+        updates.workspace_id = project.workspace_id
+      }
+    }
+    const { data, error } = await db.from('tasks').update(updates).eq('user_id', userId).eq('id', taskId).select().single()
+    if (error) throw error
+    return { item: data, reference: { id: data.id, type: 'backlog_task', title: data.title, subtitle: data.due_at ?? 'sin horario' } }
+  }
+  if (name === 'deleteBacklogTask') {
+    const taskId = String(args.taskId ?? '')
+    const { data: existing, error: readError } = await db.from('tasks').select('id').eq('id', taskId).eq('user_id', userId).maybeSingle()
+    if (readError) throw readError
+    if (!existing) return { taskId, alreadyDeleted: true }
+    const { data: deleted, error } = await db.from('tasks').delete().eq('id', taskId).eq('user_id', userId).select('id').single()
+    if (error) throw error
+    if (!deleted) throw new Error('No se pudo verificar la eliminación de la tarea.')
+    return { taskId, deleted: true }
+  }
   if (name === 'createCalendarEvent') {
     assertFaroCalendarMutation(args)
     const id = validUuid(args.eventId) ? String(args.eventId) : crypto.randomUUID()
@@ -450,19 +660,25 @@ async function executeTool(db: Db, userId: string, name: string, args: Record<st
   throw new Error(`Herramienta no permitida: ${name}`)
 }
 
-async function loadContext(db: Db, userId: string) {
+async function loadContext(db: Db, userId: string, decision?: FaroRouteDecision) {
   const today = localToday(); const period = `${today.slice(0, 7)}-01`
-  const [accounts, categories, recurring, recurringOccurrences, plannedTransactions, recentTransactions, budgets] = await Promise.all([
-    db.from('finance_accounts').select('id,name,type').eq('user_id', userId).eq('is_active', true),
-    db.from('finance_categories').select('id,name,type').eq('user_id', userId).eq('is_active', true),
-    db.from('finance_recurring_transactions').select('id,description,type,amount,frequency,next_occurrence,day_of_month,is_active,account_id,category_id').eq('user_id', userId),
-    db.from('finance_recurring_occurrences').select('id,recurring_transaction_id,period,expected_date,amount,status,transaction_id').eq('user_id', userId).eq('period', period),
-    db.from('finance_transactions').select('id,description,type,amount,status,account_id,category_id,transaction_date').eq('user_id', userId).in('status', ['planned', 'pending']),
-    db.from('finance_transactions').select('id,description,type,amount,status,account_id,category_id,transaction_date').eq('user_id', userId).order('transaction_date', { ascending: false }).limit(20),
-    db.from('finance_budgets').select('id,name,category_id,planned_amount,period_start,period_end').eq('user_id', userId).lte('period_start', today).gte('period_end', today).limit(20),
+  const plan = buildFaroContextPlan({ module: decision?.skill ?? 'unknown', tier: decision?.tierRequested ?? 'standard' })
+  const empty = () => Promise.resolve({ data: [], error: null })
+  const financeLimit = plan.compact ? 12 : 40
+  const taskLimit = plan.compact ? 12 : 30
+  const [accounts, categories, recurring, recurringOccurrences, plannedTransactions, recentTransactions, budgets, backlogTasks, workspaces] = await Promise.all([
+    plan.finance ? db.from('finance_accounts').select('id,name,type').eq('user_id', userId).eq('is_active', true).limit(financeLimit) : empty(),
+    plan.finance ? db.from('finance_categories').select('id,name,type').eq('user_id', userId).eq('is_active', true).limit(financeLimit * 2) : empty(),
+    plan.finance ? db.from('finance_recurring_transactions').select('id,description,type,amount,frequency,next_occurrence,day_of_month,is_active,account_id,category_id').eq('user_id', userId).order('next_occurrence').limit(financeLimit) : empty(),
+    plan.finance ? db.from('finance_recurring_occurrences').select('id,recurring_transaction_id,period,expected_date,amount,status,transaction_id').eq('user_id', userId).eq('period', period).limit(financeLimit) : empty(),
+    plan.finance ? db.from('finance_transactions').select('id,description,type,amount,status,account_id,category_id,transaction_date').eq('user_id', userId).in('status', ['planned', 'pending']).limit(financeLimit) : empty(),
+    plan.finance ? db.from('finance_transactions').select('id,description,type,amount,status,account_id,category_id,transaction_date').eq('user_id', userId).order('transaction_date', { ascending: false }).limit(financeLimit) : empty(),
+    plan.finance ? db.from('finance_budgets').select('id,name,category_id,planned_amount,period_start,period_end').eq('user_id', userId).lte('period_start', today).gte('period_end', today).limit(financeLimit) : empty(),
+    (plan.backlog || plan.calendar) ? db.from('tasks').select('id,title,status,priority,due_at,estimated_minutes,workspace_id,project_id').eq('user_id', userId).is('archived_at', null).order('updated_at', { ascending: false }).limit(taskLimit) : empty(),
+    (plan.backlog || plan.calendar) ? db.from('workspaces').select('id,name').eq('user_id', userId).eq('is_active', true).order('sort_order').limit(taskLimit) : empty(),
   ])
-  for (const response of [accounts, categories, recurring, recurringOccurrences, plannedTransactions, recentTransactions, budgets]) if (response.error) throw response.error
-  return { accounts: accounts.data ?? [], categories: categories.data ?? [], recurring: recurring.data ?? [], recurringOccurrences: recurringOccurrences.data ?? [], plannedTransactions: plannedTransactions.data ?? [], recentTransactions: recentTransactions.data ?? [], budgets: budgets.data ?? [], currentPeriod: period }
+  for (const response of [accounts, categories, recurring, recurringOccurrences, plannedTransactions, recentTransactions, budgets, backlogTasks, workspaces]) if (response.error) throw response.error
+  return { plan, accounts: accounts.data ?? [], categories: categories.data ?? [], recurring: recurring.data ?? [], recurringOccurrences: recurringOccurrences.data ?? [], plannedTransactions: plannedTransactions.data ?? [], recentTransactions: recentTransactions.data ?? [], budgets: budgets.data ?? [], backlogTasks: backlogTasks.data ?? [], workspaces: workspaces.data ?? [], currentPeriod: period }
 }
 type FinanceContext = Awaited<ReturnType<typeof loadContext>>
 
@@ -535,20 +751,175 @@ function normalizeCalendarFallbackArguments(name: string, raw: Record<string, un
 function foldText(value: string) { return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es-MX') }
 function money(value: number) { return value.toLocaleString('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 2 }) }
 function normalizeHistory(value: unknown): Array<{ role: 'user' | 'assistant'; content: string }> { if (!Array.isArray(value)) return []; return value.slice(-6).flatMap((turn) => { const item = asRecord(turn); return (item.role === 'user' || item.role === 'assistant') && typeof item.content === 'string' && item.content.trim() ? [{ role: item.role, content: item.content.trim().slice(0, 2000) }] : [] }) }
-function contextForSurface(context: FinanceContext, surface: FaroSurface) { const limit = surface === 'finances' || surface === 'lab' ? 75 : surface === 'today' ? 30 : 20; return { accounts: context.accounts.slice(0, 20), categories: context.categories.slice(0, 40), recurring: context.recurring.slice(0, limit), recurringOccurrences: context.recurringOccurrences.slice(0, limit), plannedTransactions: context.plannedTransactions.slice(0, limit), recentTransactions: context.recentTransactions.slice(0, limit), budgets: context.budgets.slice(0, 20), currentPeriod: context.currentPeriod } }
-function idempotentArguments(name: string, raw: Record<string, unknown>) { const args = { ...raw }; if ((name === 'createExpense' || name === 'createIncome') && !validUuid(args.transactionId)) args.transactionId = crypto.randomUUID(); if (name === 'createRecurringExpense' && !validUuid(args.recurringId)) args.recurringId = crypto.randomUUID(); if (name === 'createCalendarEvent' && !validUuid(args.eventId)) args.eventId = crypto.randomUUID(); if (name === 'createScheduledTask' && !validUuid(args.taskId)) args.taskId = crypto.randomUUID(); return args }
+function contextForRoute(context: FinanceContext, _surface: FaroSurface, route?: FaroRouteDecision['route']) {
+  const compact = route !== 'reasoning_model'
+  const financeLimit = compact ? 12 : 40
+  const taskLimit = compact ? 12 : 30
+  const selected: Record<string, unknown> = { currentPeriod: context.currentPeriod }
+  if (context.plan.finance) Object.assign(selected, {
+    accounts: context.accounts.slice(0, financeLimit), categories: context.categories.slice(0, financeLimit * 2),
+    recurring: context.recurring.slice(0, financeLimit), recurringOccurrences: context.recurringOccurrences.slice(0, financeLimit),
+    plannedTransactions: context.plannedTransactions.slice(0, financeLimit), recentTransactions: context.recentTransactions.slice(0, compact ? 8 : financeLimit), budgets: context.budgets.slice(0, financeLimit),
+  })
+  if (context.plan.backlog || context.plan.calendar) Object.assign(selected, {
+    backlogTasks: context.backlogTasks.slice(0, taskLimit), workspaces: context.workspaces.slice(0, taskLimit),
+  })
+  return selected
+}
+function deterministicFinanceDecision(previous: FaroRouteDecision | undefined, intent: string): FaroRouteDecision {
+  return { skill: 'finance', intent, route: 'deterministic', confidence: Math.max(previous?.confidence ?? 0, .96), provider: null, model: null, reason: 'finance_existing_candidate_match', tierRequested: AI_TIER.DETERMINISTIC, tierUsed: AI_TIER.DETERMINISTIC, escalated: false, fallbackReason: null }
+}
+function skillForTool(name: string, fallback: FaroRouteDecision['skill'] | undefined) { return BACKLOG_TOOLS.has(name) ? 'backlog' : CALENDAR_MUTATIONS.has(name) || ['listCalendarItems', 'getNextCommitment', 'findCalendarEvent', 'findAvailableSlots'].includes(name) ? 'calendar' : fallback === 'calendar' || fallback === 'backlog' || fallback === 'unknown' ? fallback : 'finance' }
+function validBenchmarkScenario(value: unknown) { return typeof value === 'string' && value.length > 0 && value.length <= 160 ? value : undefined }
+function idempotentArguments(name: string, raw: Record<string, unknown>) { const args = { ...raw }; if ((name === 'createExpense' || name === 'createIncome') && !validUuid(args.transactionId)) args.transactionId = crypto.randomUUID(); if (name === 'createRecurringExpense' && !validUuid(args.recurringId)) args.recurringId = crypto.randomUUID(); if (name === 'createCalendarEvent' && !validUuid(args.eventId)) args.eventId = crypto.randomUUID(); if ((name === 'createScheduledTask' || name === 'createBacklogTask') && !validUuid(args.taskId)) args.taskId = crypto.randomUUID(); return args }
 function validUuid(value: unknown) { return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value) }
 function asRecord(value: unknown): Record<string, any> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {} }
 function numericRecord(value: unknown) { return Object.fromEntries(Object.entries(asRecord(value)).flatMap(([key, item]) => typeof item === 'number' && Number.isFinite(item) ? [[key, Math.round(item * 100) / 100]] : [])) }
 function extractQuestions(text: string) { return text.split(/\n+/).map((item) => item.trim()).filter((item) => item.endsWith('?')) }
 
-async function findPotentialDuplicate(db: Db, userId: string, toolName: string, args: Record<string, unknown>) {
-  if (!args.accountId || !args.date || !Number.isFinite(Number(args.amount))) return undefined
-  const { data, error } = await db.from('finance_transactions').select('id,description,amount,transaction_date').eq('user_id', userId).eq('type', toolName === 'createExpense' ? 'expense' : 'income').eq('account_id', args.accountId).eq('transaction_date', args.date).eq('amount', Number(args.amount)).neq('status', 'cancelled').limit(1)
-  if (error) throw error; const match = data?.[0]; return match ? { id: match.id, description: match.description, amount: Number(match.amount), date: match.transaction_date } : undefined
+function isFinanceCreate(name: string) { return name === 'createExpense' || name === 'createIncome' }
+function classifyPendingTurn(value: string) {
+  const text = foldText(value)
+  if (/\?$|\b(cual|cuanto|por que|porque|que categoria|que encontraste|explicame)\b/.test(text)) return 'question' as const
+  if (/\b(no es(?: el)? mismo|no es igual|eso esta mal|te equivocaste|no es ese|no es lo mismo|ese movimiento es otro|ese dice|yo dije|yo te estoy diciendo|no me entendiste|son movimientos diferentes)\b/.test(text)) return 'reject_assumption' as const
+  if (/\b(mejor|cambia|cambialo|ponle|ponlo|descripcion|categoria|importe|monto|fueron|ayer|hoy|manana|prioridad|workspace|a las)\b/.test(text)) return 'modify' as const
+  return 'clarify' as const
 }
-function confirmationSummary(name: string, args: Record<string, unknown>, context: { accounts?: Array<{ id: string; name: string }>; categories?: Array<{ id: string; name: string }>; recurring?: Array<{ id: string; description: string }> }) { const label = (items: Array<{ id: string; name: string }> | undefined, id: unknown) => items?.find((item) => item.id === id)?.name ?? String(id ?? 'sin definir'); if (name === 'createExpense' || name === 'createIncome') return `${name === 'createExpense' ? 'Gasto' : 'Ingreso'} de ${money(Number(args.amount))} en ${label(context.accounts, args.accountId)}, categoría ${label(context.categories, args.categoryId)}, fecha ${args.date}.`; if (name === 'deleteFinanceTransaction') return 'Eliminar el movimiento seleccionado.'; if (name === 'updateFinanceTransaction') return 'Actualizar el movimiento seleccionado.'; if (name === 'createRecurringExpense') return `Crear ${args.description} por ${money(Number(args.amount))}.`; if (name === 'registerRecurringPayment') return `Registrar el pago de ${context.recurring?.find((item) => item.id === args.recurringId)?.description ?? 'este recurrente'}.`; return `${name}: ${JSON.stringify(args)}` }
-function confirmationPrompt(name: string, args: Record<string, unknown>, context: { categories?: Array<{ id: string; name: string }>; recurring?: Array<{ id: string; description: string }> }, duplicate: boolean) { if (duplicate) return 'Ya existe un movimiento igual. ¿Quieres registrarlo otra vez?'; if (name === 'createExpense' || name === 'createIncome') return `¿Registro ${money(Number(args.amount))} como ${name === 'createExpense' ? 'gasto' : 'ingreso'} en ${context.categories?.find((item) => item.id === args.categoryId)?.name ?? 'Sin categoría'}?`; if (name === 'registerRecurringPayment') return `¿Registro el pago de ${context.recurring?.find((item) => item.id === args.recurringId)?.description ?? 'este recurrente'}?`; if (name === 'createCalendarEvent') return `Voy a agregar “${String(args.title)}” de ${formatTimeForSpeech(String(args.start), String(args.timezone))} a ${formatTimeForSpeech(String(args.end), String(args.timezone))}. ¿Confirmas?`; return '¿Confirmas este cambio?' }
+
+function pendingActionResponse(requestId: string, toolName: string, args: Record<string, unknown>, summary: string, rawDuplicate?: unknown) {
+  const duplicate = asRecord(rawDuplicate)
+  const possibleDuplicate = duplicate.confidence !== 'medium' && validUuid(duplicate.id) && typeof duplicate.description === 'string' && Number.isFinite(Number(duplicate.amount)) && typeof duplicate.date === 'string'
+    ? { id: String(duplicate.id), description: duplicate.description, amount: Number(duplicate.amount), date: duplicate.date, ...(Number.isFinite(Number(duplicate.score)) ? { score: Number(duplicate.score) } : {}), ...(duplicate.confidence === 'medium' || duplicate.confidence === 'high' ? { confidence: duplicate.confidence } : {}) }
+    : undefined
+  return { requestId, toolName, arguments: args, summary, ...(possibleDuplicate ? { possibleDuplicate } : {}) }
+}
+
+function pendingContext(meta: RequestMeta, toolName: string, args: Record<string, unknown>, summary: string, rawDuplicate?: unknown) {
+  const duplicate = asRecord(rawDuplicate)
+  return {
+    version: 1,
+    requestId: meta.requestId,
+    sessionId: meta.sessionId,
+    originalUserRequest: meta.message,
+    proposedAction: { toolName, arguments: args },
+    summary,
+    relevantCandidates: validUuid(duplicate.id) ? [duplicate] : [],
+    assumptions: validUuid(duplicate.id) ? ['possible_duplicate'] : [],
+    rejectedCandidateIds: [],
+    modifications: [],
+  }
+}
+
+function pendingSummary(name: string, args: Record<string, unknown>, fallback: string) {
+  if (isFinanceCreate(name)) return `${name === 'createExpense' ? 'Gasto' : 'Ingreso'} de ${money(Number(args.amount))}${typeof args.description === 'string' ? ` como “${args.description}”` : ''}.`
+  if (['createCalendarEvent', 'createScheduledTask', 'updateCalendarEvent'].includes(name)) return `Mantengo “${String(args.title ?? 'el evento')}”.`
+  if (['createBacklogTask', 'updateBacklogTask'].includes(name)) return `Mantengo la tarea “${String(args.title ?? 'pendiente')}”.`
+  return fallback
+}
+
+function pendingRevisionMessage(input: { toolName: string; args: Record<string, unknown>; context: FinanceContext; turn: 'modify' | 'clarify' | 'reject_assumption'; changes: string[]; rejected: boolean; candidate?: Record<string, any>; possibleDuplicate?: FinanceDuplicateMatch; summary: string }) {
+  const prompt = confirmationPrompt(input.toolName, input.args, input.context, Boolean(input.possibleDuplicate))
+  if (input.rejected) {
+    const candidate = input.candidate?.description ? ` “${String(input.candidate.description)}”` : ' el candidato encontrado'
+    return `Entendido.${candidate} es distinto de tu propuesta. ${input.summary} ¿Confirmas?`
+  }
+  if (input.changes.length) {
+    const labels: Record<string, string> = { amount: 'el monto', actualAmount: 'el monto', categoryId: 'la categoría', description: 'la descripción', date: 'la fecha', title: 'el título', start: 'el horario', priority: 'la prioridad', workspaceId: 'el workspace' }
+    const changed = input.changes.map((item) => labels[item] ?? item).join(', ')
+    return `Perfecto, actualicé ${changed}. ${input.summary} ${prompt}`
+  }
+  return `Mantengo la propuesta. ${input.summary} ${prompt}`
+}
+
+function revisionAmount(transcript: string, body: Record<string, unknown>) {
+  const normalized = foldText(transcript)
+  const requested = /\b(mejor|fueron|monto|importe|ponle|cambia)\b/.test(normalized)
+  if (!requested && transcript) return undefined
+  if (Number.isFinite(Number(body.amount)) && Number(body.amount) > 0) return Number(body.amount)
+  const match = transcript.replace(/,/g, '').match(/\$?\s*(\d+(?:\.\d{1,2})?)/)
+  return match && Number(match[1]) > 0 ? Number(match[1]) : undefined
+}
+
+function revisedDescription(transcript: string) {
+  const direct = transcript.match(/(?:la\s+)?descripci[oó]n\s+(?:es|ser[aá]|ser[ií]a|debe ser)\s+(.+?)\s*[.!?]*$/i)
+    ?? transcript.match(/(?:yo\s+(?:te\s+)?(?:estoy\s+pidiendo|dije)|este\s+es)\s+(.+?)\s*[.!?]*$/i)
+  return direct?.[1]?.trim().replace(/^como\s+/i, '').slice(0, 160)
+}
+
+function revisionTime(transcript: string, args: Record<string, unknown>) {
+  if (!['createCalendarEvent', 'createScheduledTask', 'updateCalendarEvent', 'scheduleBacklogTask'].includes(String(args.toolName ?? '')) && !args.start) return undefined
+  const match = foldText(transcript).match(/\b(?:a las|para las)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm|de la manana|de la tarde|de la noche)?\b/)
+  if (!match) return undefined
+  let hour = Number(match[1]); const minute = Number(match[2] ?? 0); const suffix = match[3] ?? ''
+  if (suffix === 'pm' || suffix.includes('tarde') || suffix.includes('noche')) { if (hour < 12) hour += 12 }
+  else if (suffix === 'am' || suffix.includes('manana')) { if (hour === 12) hour = 0 }
+  else {
+    const existingHour = Number(new Intl.DateTimeFormat('en-CA', { timeZone: String(args.timezone ?? 'America/Mexico_City'), hour: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(String(args.start))).find((part) => part.type === 'hour')?.value ?? 0)
+    if (existingHour >= 12 && hour < 12) hour += 12
+  }
+  if (hour > 23 || minute > 59) return undefined
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+}
+
+async function applyPendingChanges(db: Db, userId: string, toolName: string, args: Record<string, unknown>, transcript: string, body: Record<string, unknown>) {
+  const changes: string[] = []
+  const normalized = foldText(transcript)
+  const finance = ['createExpense', 'createIncome', 'registerRecurringPayment', 'completePlannedTransaction', 'updateRecurringAmount', 'updateFinanceTransaction'].includes(toolName)
+  if (finance) {
+    const amount = revisionAmount(transcript, body)
+    const amountKey = toolName === 'registerRecurringPayment' || toolName === 'completePlannedTransaction' ? 'actualAmount' : 'amount'
+    if (amount !== undefined && Number(args[amountKey]) !== amount) { args[amountKey] = amount; changes.push(amountKey) }
+    if (isFinanceCreate(toolName) || toolName === 'updateFinanceTransaction') {
+      const type = toolName === 'createIncome' ? 'income' : 'expense'
+      const { data: categories, error } = await db.from('finance_categories').select('id,name').eq('user_id', userId).eq('is_active', true).eq('type', type)
+      if (error) throw error
+      const category = (categories ?? []).find((item) => { const name = foldText(item.name); return name.length > 1 && new RegExp(`\\b${name.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\b`).test(normalized) })
+      if (category && args.categoryId !== category.id) { args.categoryId = category.id; changes.push('categoryId') }
+      const description = revisedDescription(transcript)
+      if (description && args.description !== description) { args.description = description; changes.push('description') }
+      if (/\bayer\b/.test(normalized)) { const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City' }).format(new Date(Date.now() - 86_400_000)); if (args.date !== date) { args.date = date; changes.push('date') } }
+      if (/\bhoy\b/.test(normalized)) { const date = localToday(); if (args.date !== date) { args.date = date; changes.push('date') } }
+    }
+  }
+  if (['createCalendarEvent', 'createScheduledTask', 'updateCalendarEvent', 'createBacklogTask', 'updateBacklogTask'].includes(toolName)) {
+    const title = typeof body.title === 'string' ? body.title.trim().slice(0, 120) : undefined
+    if (title && title !== args.title) { args.title = title; changes.push('title') }
+  }
+  if (['createCalendarEvent', 'createScheduledTask', 'updateCalendarEvent', 'scheduleBacklogTask'].includes(toolName)) {
+    const time = revisionTime(transcript, args)
+    if (time && typeof args.start === 'string') {
+      const timezone = String(args.timezone ?? 'America/Mexico_City')
+      const date = calendarLocalDate(new Date(args.start), timezone)
+      const start = zonedCalendarIso(date, time, timezone)
+      const oldStart = new Date(args.start); const oldEnd = new Date(String(args.end)); const duration = Number.isFinite(oldEnd.getTime()) ? Math.max(15, oldEnd.getTime() - oldStart.getTime()) : 60 * 60 * 1000
+      if (start !== args.start) { args.start = start; args.end = new Date(new Date(start).getTime() + duration).toISOString(); changes.push('start') }
+    }
+  }
+  if (['createBacklogTask', 'updateBacklogTask'].includes(toolName)) {
+    const priority = /\b(?:prioridad\s+)?(alta|high)\b/.test(normalized) ? 'high' : /\b(?:prioridad\s+)?(critica|critical)\b/.test(normalized) ? 'critical' : /\b(?:prioridad\s+)?(baja|low)\b/.test(normalized) ? 'low' : /\b(?:prioridad\s+)?(media|medium)\b/.test(normalized) ? 'medium' : undefined
+    if (priority && args.priority !== priority) { args.priority = priority; changes.push('priority') }
+    const { data: workspaces, error } = await db.from('workspaces').select('id,name').eq('user_id', userId).eq('is_active', true)
+    if (error) throw error
+    const workspace = (workspaces ?? []).find((item) => { const name = foldText(item.name); return name.length > 1 && new RegExp(`\\b${name.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\b`).test(normalized) })
+    if (workspace && args.workspaceId !== workspace.id) { args.workspaceId = workspace.id; changes.push('workspaceId') }
+  }
+  return changes
+}
+
+async function findFinanceDuplicateAssessment(db: Db, userId: string, toolName: string, args: Record<string, unknown>, excludedIds: string[] = []) {
+  if (!args.accountId || !args.date || !Number.isFinite(Number(args.amount))) return undefined
+  const type = toolName === 'createExpense' ? 'expense' : 'income'
+  const { data, error } = await db.from('finance_transactions').select('id,description,amount,transaction_date,type,account_id,category_id,recurring_transaction_id').eq('user_id', userId).eq('type', type).eq('transaction_date', args.date).neq('status', 'cancelled').limit(30)
+  if (error) throw error
+  return assessFinanceDuplicate({ type, amount: Number(args.amount), date: String(args.date), accountId: args.accountId, categoryId: args.categoryId, description: args.description, recurringTransactionId: args.recurringTransactionId }, (data ?? []).filter((item) => !excludedIds.includes(item.id)))
+}
+
+async function findPotentialDuplicate(db: Db, userId: string, toolName: string, args: Record<string, unknown>, excludedIds: string[] = []) {
+  const match = await findFinanceDuplicateAssessment(db, userId, toolName, args, excludedIds)
+  return match?.confidence === 'high' ? match : undefined
+}
+function confirmationSummary(name: string, args: Record<string, unknown>, context: { accounts?: Array<{ id: string; name: string }>; categories?: Array<{ id: string; name: string }>; recurring?: Array<{ id: string; description: string }> }) { const label = (items: Array<{ id: string; name: string }> | undefined, id: unknown) => items?.find((item) => item.id === id)?.name ?? String(id ?? 'sin definir'); if (name === 'createExpense' || name === 'createIncome') return `${name === 'createExpense' ? 'Gasto' : 'Ingreso'} de ${money(Number(args.amount))} en ${label(context.accounts, args.accountId)}, categoría ${label(context.categories, args.categoryId)}, fecha ${args.date}.`; if (name === 'deleteFinanceTransaction') return 'Eliminar el movimiento seleccionado.'; if (name === 'updateFinanceTransaction') return 'Actualizar el movimiento seleccionado.'; if (name === 'createRecurringExpense') return `Crear ${args.description} por ${money(Number(args.amount))}.`; if (name === 'registerRecurringPayment') return `Registrar el pago de ${context.recurring?.find((item) => item.id === args.recurringId)?.description ?? 'este recurrente'}.`; if (name === 'createBacklogTask') return `Crear tarea “${String(args.title)}”.`; if (name === 'deleteBacklogTask') return 'Eliminar la tarea seleccionada.'; if (name === 'unscheduleBacklogTask') return 'Quitar únicamente el horario de la tarea.'; return `${name}: ${JSON.stringify(args)}` }
+function confirmationPrompt(name: string, args: Record<string, unknown>, context: { categories?: Array<{ id: string; name: string }>; recurring?: Array<{ id: string; description: string }> }, duplicate: boolean) { if (duplicate) return 'Ya existe un movimiento igual. ¿Quieres registrarlo otra vez?'; if (name === 'createExpense' || name === 'createIncome') return `¿Registro ${money(Number(args.amount))} como ${name === 'createExpense' ? 'gasto' : 'ingreso'} en ${context.categories?.find((item) => item.id === args.categoryId)?.name ?? 'Sin categoría'}?`; if (name === 'registerRecurringPayment') return `¿Registro el pago de ${context.recurring?.find((item) => item.id === args.recurringId)?.description ?? 'este recurrente'}?`; if (name === 'createCalendarEvent') return `Voy a agregar “${String(args.title)}” de ${formatTimeForSpeech(String(args.start), String(args.timezone))} a ${formatTimeForSpeech(String(args.end), String(args.timezone))}. ¿Confirmas?`; if (name === 'createBacklogTask') return `¿Creo la tarea “${String(args.title)}”?`; return '¿Confirmas este cambio?' }
 function successMessage(name: string, args: Record<string, unknown> = {}) {
   if (name === 'createCalendarEvent') return `Listo. Agendé “${String(args.title)}” a las ${formatTimeForSpeech(String(args.start), String(args.timezone ?? 'America/Mexico_City'))}.`
   if (name === 'createScheduledTask') return `Listo. Programé “${String(args.title)}” a las ${formatTimeForSpeech(String(args.start))}.`
@@ -556,10 +927,45 @@ function successMessage(name: string, args: Record<string, unknown> = {}) {
     ? `Listo. Cambié el título a “${args.title}”.`
     : `Listo. Moví el elemento a la ${formatTimeForSpeech(String(args.start))}.`
   if (name === 'deleteCalendarEvent') return 'Listo. Eliminé el elemento del calendario FARO.'
-  const labels: Record<string, string> = { createExpense: 'Gasto registrado correctamente.', createIncome: 'Ingreso registrado correctamente.', updateFinanceTransaction: 'Movimiento actualizado correctamente.', updateFinanceTransactionStatus: 'Estado actualizado correctamente.', deleteFinanceTransaction: 'Movimiento eliminado correctamente.', createRecurringExpense: 'Gasto recurrente creado.', registerRecurringPayment: 'Pago recurrente registrado.', completePlannedTransaction: 'Movimiento completado correctamente.', updateRecurringAmount: 'Recurrencia actualizada correctamente.' }
+  const labels: Record<string, string> = { createExpense: 'Gasto registrado correctamente.', createIncome: 'Ingreso registrado correctamente.', updateFinanceTransaction: 'Movimiento actualizado correctamente.', updateFinanceTransactionStatus: 'Estado actualizado correctamente.', deleteFinanceTransaction: 'Movimiento eliminado correctamente.', createRecurringExpense: 'Gasto recurrente creado.', registerRecurringPayment: 'Pago recurrente registrado.', completePlannedTransaction: 'Movimiento completado correctamente.', updateRecurringAmount: 'Recurrencia actualizada correctamente.', createBacklogTask: 'Tarea creada.', updateBacklogTask: 'Tarea actualizada.', updateBacklogTaskStatus: 'Estado de la tarea actualizado.', deleteBacklogTask: 'Tarea eliminada.', scheduleBacklogTask: 'Tarea programada.', unscheduleBacklogTask: 'Horario eliminado; la tarea sigue en Backlog.' }
   return labels[name] ?? 'Cambio guardado correctamente.'
 }
-function readResultMessage(name: string, result: unknown) { if (name === 'getSpentToday') return `Hoy has gastado ${money(Number(asRecord(result).total ?? 0))}.`; if (name === 'getFinanceSummary') return 'Aquí tienes tu resumen financiero.'; if (name === 'listRecurringExpenses') return `Encontré ${Array.isArray(result) ? result.length : 0} gasto(s) recurrente(s).`; return `Encontré ${Array.isArray(result) ? result.length : 1} resultado(s).` }
+function readResultMessage(name: string, result: unknown) { if (name === 'getSpentToday') return `Hoy has gastado ${money(Number(asRecord(result).total ?? 0))}.`; if (name === 'getFinanceSummary') return 'Aquí tienes tu resumen financiero.'; if (name === 'listRecurringExpenses') return `Encontré ${Array.isArray(result) ? result.length : 0} gasto(s) recurrente(s).`; if (['listBacklogTasks','findBacklogTask','listTasksByWorkspace','listTasksByStatus','listTasksDueToday','listOverdueTasks','getCurrentTask','getScheduledTasks'].includes(name)) return `Encontré ${Array.isArray(result) ? result.length : 0} tarea(s).`; return `Encontré ${Array.isArray(result) ? result.length : 1} resultado(s).` }
 
-async function insertLog(db: Db, userId: string, meta: RequestMeta, values: Record<string, unknown>) { const { error } = await db.from('voice_action_logs').insert({ user_id: userId, request_id: meta.requestId, session_id: meta.sessionId, source: meta.source, transcript: meta.message, surface: meta.surface, skill: 'finance', ...values }); if (error) throw error }
+async function insertLog(db: Db, userId: string, meta: RequestMeta, values: Record<string, unknown>) {
+  const stored = { user_id: userId, request_id: meta.requestId, session_id: meta.sessionId, source: meta.source, transcript: meta.message, surface: meta.surface, skill: meta.decision?.skill ?? 'unknown', ...values }
+  const { error } = await db.from('voice_action_logs').insert(stored)
+  if (error) throw error
+  await persistFaroMetric(observabilityDb(db), userId, meta, stored)
+}
+async function persistFaroMetric(db: Db, userId: string, meta: RequestMeta, values: Record<string, unknown>) {
+  const task = upsertFaroRequestMetric(db, userId, meta, values)
+    .catch((metricError) => console.error('FARO observability metric could not be persisted.', { requestId: meta.requestId, name: metricError instanceof Error ? metricError.name : 'UnknownError' }))
+  const runtime = (globalThis as unknown as { EdgeRuntime?: { waitUntil?: (promise: Promise<void>) => void } }).EdgeRuntime
+  if (runtime?.waitUntil) {
+    runtime.waitUntil(task)
+    return
+  }
+  await task
+}
 async function updateLog(db: Db, userId: string, requestId: string, values: Record<string, unknown>) { const { error } = await db.from('voice_action_logs').update(values).eq('user_id', userId).eq('request_id', requestId); if (error) throw error }
+async function updateMetricTelemetry(db: Db, userId: string, requestId: string, timings: Record<string, unknown>, providerMetadata: Record<string, unknown>) {
+  const update = {
+    stt_provider: typeof providerMetadata.sttProvider === 'string' ? providerMetadata.sttProvider : null,
+    stt_latency_ms: numericValue(timings.sttFinalMs), tts_provider: typeof providerMetadata.ttsModel === 'string' ? 'elevenlabs' : null,
+    tts_latency_ms: numericValue(timings.ttsTotalMs), routing_latency_ms: numericValue(timings.routingMs ?? timings.modelRoutingMs),
+    context_latency_ms: numericValue(timings.contextMs), llm_latency_ms: numericValue(timings.llmMs), tool_latency_ms: numericValue(timings.executionMs), total_latency_ms: numericValue(timings.endToEndMs ?? timings.serverTotalMs),
+  }
+  try {
+    const { error } = await db.from('faro_ai_request_metrics').update(update).eq('user_id', userId).eq('request_id', requestId)
+    if (error) throw error
+  } catch (metricError) {
+    console.error('FARO observability telemetry could not be persisted.', { requestId, name: metricError instanceof Error ? metricError.name : 'UnknownError' })
+  }
+}
+function numericValue(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? Math.round(value * 100) / 100 : null }
+function observabilityDb(fallback: Db) {
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  const url = Deno.env.get('SUPABASE_URL')
+  return serviceKey && url ? createClient(url, serviceKey) : fallback
+}

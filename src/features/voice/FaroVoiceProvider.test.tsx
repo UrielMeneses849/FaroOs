@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { FaroVoicePresence } from './FaroVoicePresence'
+import { FARO_VOICE_ACTION_EVENT } from './desktopVoiceEvents'
 import { FaroVoiceProvider, useFaroVoice } from './FaroVoiceProvider'
 
 const panel = vi.hoisted(() => vi.fn())
@@ -26,4 +27,12 @@ describe('FaroVoiceProvider', () => {
     expect(() => render(<FaroVoicePresence surface="finances" />)).not.toThrow()
     expect(screen.queryByRole('button', { name: /abrir faro voice/i })).not.toBeInTheDocument()
   })
+})
+
+it('desktop Talk activates the existing command-listening path without opening another provider', () => {
+  render(<FaroVoiceProvider><Accesses /></FaroVoiceProvider>)
+  expect(panel.mock.lastCall?.[0]).toMatchObject({ open: false, activateOnStart: false })
+  fireEvent(window, new CustomEvent(FARO_VOICE_ACTION_EVENT, { detail: 'open_and_listen' }))
+  expect(panel.mock.lastCall?.[0]).toMatchObject({ open: true, presentation: 'mini', activateOnStart: true })
+  expect(screen.getAllByTestId('voice-panel')).toHaveLength(1)
 })

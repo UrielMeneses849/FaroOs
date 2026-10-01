@@ -8,6 +8,8 @@ import type {
   FinanceGoal,
   FinanceGoalContribution,
   FinanceGoalItem,
+  FinanceLiquidityPreference,
+  FinanceLiquiditySnapshot,
   FinanceSavingsFundEntry,
   FinanceRecurringOccurrence,
   FinanceRecurringTransaction,
@@ -28,6 +30,8 @@ type GoalItemRow = Tables['finance_goal_items']['Row']
 type FundRow = Tables['finance_savings_funds']['Row']
 type FundEntryRow = Tables['finance_savings_fund_entries']['Row']
 type ClosureRow = Tables['finance_budget_closures']['Row']
+type LiquidityPreferenceRow = Tables['finance_liquidity_preferences']['Row']
+type LiquiditySnapshotRow = Tables['finance_liquidity_snapshots']['Row']
 
 const accountFromRow = (row: AccountRow): FinanceAccount => ({
   id: row.id, name: row.name, type: row.type, currency: row.currency,
@@ -93,6 +97,18 @@ const contributionFromRow = (row: ContributionRow): FinanceGoalContribution => (
   contributionSource: 'contribution_source' in row ? (row.contribution_source as FinanceGoalContribution['contributionSource']) : 'previously_reserved',
   description: 'description' in row && row.description ? String(row.description) : undefined,
 })
+const liquidityPreferenceFromRow = (row: LiquidityPreferenceRow): FinanceLiquidityPreference => ({
+  minimumOperatingBufferCents: numericToCents(row.minimum_operating_buffer),
+  updatedAt: row.updated_at,
+})
+const liquiditySnapshotFromRow = (row: LiquiditySnapshotRow): FinanceLiquiditySnapshot => ({
+  id: row.id,
+  month: row.month,
+  projectionVersion: Number(row.projection_version ?? 1),
+  initialProjectedMinimumCents: numericToCents(row.initial_projected_minimum),
+  initialProjectedClosingBalanceCents: numericToCents(row.initial_projected_closing_balance),
+  snapshotDate: row.snapshot_date,
+})
 
 export const financeAccountRepository = {
   async list(userId: string) {
@@ -144,6 +160,67 @@ export const financeCategoryRepository = {
       .eq('user_id', userId).order('type').order('name')
     throwIfError(error)
     return (data ?? []).map(categoryFromRow)
+  },
+  async save(category: FinanceCategory, userId: string) {
+    await assertFinanceUser(userId)
+    const { data, error } = await supabase.from('finance_categories').upsert({
+      id: category.id,
+      user_id: userId,
+      name: category.name.trim(),
+      type: category.type,
+      icon: category.icon ?? null,
+      color: category.color ?? null,
+      is_default: category.isDefault,
+      is_active: category.isActive,
+    }, { onConflict: 'id' }).select().single()
+    if (error?.code === '23505') {
+      throw new Error('Ya existe una categoría con ese nombre para este tipo de movimiento.')
+    }
+    throwIfError(error)
+    return categoryFromRow(data!)
+  },
+}
+
+export const financeLiquidityRepository = {
+  async load(userId: string) {
+    await assertFinanceUser(userId)
+    const [preference, snapshots] = await Promise.all([
+      supabase.from('finance_liquidity_preferences').select('*').eq('user_id', userId).maybeSingle(),
+      supabase.from('finance_liquidity_snapshots').select('*').eq('user_id', userId).order('month', { ascending: false }),
+    ])
+    throwIfError(preference.error)
+    throwIfError(snapshots.error)
+    return {
+      preference: preference.data
+        ? liquidityPreferenceFromRow(preference.data)
+        : { minimumOperatingBufferCents: 1_500_000 },
+      snapshots: (snapshots.data ?? []).map(liquiditySnapshotFromRow),
+    }
+  },
+  async saveMinimumOperatingBuffer(minimumOperatingBufferCents: number, userId: string) {
+    await assertFinanceUser(userId)
+    const { data, error } = await supabase.from('finance_liquidity_preferences').upsert({
+      user_id: userId,
+      minimum_operating_buffer: centsToNumeric(Math.max(0, Math.round(minimumOperatingBufferCents))),
+    }, { onConflict: 'user_id' }).select().single()
+    throwIfError(error)
+    return liquidityPreferenceFromRow(data!)
+  },
+  async captureInitialSnapshot(input: {
+    month: string
+    projectionVersion: number
+    projectedMinimumCents: number
+    projectedClosingBalanceCents: number
+  }, userId: string) {
+    await assertFinanceUser(userId)
+    const { data, error } = await supabase.rpc('capture_finance_liquidity_snapshot_v2', {
+      target_month: input.month,
+      target_minimum: centsToNumeric(input.projectedMinimumCents),
+      target_closing: centsToNumeric(input.projectedClosingBalanceCents),
+      target_projection_version: input.projectionVersion,
+    })
+    throwIfError(error)
+    return liquiditySnapshotFromRow(data!)
   },
 }
 
@@ -307,11 +384,13 @@ export const financeBudgetRepository = {
   },
   async save(item: Omit<FinanceBudget, 'id' | 'createdAt' | 'updatedAt'>, userId: string) {
     await assertFinanceUser(userId)
+    const periodStart = item.periodStart ?? item.month
+    const periodEnd = item.periodEnd ?? item.month
     const { data, error } = await supabase.from('finance_budgets').upsert({
-      user_id: userId, category_id: item.categoryId, month: item.month,
+      user_id: userId, category_id: item.categoryId, month: `${periodStart.slice(0, 7)}-01`,
       planned_amount: centsToNumeric(item.plannedAmountCents),
-      name:item.name??'Gastos Personales',period_start:item.periodStart??item.month,period_end:item.periodEnd??item.month,carry_over_enabled:item.carryOverEnabled??false,
-    }, { onConflict: 'user_id,name,period_start' }).select().single()
+      name:item.name??'Gastos Personales',period_start:periodStart,period_end:periodEnd,carry_over_enabled:item.carryOverEnabled??false,
+    }, { onConflict: 'user_id,category_id,period_start,period_end' }).select().single()
     throwIfError(error)
     return budgetFromRow(data!)
   },
@@ -351,6 +430,13 @@ export const financeGoalRepository = {
     })
     throwIfError(error)
   },
+  async remove(id: string, userId: string) {
+    await assertFinanceUser(userId)
+    // The database cascades only the goal's planning records (items and
+    // contribution links). Transactions stay in the financial ledger.
+    const { error } = await supabase.from('finance_goals').delete().eq('id', id).eq('user_id', userId)
+    throwIfError(error)
+  },
 }
 
 export const financePlanningRepository = {
@@ -373,11 +459,12 @@ export const financePlanningRepository = {
 }
 
 export async function loadFinanceData(userId: string): Promise<FinanceData> {
-  const [accounts, categories, transactions, recurring, recurringOccurrences, budgets, goalData, planning] = await Promise.allSettled([
+  const [accounts, categories, transactions, recurring, recurringOccurrences, budgets, goalData, planning, liquidity] = await Promise.allSettled([
     financeAccountRepository.list(userId), financeCategoryRepository.list(userId),
     financeTransactionRepository.list(userId), financeRecurringRepository.list(userId),
     financeRecurringOccurrenceRepository.list(userId), financeBudgetRepository.list(userId),
     financeGoalRepository.list(userId), financePlanningRepository.list(userId),
+    financeLiquidityRepository.load(userId),
   ])
   if (accounts.status === 'rejected') throw accounts.reason
   if (categories.status === 'rejected') throw categories.reason
@@ -391,6 +478,7 @@ export async function loadFinanceData(userId: string): Promise<FinanceData> {
   reportSecondaryFailure('ocurrencias recurrentes', recurringOccurrences)
   reportSecondaryFailure('presupuestos', budgets)
   reportSecondaryFailure('metas', goalData)
+  reportSecondaryFailure('radar de liquidez', liquidity)
   return {
     accounts: accounts.value,
     categories: categories.value,
@@ -402,5 +490,7 @@ export async function loadFinanceData(userId: string): Promise<FinanceData> {
     contributions: goalData.status === 'fulfilled' ? goalData.value.contributions : [],
     budgetClosures:planning.status==='fulfilled'?planning.value.budgetClosures:[], savingsFund:planning.status==='fulfilled'?planning.value.savingsFund:undefined,
     savingsFundEntries:planning.status==='fulfilled'?planning.value.savingsFundEntries:[],goalItems:planning.status==='fulfilled'?planning.value.goalItems:[],
+    liquidityPreference: liquidity.status === 'fulfilled' ? liquidity.value.preference : { minimumOperatingBufferCents: 1_500_000 },
+    liquiditySnapshots: liquidity.status === 'fulfilled' ? liquidity.value.snapshots : [],
   }
 }

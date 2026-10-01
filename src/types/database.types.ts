@@ -14,6 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_test_baselines: {
+        Row: {
+          available_operating: number
+          captured_at: string
+          id: string
+          period_end: string
+          period_expenses: number
+          period_start: string
+          personal_budget_consumed: number
+          projected_balance: number
+          real_balance: number
+          user_id: string
+        }
+        Insert: {
+          available_operating: number
+          captured_at?: string
+          id?: string
+          period_end: string
+          period_expenses: number
+          period_start: string
+          personal_budget_consumed: number
+          projected_balance: number
+          real_balance: number
+          user_id: string
+        }
+        Update: {
+          available_operating?: number
+          captured_at?: string
+          id?: string
+          period_end?: string
+          period_expenses?: number
+          period_start?: string
+          personal_budget_consumed?: number
+          projected_balance?: number
+          real_balance?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
       calendar_entries: {
         Row: {
           all_day: boolean
@@ -73,6 +112,45 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      calendar_voice_fixtures: {
+        Row: {
+          calendar_id: string | null
+          created_at: string
+          ends_at: string
+          etag: string | null
+          external_id: string | null
+          id: string
+          source: string
+          starts_at: string
+          title: string
+          user_id: string
+        }
+        Insert: {
+          calendar_id?: string | null
+          created_at?: string
+          ends_at: string
+          etag?: string | null
+          external_id?: string | null
+          id?: string
+          source: string
+          starts_at: string
+          title: string
+          user_id: string
+        }
+        Update: {
+          calendar_id?: string | null
+          created_at?: string
+          ends_at?: string
+          etag?: string | null
+          external_id?: string | null
+          id?: string
+          source?: string
+          starts_at?: string
+          title?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       content_campaigns: {
         Row: {
@@ -226,6 +304,198 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      faro_ai_budgets: {
+        Row: {
+          monthly_budget_usd: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          monthly_budget_usd: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          monthly_budget_usd?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      faro_ai_request_metrics: {
+        Row: {
+          avoided_llm_call: boolean
+          benchmark_scenario: string | null
+          cached_input_tokens: number | null
+          confidence: number
+          context_latency_ms: number | null
+          cost_is_estimated: boolean
+          cost_status: string
+          created_at: string
+          error_code: string | null
+          error_type: string | null
+          escalated: boolean
+          estimated_cost_usd: number | null
+          fallback: boolean
+          fallback_reason: string | null
+          feature: string | null
+          id: string
+          input_tokens: number | null
+          intent: string
+          llm_latency_ms: number | null
+          model: string | null
+          module: string | null
+          output_tokens: number | null
+          pipeline: string
+          provider: string | null
+          request_id: string
+          route: string
+          route_reason: string
+          routing_latency_ms: number | null
+          session_id: string | null
+          skill: string
+          source: string
+          stt_latency_ms: number | null
+          stt_provider: string | null
+          success: boolean
+          surface: string
+          tier_requested: string | null
+          tier_used: string | null
+          tool_latency_ms: number | null
+          total_latency_ms: number | null
+          tts_latency_ms: number | null
+          tts_provider: string | null
+          used_llm: boolean
+          user_id: string
+        }
+        Insert: {
+          avoided_llm_call?: boolean
+          benchmark_scenario?: string | null
+          cached_input_tokens?: number | null
+          confidence: number
+          context_latency_ms?: number | null
+          cost_is_estimated?: boolean
+          cost_status?: string
+          created_at?: string
+          error_code?: string | null
+          error_type?: string | null
+          escalated?: boolean
+          estimated_cost_usd?: number | null
+          fallback?: boolean
+          fallback_reason?: string | null
+          feature?: string | null
+          id?: string
+          input_tokens?: number | null
+          intent: string
+          llm_latency_ms?: number | null
+          model?: string | null
+          module?: string | null
+          output_tokens?: number | null
+          pipeline?: string
+          provider?: string | null
+          request_id: string
+          route: string
+          route_reason: string
+          routing_latency_ms?: number | null
+          session_id?: string | null
+          skill: string
+          source: string
+          stt_latency_ms?: number | null
+          stt_provider?: string | null
+          success?: boolean
+          surface: string
+          tier_requested?: string | null
+          tier_used?: string | null
+          tool_latency_ms?: number | null
+          total_latency_ms?: number | null
+          tts_latency_ms?: number | null
+          tts_provider?: string | null
+          used_llm?: boolean
+          user_id: string
+        }
+        Update: {
+          avoided_llm_call?: boolean
+          benchmark_scenario?: string | null
+          cached_input_tokens?: number | null
+          confidence?: number
+          context_latency_ms?: number | null
+          cost_is_estimated?: boolean
+          cost_status?: string
+          created_at?: string
+          error_code?: string | null
+          error_type?: string | null
+          escalated?: boolean
+          estimated_cost_usd?: number | null
+          fallback?: boolean
+          fallback_reason?: string | null
+          feature?: string | null
+          id?: string
+          input_tokens?: number | null
+          intent?: string
+          llm_latency_ms?: number | null
+          model?: string | null
+          module?: string | null
+          output_tokens?: number | null
+          pipeline?: string
+          provider?: string | null
+          request_id?: string
+          route?: string
+          route_reason?: string
+          routing_latency_ms?: number | null
+          session_id?: string | null
+          skill?: string
+          source?: string
+          stt_latency_ms?: number | null
+          stt_provider?: string | null
+          success?: boolean
+          surface?: string
+          tier_requested?: string | null
+          tier_used?: string | null
+          tool_latency_ms?: number | null
+          total_latency_ms?: number | null
+          tts_latency_ms?: number | null
+          tts_provider?: string | null
+          used_llm?: boolean
+          user_id?: string
+        }
+        Relationships: []
+      }
+      faro_task_cleaner_runs: {
+        Row: {
+          cleaned: number
+          eligible: number
+          errors: number
+          finished_at: string
+          id: string
+          scanned: number
+          skipped_missing_completed_at: number
+          started_at: string
+          user_id: string
+        }
+        Insert: {
+          cleaned?: number
+          eligible?: number
+          errors?: number
+          finished_at?: string
+          id?: string
+          scanned?: number
+          skipped_missing_completed_at?: number
+          started_at?: string
+          user_id: string
+        }
+        Update: {
+          cleaned?: number
+          eligible?: number
+          errors?: number
+          finished_at?: string
+          id?: string
+          scanned?: number
+          skipped_missing_completed_at?: number
+          started_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       finance_accounts: {
         Row: {
@@ -599,11 +869,59 @@ export type Database = {
           },
         ]
       }
+      finance_liquidity_preferences: {
+        Row: {
+          minimum_operating_buffer: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          minimum_operating_buffer?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          minimum_operating_buffer?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      finance_liquidity_snapshots: {
+        Row: {
+          id: string
+          initial_projected_closing_balance: number
+          initial_projected_minimum: number
+          month: string
+          projection_version: number
+          snapshot_date: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          initial_projected_closing_balance: number
+          initial_projected_minimum: number
+          month: string
+          projection_version?: number
+          snapshot_date?: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          initial_projected_closing_balance?: number
+          initial_projected_minimum?: number
+          month?: string
+          projection_version?: number
+          snapshot_date?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       finance_recurring_occurrences: {
         Row: {
           amount: number | null
-          description: string | null
           created_at: string
+          description: string | null
           expected_date: string
           id: string
           paid_at: string | null
@@ -618,8 +936,8 @@ export type Database = {
         }
         Insert: {
           amount?: number | null
-          description?: string | null
           created_at?: string
+          description?: string | null
           expected_date: string
           id?: string
           paid_at?: string | null
@@ -634,8 +952,8 @@ export type Database = {
         }
         Update: {
           amount?: number | null
-          description?: string | null
           created_at?: string
+          description?: string | null
           expected_date?: string
           id?: string
           paid_at?: string | null
@@ -818,6 +1136,7 @@ export type Database = {
           id: string
           legacy_transaction_id: string | null
           notes: string | null
+          planned_amount: number | null
           recurring_transaction_id: string | null
           status: Database["public"]["Enums"]["finance_transaction_status"]
           transaction_date: string
@@ -836,6 +1155,7 @@ export type Database = {
           id?: string
           legacy_transaction_id?: string | null
           notes?: string | null
+          planned_amount?: number | null
           recurring_transaction_id?: string | null
           status?: Database["public"]["Enums"]["finance_transaction_status"]
           transaction_date: string
@@ -854,6 +1174,7 @@ export type Database = {
           id?: string
           legacy_transaction_id?: string | null
           notes?: string | null
+          planned_amount?: number | null
           recurring_transaction_id?: string | null
           status?: Database["public"]["Enums"]["finance_transaction_status"]
           transaction_date?: string
@@ -951,6 +1272,84 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      google_calendar_connections: {
+        Row: {
+          calendar_access_role: string | null
+          calendar_id: string | null
+          calendar_name: string | null
+          connected_at: string
+          encrypted_refresh_token: string
+          google_account_email: string | null
+          granted_scopes: string[]
+          id: string
+          last_synced_at: string | null
+          refresh_token_iv: string
+          status: string
+          updated_at: string
+          user_id: string
+          write_enabled: boolean
+        }
+        Insert: {
+          calendar_access_role?: string | null
+          calendar_id?: string | null
+          calendar_name?: string | null
+          connected_at?: string
+          encrypted_refresh_token: string
+          google_account_email?: string | null
+          granted_scopes?: string[]
+          id?: string
+          last_synced_at?: string | null
+          refresh_token_iv: string
+          status?: string
+          updated_at?: string
+          user_id: string
+          write_enabled?: boolean
+        }
+        Update: {
+          calendar_access_role?: string | null
+          calendar_id?: string | null
+          calendar_name?: string | null
+          connected_at?: string
+          encrypted_refresh_token?: string
+          google_account_email?: string | null
+          granted_scopes?: string[]
+          id?: string
+          last_synced_at?: string | null
+          refresh_token_iv?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+          write_enabled?: boolean
+        }
+        Relationships: []
+      }
+      google_calendar_oauth_states: {
+        Row: {
+          created_at: string
+          expires_at: string
+          id: string
+          state_hash: string
+          used_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at: string
+          id?: string
+          state_hash: string
+          used_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          state_hash?: string
+          used_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
       }
       health_logs: {
         Row: {
@@ -1129,6 +1528,185 @@ export type Database = {
           tags?: string[]
           title?: string | null
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      needs_categories: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          shopping_group: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          shopping_group?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          shopping_group?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      needs_items: {
+        Row: {
+          category: string
+          category_id: string | null
+          created_at: string
+          estimated_amount: number | null
+          frequency: string
+          id: string
+          is_active: boolean
+          is_on_shopping_list: boolean
+          last_completed_at: string | null
+          name: string
+          next_needed_on: string | null
+          notes: string | null
+          priority: string
+          quantity: string | null
+          shopping_group: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          category?: string
+          category_id?: string | null
+          created_at?: string
+          estimated_amount?: number | null
+          frequency?: string
+          id?: string
+          is_active?: boolean
+          is_on_shopping_list?: boolean
+          last_completed_at?: string | null
+          name: string
+          next_needed_on?: string | null
+          notes?: string | null
+          priority?: string
+          quantity?: string | null
+          shopping_group?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          category?: string
+          category_id?: string | null
+          created_at?: string
+          estimated_amount?: number | null
+          frequency?: string
+          id?: string
+          is_active?: boolean
+          is_on_shopping_list?: boolean
+          last_completed_at?: string | null
+          name?: string
+          next_needed_on?: string | null
+          notes?: string | null
+          priority?: string
+          quantity?: string | null
+          shopping_group?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "needs_items_category_id_user_id_fkey"
+            columns: ["category_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "needs_categories"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
+      }
+      needs_price_observations: {
+        Row: {
+          amount: number
+          canonical_name: string
+          created_at: string
+          id: string
+          need_item_id: string | null
+          observed_on: string
+          presentation: string | null
+          receipt_id: string
+          source_name: string
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          canonical_name: string
+          created_at?: string
+          id?: string
+          need_item_id?: string | null
+          observed_on?: string
+          presentation?: string | null
+          receipt_id: string
+          source_name: string
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          canonical_name?: string
+          created_at?: string
+          id?: string
+          need_item_id?: string | null
+          observed_on?: string
+          presentation?: string | null
+          receipt_id?: string
+          source_name?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "needs_price_observations_need_item_id_fkey"
+            columns: ["need_item_id"]
+            isOneToOne: false
+            referencedRelation: "needs_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "needs_price_observations_receipt_id_fkey"
+            columns: ["receipt_id"]
+            isOneToOne: false
+            referencedRelation: "needs_purchase_receipts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      needs_purchase_receipts: {
+        Row: {
+          created_at: string
+          id: string
+          purchased_on: string
+          source_file_name: string | null
+          store_name: string | null
+          total_amount: number | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          purchased_on?: string
+          source_file_name?: string | null
+          store_name?: string | null
+          total_amount?: number | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          purchased_on?: string
+          source_file_name?: string | null
+          store_name?: string | null
+          total_amount?: number | null
           user_id?: string
         }
         Relationships: []
@@ -2582,6 +3160,7 @@ export type Database = {
           id: string
           last_attempt_at: string | null
           parsed_intent: string | null
+          pending_context: Json
           provider_metadata: Json
           questions: Json
           request_id: string
@@ -2610,6 +3189,7 @@ export type Database = {
           id?: string
           last_attempt_at?: string | null
           parsed_intent?: string | null
+          pending_context?: Json
           provider_metadata?: Json
           questions?: Json
           request_id: string
@@ -2638,6 +3218,7 @@ export type Database = {
           id?: string
           last_attempt_at?: string | null
           parsed_intent?: string | null
+          pending_context?: Json
           provider_metadata?: Json
           questions?: Json
           request_id?: string
@@ -2724,6 +3305,53 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      capture_ai_test_baseline: { Args: never; Returns: Json }
+      capture_finance_liquidity_snapshot: {
+        Args: {
+          target_closing: number
+          target_minimum: number
+          target_month: string
+        }
+        Returns: {
+          id: string
+          initial_projected_closing_balance: number
+          initial_projected_minimum: number
+          month: string
+          projection_version: number
+          snapshot_date: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_liquidity_snapshots"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      capture_finance_liquidity_snapshot_v2: {
+        Args: {
+          target_closing: number
+          target_minimum: number
+          target_month: string
+          target_projection_version: number
+        }
+        Returns: {
+          id: string
+          initial_projected_closing_balance: number
+          initial_projected_minimum: number
+          month: string
+          projection_version: number
+          snapshot_date: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_liquidity_snapshots"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      claim_voice_action: { Args: { target_request_id: string }; Returns: Json }
       close_finance_budget: {
         Args: {
           target_budget_id: string
@@ -2736,12 +3364,44 @@ export type Database = {
         Args: { target_transaction_id: string }
         Returns: undefined
       }
+      faro_benchmark_comparison: { Args: { p_start?: string }; Returns: Json }
+      faro_cost_observatory: {
+        Args: {
+          p_end?: string
+          p_period?: string
+          p_start?: string
+          p_surface?: string
+        }
+        Returns: Json
+      }
+      faro_database_capacity: { Args: never; Returns: Json }
+      faro_finops_dashboard: { Args: { p_period?: string }; Returns: Json }
+      faro_set_ai_budget: {
+        Args: { p_monthly_budget_usd: number }
+        Returns: Json
+      }
+      faro_task_smart_cleaner: { Args: never; Returns: Json }
+      faro_task_smart_cleaner_all: { Args: never; Returns: Json }
+      faro_task_smart_cleaner_preflight_all: { Args: never; Returns: Json }
       finance_next_recurring_date: {
         Args: {
           current_date_value: string
           frequency_value: Database["public"]["Enums"]["finance_frequency"]
         }
         Returns: string
+      }
+      prepare_ai_calendar_scenario: {
+        Args: { p_anchor_date?: string; p_confirm_is_test_user?: boolean }
+        Returns: Json
+      }
+      prepare_ai_test_environment: {
+        Args: {
+          p_bbva_balance?: number
+          p_confirm_is_test_user?: boolean
+          p_nu_balance?: number
+          p_personal_budget?: number
+        }
+        Returns: Json
       }
       register_finance_goal_contribution: {
         Args: {
@@ -2763,8 +3423,22 @@ export type Database = {
         }
         Returns: string
       }
+      restore_ai_finance_scenario: {
+        Args: { p_confirm_is_test_user?: boolean }
+        Returns: Json
+      }
       revert_finance_recurring_occurrence: {
         Args: { target_occurrence_id: string }
+        Returns: undefined
+      }
+      save_finance_recurring_period: {
+        Args: {
+          target_amount: number
+          target_description?: string
+          target_expected_date: string
+          target_period: string
+          target_recurring_id: string
+        }
         Returns: undefined
       }
       seed_finance_categories: {
@@ -2831,12 +3505,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2860,11 +3534,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2885,11 +3559,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2910,11 +3584,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2927,11 +3601,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }

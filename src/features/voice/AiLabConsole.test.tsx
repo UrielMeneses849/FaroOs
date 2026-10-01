@@ -14,6 +14,7 @@ vi.mock('../../services/voiceService', () => ({ voiceService:{send:mocks.send,co
 const action={requestId:'48e30c50-e4bb-44a0-bdeb-bf098b2c3547',toolName:'registerRecurringPayment' as const,arguments:{recurringId:'seguro',period:'2026-08-01',expectedDate:'2026-08-06',actualAmount:700},summary:'Seguro Hermana por $700'}
 const calendarAction={requestId:'58e30c50-e4bb-44a0-bdeb-bf098b2c3547',toolName:'createCalendarEvent' as const,arguments:{eventId:'68e30c50-e4bb-44a0-bdeb-bf098b2c3547',title:'Salida con Iris',start:'2026-08-09T18:00:00.000Z',end:'2026-08-09T19:00:00.000Z',provider:'faro',timezone:'America/Mexico_City'},summary:'Salida con Iris'}
 const pending={status:'pending_confirmation' as const,message:'Encontré Seguro Hermana por $700. ¿Confirmas?',questions:[],pendingAction:action}
+const duplicateAction={requestId:'68e30c50-e4bb-44a0-bdeb-bf098b2c3547',toolName:'createExpense' as const,arguments:{transactionId:'78e30c50-e4bb-44a0-bdeb-bf098b2c3547',amount:150,description:'Comida de Kira',date:'2026-08-15',accountId:'88e30c50-e4bb-44a0-bdeb-bf098b2c3547',categoryId:'98e30c50-e4bb-44a0-bdeb-bf098b2c3547'},summary:'Gasto de $150 en Comida.',possibleDuplicate:{id:'a8e30c50-e4bb-44a0-bdeb-bf098b2c3547',description:'Recarga',amount:150,date:'2026-08-15',score:.9,confidence:'high' as const}}
 const deferred=()=>{let resolve!:(value?:void)=>void;let reject!:(reason?:unknown)=>void;const promise=new Promise<void>((ok,no)=>{resolve=ok;reject=no});return{promise,resolve,reject}}
 
 describe('AiLabConsole con ElevenLabs',()=>{
@@ -33,7 +34,17 @@ describe('AiLabConsole con ElevenLabs',()=>{
   it('una transcripción final duplicada envía una sola solicitud sin espera artificial',async()=>{render(<AiLabConsole onOpenFinance={vi.fn()} mode="product" surface="today"/>);fireEvent.click(screen.getByText('Iniciar conversación'));act(()=>{mocks.final?.('Hola FARO, gasté 200 en café');mocks.final?.('Hola FARO, gasté 200 en café')});await act(async()=>Promise.resolve());expect(mocks.send).toHaveBeenCalledOnce();expect(mocks.send).toHaveBeenCalledWith('gasté 200 en café','voice',[], 'today',expect.objectContaining({pipeline:'optimized',sessionId:expect.any(String),requestId:expect.any(String)}))})
 
   it('cancelar por voz descarta exactamente la propuesta pendiente',async()=>{await startAndSend();await act(async()=>Promise.resolve());act(()=>mocks.final?.('cancela'));await act(async()=>Promise.resolve());expect(mocks.cancel).toHaveBeenCalledOnce();expect(mocks.cancel).toHaveBeenCalledWith(action);expect(mocks.confirm).not.toHaveBeenCalled()})
-  it('persiste en servidor una revisión de monto antes de confirmar',async()=>{await startAndSend();await act(async()=>Promise.resolve());act(()=>mocks.final?.('mejor fueron 1400'));await act(async()=>Promise.resolve());expect(mocks.revise).toHaveBeenCalledOnce();expect(mocks.revise).toHaveBeenCalledWith(expect.objectContaining({requestId:action.requestId,arguments:expect.objectContaining({actualAmount:1400})}))})
+  it('confirma desde FARO Mini usando la misma pendingAction y el mismo servicio',async()=>{
+    render(<AiLabConsole onOpenFinance={vi.fn()} mode="product" surface="finances"/>)
+    fireEvent.click(screen.getByText('Iniciar conversación'))
+    act(()=>mocks.final?.('Hola FARO, registra el cobro de Seguro Hermana'))
+    await act(async()=>Promise.resolve())
+    act(()=>window.dispatchEvent(new CustomEvent('faro:voice-action',{detail:'confirm'})))
+    await act(async()=>Promise.resolve())
+    expect(mocks.confirm).toHaveBeenCalledOnce()
+    expect(mocks.confirm).toHaveBeenCalledWith(action)
+  })
+  it('persiste en servidor una revisión de monto antes de confirmar',async()=>{await startAndSend();await act(async()=>Promise.resolve());act(()=>mocks.final?.('mejor fueron 1400'));await act(async()=>Promise.resolve());expect(mocks.revise).toHaveBeenCalledOnce();expect(mocks.revise).toHaveBeenCalledWith(expect.objectContaining({requestId:action.requestId,arguments:expect.objectContaining({actualAmount:1400})}),'mejor fueron 1400')})
 
   it('permite dictar un título nuevo antes de confirmar Calendar',async()=>{
     mocks.send.mockResolvedValue({status:'pending_confirmation',message:'¿Confirmas?',questions:[],pendingAction:calendarAction})
@@ -47,7 +58,40 @@ describe('AiLabConsole con ElevenLabs',()=>{
     expect(screen.getAllByText('Claro. ¿Qué título quieres usar?')).toHaveLength(2)
     act(()=>mocks.final?.('Comida con Iris'))
     await act(async()=>Promise.resolve())
-    expect(mocks.revise).toHaveBeenCalledWith(expect.objectContaining({arguments:expect.objectContaining({title:'Comida con Iris'})}))
+    expect(mocks.revise).toHaveBeenCalledWith(expect.objectContaining({arguments:expect.objectContaining({title:'Comida con Iris'})}),'Comida con Iris')
+  })
+  it('mantiene viva la propuesta cuando se pregunta por el duplicado',async()=>{
+    mocks.send.mockResolvedValue({status:'pending_confirmation',message:'Encontré una Recarga. ¿Confirmas?',questions:[],pendingAction:duplicateAction})
+    mocks.revise.mockResolvedValue({status:'pending_confirmation',message:'Encontré Recarga. ¿Quieres ajustar algo o confirmas?',questions:[],pendingAction:duplicateAction})
+    render(<AiLabConsole onOpenFinance={vi.fn()}/>)
+    fireEvent.click(screen.getByText('Iniciar conversación'))
+    act(()=>mocks.final?.('Hola FARO, registra 150 en Comida como Comida de Kira'))
+    await act(async()=>Promise.resolve())
+    act(()=>mocks.final?.('¿Cuál encontraste?'))
+    await act(async()=>Promise.resolve())
+    expect(mocks.revise).toHaveBeenCalledWith(duplicateAction,'¿Cuál encontraste?')
+    expect(screen.getByText('Posible movimiento duplicado')).toBeTruthy()
+  })
+  it('elimina el warning de duplicado cuando el usuario rechaza la suposición',async()=>{
+    mocks.send.mockResolvedValue({status:'pending_confirmation',message:'Encontré una Recarga. ¿Confirmas?',questions:[],pendingAction:duplicateAction})
+    mocks.revise.mockResolvedValue({status:'pending_confirmation',message:'Entendido. Recarga es distinto. ¿Confirmas?',questions:[],pendingAction:{...duplicateAction,possibleDuplicate:undefined}})
+    render(<AiLabConsole onOpenFinance={vi.fn()}/>)
+    fireEvent.click(screen.getByText('Iniciar conversación'))
+    act(()=>mocks.final?.('Hola FARO, registra 150 en Comida como Comida de Kira'))
+    await act(async()=>Promise.resolve())
+    act(()=>mocks.final?.('No es el mismo, ese dice Recarga y este es Comida de Kira.'))
+    await act(async()=>Promise.resolve())
+    expect(mocks.revise).toHaveBeenCalledWith(duplicateAction,'No es el mismo, ese dice Recarga y este es Comida de Kira.')
+    expect(screen.queryByText('Posible movimiento duplicado')).toBeNull()
+  })
+  it('cancela la propuesta antes de procesar una intención nueva',async()=>{
+    mocks.send.mockResolvedValueOnce(pending).mockResolvedValueOnce({status:'completed',message:'Hoy gastaste $500.',questions:[]})
+    await startAndSend()
+    await act(async()=>Promise.resolve())
+    act(()=>mocks.final?.('Olvida eso. ¿Cuánto gasté hoy?'))
+    await act(async()=>{await Promise.resolve();vi.advanceTimersByTime(1);await Promise.resolve()})
+    expect(mocks.cancel).toHaveBeenCalledWith(action)
+    expect(mocks.send.mock.calls.at(-1)?.[0]).toBe('Olvida eso. ¿Cuánto gasté hoy?')
   })
 
   it('genera un requestId nuevo y usa sólo el transcript final de cada turno',async()=>{

@@ -7,6 +7,7 @@ import {
   type FinanceFastIntent,
 } from './financeFastPath.ts'
 import type { ServerVoiceTrace } from './trace.ts'
+import { assessFinanceDuplicate, type FinanceDuplicateMatch } from './financeDuplicate.ts'
 
 type Db = ReturnType<typeof createClient>
 type EntityReference = { id: string; type: 'finance_transaction' | 'finance_recurring'; title: string; subtitle?: string }
@@ -18,7 +19,7 @@ type SessionContext = {
 export type FastFinanceResolution =
   | { kind: 'read'; intent: FinanceFastIntent; message: string; result: unknown; references?: EntityReference[] }
   | { kind: 'clarify'; intent: FinanceFastIntent; message: string; references?: EntityReference[]; missingFields?: string[]; entities?: Record<string, unknown> }
-  | { kind: 'action'; intent: FinanceFastIntent; toolName: string; arguments: Record<string, unknown>; summary: string; prompt: string; possibleDuplicate?: { id: string; description: string; amount: number; date: string } }
+  | { kind: 'action'; intent: FinanceFastIntent; toolName: string; arguments: Record<string, unknown>; summary: string; prompt: string; possibleDuplicate?: FinanceDuplicateMatch; duplicateAssessment?: FinanceDuplicateMatch }
 
 type Named = { id: string; name: string; type?: string }
 type Transaction = { id: string; description: string; type: string; amount: number | string; status: string; account_id: string; category_id: string; transaction_date: string }
@@ -94,17 +95,18 @@ async function createResolution(db: Db, userId: string, message: string, intent:
     accountId: account.id, categoryId: category.id, status: 'completed', notes: null,
   }
   const { data: duplicates, error } = await db.from('finance_transactions')
-    .select('id,description,amount,transaction_date').eq('user_id', userId).eq('type', kind)
-    .eq('account_id', account.id).eq('transaction_date', date).eq('amount', amount).neq('status', 'cancelled').limit(1)
+    .select('id,description,amount,transaction_date,type,account_id,category_id,recurring_transaction_id').eq('user_id', userId).eq('type', kind)
+    .eq('transaction_date', date).neq('status', 'cancelled').limit(30)
   if (error) throw error
-  const duplicate = duplicates?.[0]
-  const possibleDuplicate = duplicate ? { id: duplicate.id, description: duplicate.description, amount: Number(duplicate.amount), date: duplicate.transaction_date } : undefined
+  const duplicate = assessFinanceDuplicate({ type: kind, amount, date, accountId: account.id, categoryId: category.id, description: args.description }, duplicates ?? [])
+  const possibleDuplicate = duplicate?.confidence === 'high' ? duplicate : undefined
   const label = kind === 'expense' ? 'gasto' : 'ingreso'
   return {
     kind: 'action', intent, toolName: kind === 'expense' ? 'createExpense' : 'createIncome', arguments: args,
     summary: `${kind === 'expense' ? 'Gasto' : 'Ingreso'} de ${money(amount)} en ${account.name}, categoría ${category.name}, fecha ${date}.`,
-    prompt: possibleDuplicate ? 'Ya existe un movimiento igual. ¿Quieres registrarlo otra vez?' : `¿Registro ${money(amount)} como ${label} en ${category.name}?`,
+    prompt: possibleDuplicate ? `Encontré un posible duplicado de alta similitud: “${possibleDuplicate.description}” por ${money(possibleDuplicate.amount)}. ¿Registro este nuevo ${label} de todos modos?` : duplicate?.confidence === 'medium' ? `Encontré una coincidencia parecida (“${duplicate.description}”), pero tiene información distinta. ${`¿Registro ${money(amount)} como ${label} en ${category.name}?`}` : `¿Registro ${money(amount)} como ${label} en ${category.name}?`,
     possibleDuplicate,
+    duplicateAssessment: duplicate,
   }
 }
 

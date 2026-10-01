@@ -1,4 +1,4 @@
-import { addMonths, endOfMonth, format, isAfter, isBefore, parseISO, startOfMonth } from 'date-fns'
+import { addDays, addMonths, endOfMonth, format, isAfter, isBefore, isSameMonth, parseISO, startOfMonth } from 'date-fns'
 import { es } from 'date-fns/locale'
 import type {
   FinanceAccount,
@@ -32,6 +32,17 @@ export const formatFinanceDate = (value: string) =>
 export const monthKey = (date: Date) => format(startOfMonth(date), 'yyyy-MM-dd')
 const inMonth = (date: string, month: Date) => date.startsWith(format(month, 'yyyy-MM'))
 const completed = (transaction: FinanceTransaction) => transaction.status === 'completed'
+
+export function eventualIncomeTransactions(transactions: FinanceTransaction[]) {
+  return transactions.filter((transaction) =>
+    !transaction.recurringTransactionId
+    && (transaction.type === 'income' || transaction.type === 'refund')
+    && transaction.status !== 'cancelled')
+}
+
+export function canRegisterEventualIncome(transaction: FinanceTransaction) {
+  return transaction.status === 'planned' || transaction.status === 'pending'
+}
 
 export function transactionImpact(transaction: FinanceTransaction) {
   if (!completed(transaction)) return 0
@@ -127,7 +138,121 @@ export interface FinanceProjectionBreakdown {
   balanceProyectado: number
 }
 
-export function financeProjectionBreakdown(data: FinanceData, month: Date): FinanceProjectionBreakdown {
+export type FinanceLiquidityStatus = 'safe' | 'low' | 'negative'
+
+export interface FinanceLiquidityEvent {
+  id: string
+  date: string
+  label: string
+  amountCents: number
+  kind: 'income' | 'expense'
+  source: 'movement' | 'recurring'
+}
+
+export interface FinanceLiquidityDay {
+  date: string
+  incomeCents: number
+  expenseCents: number
+  balanceCents: number
+  status: FinanceLiquidityStatus
+  events: FinanceLiquidityEvent[]
+}
+
+export interface FinanceLiquidityTimeline {
+  available: boolean
+  startBalanceCents: number
+  projectedBalanceCents: number
+  floorCents: number
+  uncommittedMarginCents: number
+  days: FinanceLiquidityDay[]
+}
+
+/**
+ * Forecasts the money that remains operationally available on each remaining
+ * day of the current month. It intentionally starts from the live balance
+ * (instead of rebuilding a past balance) and only applies commitments that
+ * have not happened yet. This makes the result useful for a decision today.
+ */
+export function financeLiquidityTimeline(data: FinanceData, month: Date, reference = new Date()): FinanceLiquidityTimeline {
+  const startBalanceCents = calculateFinanceMetrics(data, month).availableBalanceCents
+  if (!isSameMonth(month, reference)) {
+    return { available: false, startBalanceCents, projectedBalanceCents: startBalanceCents, floorCents: startBalanceCents, uncommittedMarginCents: 0, days: [] }
+  }
+
+  const referenceDate = format(reference, 'yyyy-MM-dd')
+  const period = monthKey(month)
+  const finalDate = format(endOfMonth(month), 'yyyy-MM-dd')
+  const byDate = new Map<string, FinanceLiquidityEvent[]>()
+  const addEvent = (event: FinanceLiquidityEvent) => {
+    if (event.date < referenceDate || event.date > finalDate) return
+    byDate.set(event.date, [...(byDate.get(event.date) ?? []), event])
+  }
+  const kindFor = (type: FinanceTransaction['type']): FinanceLiquidityEvent['kind'] =>
+    type === 'income' || type === 'refund' ? 'income' : 'expense'
+  const impactFor = (type: FinanceTransaction['type'], amountCents: number) =>
+    type === 'income' || type === 'refund' ? amountCents : -amountCents
+  const isLiquidityType = (type: FinanceTransaction['type']) =>
+    type === 'income' || type === 'refund' || type === 'expense' || type === 'debt_payment'
+
+  data.transactions
+    .filter((transaction) => !transaction.recurringTransactionId
+      && ['planned', 'pending'].includes(transaction.status)
+      && inMonth(transaction.transactionDate, month)
+      && isLiquidityType(transaction.type))
+    .forEach((transaction) => addEvent({
+      id: `movement:${transaction.id}`,
+      date: transaction.transactionDate,
+      label: transaction.description,
+      amountCents: impactFor(transaction.type, transaction.amountCents),
+      kind: kindFor(transaction.type),
+      source: 'movement',
+    }))
+
+  data.recurring
+    .filter((item) => item.isActive && recurringAppliesToMonth(item, month) && isLiquidityType(item.type))
+    .forEach((item) => {
+      const occurrence = data.recurringOccurrences.find((candidate) =>
+        candidate.recurringTransactionId === item.id && candidate.period === period)
+      const generatedMovementExists = Boolean(occurrence?.transactionId && data.transactions.some((transaction) =>
+        transaction.id === occurrence.transactionId && transaction.status === 'completed'))
+      if (!occurrence?.amountCents || occurrence.status === 'skipped' || (occurrence.status === 'paid' && generatedMovementExists)) return
+      if (!inMonth(occurrence.expectedDate, month)) return
+      addEvent({
+        id: `recurring:${occurrence.id}`,
+        date: occurrence.expectedDate,
+        label: occurrence.description || item.description,
+        amountCents: impactFor(item.type, occurrence.amountCents),
+        kind: kindFor(item.type),
+        source: 'recurring',
+      })
+    })
+
+  const days: FinanceLiquidityDay[] = []
+  let balanceCents = startBalanceCents
+  for (let cursor = parseISO(referenceDate); !isAfter(cursor, endOfMonth(month)); cursor = addDays(cursor, 1)) {
+    const date = format(cursor, 'yyyy-MM-dd')
+    const events = byDate.get(date) ?? []
+    const incomeCents = events.filter((event) => event.kind === 'income').reduce((sum, event) => sum + event.amountCents, 0)
+    const expenseCents = Math.abs(events.filter((event) => event.kind === 'expense').reduce((sum, event) => sum + event.amountCents, 0))
+    balanceCents += incomeCents - expenseCents
+    days.push({ date, incomeCents, expenseCents, balanceCents, status: 'safe', events })
+  }
+  const floorCents = days.length ? Math.min(...days.map((day) => day.balanceCents)) : startBalanceCents
+  const markedDays = days.map((day) => ({
+    ...day,
+    status: day.balanceCents < 0 ? 'negative' : day.balanceCents === floorCents && day.events.length ? 'low' : 'safe' as FinanceLiquidityStatus,
+  }))
+  return {
+    available: true,
+    startBalanceCents,
+    projectedBalanceCents: markedDays.at(-1)?.balanceCents ?? startBalanceCents,
+    floorCents,
+    uncommittedMarginCents: Math.max(0, floorCents),
+    days: markedDays,
+  }
+}
+
+function financeProjectionComponents(data: FinanceData, month: Date, reference: Date) {
   const monthly = data.transactions.filter((item) => inMonth(item.transactionDate, month))
   const ingresosRealizados = monthly.filter((item) =>
     completed(item) && (item.type === 'income' || item.type === 'refund'))
@@ -135,8 +260,6 @@ export function financeProjectionBreakdown(data: FinanceData, month: Date): Fina
   const gastosRealizados = monthly.filter((item) =>
     completed(item) && (item.type === 'expense' || item.type === 'saving' || item.type === 'debt_payment'))
     .reduce((sum, item) => sum + item.amountCents, 0)
-  const saldoRealActual = data.accounts
-    .reduce((sum, account) => sum + accountBalance(account, data.transactions), 0)
   const pendingEventual = monthly.filter((item) =>
     !item.recurringTransactionId && (item.status === 'planned' || item.status === 'pending'))
   let ingresosPendientes = pendingEventual.filter((item) => item.type === 'income' || item.type === 'refund')
@@ -154,21 +277,51 @@ export function financeProjectionBreakdown(data: FinanceData, month: Date): Fina
     if (occurrence?.status === 'skipped' || (occurrence?.status === 'paid' && generatedMovementExists)) continue
     if (!occurrence?.amountCents || !inMonth(occurrence.expectedDate, month)) continue
     if (item.type === 'income' || item.type === 'refund') ingresosPendientes += occurrence.amountCents
-    else if (item.type !== 'transfer') gastosPendientes += occurrence.amountCents
+    else if (item.type === 'expense' || item.type === 'debt_payment') gastosPendientes += occurrence.amountCents
   }
+  // A fortnightly personal budget is an envelope, not a second movement. Reserve
+  // only what has not already been committed by real/planed personal expenses.
+  gastosPendientes += personalBudgetReservations(data, month, reference).reduce((sum, item) => sum + item.amountCents, 0)
+  return { ingresosPendientes, gastosPendientes, ingresosRealizados, gastosRealizados }
+}
+
+export function financeProjectionBreakdown(data: FinanceData, month: Date, reference = new Date()): FinanceProjectionBreakdown {
+  const selected = financeProjectionComponents(data, month, reference)
+  const saldoRealActual = data.accounts
+    .reduce((sum, account) => sum + accountBalance(account, data.transactions), 0)
+  const selectedMonthStart = startOfMonth(month)
+  const referenceMonthStart = startOfMonth(reference)
+  const isFuturePeriod = isAfter(selectedMonthStart, reference)
+  const isPastPeriod = isBefore(selectedMonthStart, referenceMonthStart)
+  let balanceProyectado = saldoRealActual + selected.ingresosPendientes - selected.gastosPendientes
+
+  if (isPastPeriod) {
+    const periodEnd = format(endOfMonth(month), 'yyyy-MM-dd')
+    const transactionsThroughPeriod = data.transactions.filter((transaction) =>
+      transaction.status === 'completed' && transaction.transactionDate <= periodEnd)
+    balanceProyectado = data.accounts
+      .reduce((sum, account) => sum + accountBalance(account, transactionsThroughPeriod), 0)
+  } else if (isFuturePeriod) {
+    let carriedBalanceCents = saldoRealActual
+    for (let cursor = referenceMonthStart; !isAfter(cursor, selectedMonthStart); cursor = addMonths(cursor, 1)) {
+      const component = isSameMonth(cursor, selectedMonthStart)
+        ? selected
+        : financeProjectionComponents(data, cursor, reference)
+      carriedBalanceCents += component.ingresosPendientes - component.gastosPendientes
+    }
+    balanceProyectado = carriedBalanceCents
+  }
+
   return {
     saldoRealActual,
-    ingresosPendientes,
-    gastosPendientes,
-    ingresosRealizados,
-    gastosRealizados,
-    balanceProyectado: saldoRealActual + ingresosPendientes - gastosPendientes,
+    ...selected,
+    balanceProyectado,
   }
 }
 
-export function calculateFinanceMetrics(data: FinanceData, month: Date): FinanceMetrics {
+export function calculateFinanceMetrics(data: FinanceData, month: Date, reference = new Date()): FinanceMetrics {
   const monthly = data.transactions.filter((item) => inMonth(item.transactionDate, month))
-  const projection = financeProjectionBreakdown(data, month)
+  const projection = financeProjectionBreakdown(data, month, reference)
   const monthlyIncomeCents = monthly.filter((item) => completed(item) && item.type === 'income')
     .reduce((sum, item) => sum + item.amountCents, 0)
   const refunds = monthly.filter((item) => completed(item) && item.type === 'refund')
@@ -179,13 +332,18 @@ export function calculateFinanceMetrics(data: FinanceData, month: Date): Finance
   const monthlySavingsCents = monthly.filter((item) => completed(item) && item.type === 'saving')
     .reduce((sum, item) => sum + item.amountCents, 0)
   const totalMoneyCents = projection.saldoRealActual
-  const physicalAvailable = data.accounts.filter((account) => account.isActive)
+  const activeAccounts = data.accounts.filter((account) => account.isActive)
+  const activeAccountIds = new Set(activeAccounts.map((account) => account.id))
+  const physicalAvailable = activeAccounts
     .reduce((sum, account) => sum + accountBalance(account, data.transactions), 0)
-  const reservedSavings = data.transactions.filter((item) => completed(item) && item.type === 'saving')
+  const reservedSavings = data.transactions.filter((item) => activeAccountIds.has(item.accountId) && completed(item) && item.type === 'saving')
     .reduce((sum, item) => sum + item.amountCents, 0)
   const availableBalanceCents = physicalAvailable - reservedSavings
-  const plannedBudget = data.budgets.filter((item) => item.month === monthKey(month))
-    .reduce((sum, item) => sum + item.plannedAmountCents, 0)
+  const selectedMonthStart = monthKey(month)
+  const selectedMonthEnd = format(endOfMonth(month), 'yyyy-MM-dd')
+  const plannedBudget = canonicalFinanceBudgetGroups(data)
+    .filter((item) => item.periodStart <= selectedMonthEnd && item.periodEnd >= selectedMonthStart)
+    .reduce((sum, item) => sum + item.budget.plannedAmountCents, 0)
   return {
     monthlyIncomeCents,
     monthlyExpensesCents,
@@ -237,33 +395,250 @@ export function annualFinanceTotals(data: FinanceData, year: number) {
 
 export interface BudgetPerformance extends FinanceBudget {
   category?: FinanceCategory
+  /** Legacy duplicated records represented by this single logical budget. */
+  sourceBudgetIds?: string[]
   actualCents: number
   remainingCents: number
   usedPercentage: number
 }
 
-export function personalBudgetForDate(
-  budgets: Array<Pick<FinanceBudget, 'id' | 'name' | 'periodStart' | 'periodEnd'>>,
+export interface CanonicalFinanceBudget {
+  budget: FinanceBudget
+  category?: FinanceCategory
+  periodStart: string
+  periodEnd: string
+  isPersonal: boolean
+  sourceBudgetIds: string[]
+}
+
+export interface FinanceBudgetReservation {
+  id: string
+  budgetId: string
+  date: string
+  periodStart: string
+  periodEnd: string
+  label: string
+  amountCents: number
+  sourceBudgetIds: string[]
+}
+
+const normalizedBudgetName = (value?: string) => value?.trim().toLocaleLowerCase('es-MX') ?? ''
+const isPersonalName = (value?: string) => normalizedBudgetName(value) === 'gastos personales' || normalizedBudgetName(value) === 'personal'
+const budgetPeriodStart = (budget: FinanceBudget) => budget.periodStart ?? budget.month
+const budgetPeriodEnd = (budget: FinanceBudget) => budget.periodEnd ?? format(endOfMonth(parseISO(budget.month)), 'yyyy-MM-dd')
+const isNewerBudget = (candidate: FinanceBudget, current: FinanceBudget) =>
+  candidate.updatedAt.localeCompare(current.updatedAt) > 0
+  || (candidate.updatedAt === current.updatedAt && candidate.id.localeCompare(current.id) > 0)
+
+/**
+ * Older imports allowed multiple category ids called "Personal". Treat those
+ * as one envelope per fortnight, keeping the newest value and retaining every
+ * legacy id for movement matching. That removes duplicate cards without
+ * deleting accounting history.
+ */
+export function canonicalFinanceBudgetGroups(data: Pick<FinanceData, 'budgets' | 'categories'>): CanonicalFinanceBudget[] {
+  const groups = new Map<string, CanonicalFinanceBudget>()
+  for (const budget of data.budgets) {
+    const category = data.categories.find((item) => item.id === budget.categoryId)
+    const periodStart = budgetPeriodStart(budget)
+    const periodEnd = budgetPeriodEnd(budget)
+    const isPersonal = isPersonalName(budget.name) || isPersonalName(category?.name)
+    const key = isPersonal
+      ? `personal:${periodStart}:${periodEnd}`
+      : `category:${budget.categoryId}:${periodStart}:${periodEnd}`
+    const existing = groups.get(key)
+    if (!existing) {
+      groups.set(key, { budget, category, periodStart, periodEnd, isPersonal, sourceBudgetIds: [budget.id] })
+      continue
+    }
+    existing.sourceBudgetIds.push(budget.id)
+    if (isNewerBudget(budget, existing.budget)) {
+      existing.budget = budget
+      existing.category = category
+    }
+  }
+  return [...groups.values()].map((group) => ({
+    ...group,
+    sourceBudgetIds: [...new Set(group.sourceBudgetIds)],
+  })).sort((left, right) => left.periodStart.localeCompare(right.periodStart)
+    || left.periodEnd.localeCompare(right.periodEnd)
+    || left.budget.id.localeCompare(right.budget.id))
+}
+
+function personalBudgetMovementCentsForPeriod(data: FinanceData, {
+  periodStart,
+  periodEnd,
+  sourceBudgetIds = [],
+}: Pick<CanonicalFinanceBudget, 'periodStart' | 'periodEnd' | 'sourceBudgetIds'>) {
+  const personalCategoryIds = new Set(data.categories
+    .filter((category) => category.type === 'expense' && isPersonalName(category.name))
+    .map((category) => category.id))
+  const budgetIds = new Set(sourceBudgetIds)
+  const belongsToBudget = (categoryId?: string, budgetId?: string) => Boolean(budgetId && budgetIds.has(budgetId))
+    || (!budgetId && Boolean(categoryId && personalCategoryIds.has(categoryId)))
+  const transactionCents = data.transactions
+    .filter((transaction) => transaction.status !== 'cancelled'
+      && (transaction.type === 'expense' || transaction.type === 'debt_payment')
+      && transaction.transactionDate >= periodStart && transaction.transactionDate <= periodEnd
+      && belongsToBudget(transaction.categoryId, transaction.budgetId))
+    .reduce((sum, transaction) => sum + transaction.amountCents, 0)
+  const recurringCents = data.recurring.reduce((sum, recurring) => {
+    if (!recurring.isActive || !belongsToBudget(recurring.categoryId)) return sum
+    if (recurring.type !== 'expense' && recurring.type !== 'debt_payment') return sum
+    const occurrence = data.recurringOccurrences.find((candidate) =>
+      candidate.recurringTransactionId === recurring.id
+      && candidate.expectedDate >= periodStart
+      && candidate.expectedDate <= periodEnd)
+    if (!occurrence?.amountCents || occurrence.status === 'skipped' || occurrence.status === 'paid') return sum
+    const materialized = occurrence.transactionId && data.transactions.some((transaction) =>
+      transaction.id === occurrence.transactionId && transaction.status !== 'cancelled')
+    return materialized ? sum : sum + occurrence.amountCents
+  }, 0)
+  return transactionCents + recurringCents
+}
+
+function personalBudgetMovementCents(data: FinanceData, budget: CanonicalFinanceBudget) {
+  return personalBudgetMovementCentsForPeriod(data, budget)
+}
+
+/** Planned and completed personal spending already dated inside a fortnight. */
+export function personalBudgetUsageCents(data: FinanceData, periodStart: string, periodEnd: string, sourceBudgetIds: string[] = []) {
+  return personalBudgetMovementCentsForPeriod(data, { periodStart, periodEnd, sourceBudgetIds })
+}
+
+/**
+ * The unspent part of the immediately preceding personal envelope.  Q2 can
+ * treat this as already available so a target of $5k with $2k left in Q1 only
+ * needs another $3k reserved.
+ */
+export function personalBudgetCarryOverIntoPeriod(data: FinanceData, periodStart: string) {
+  const previousPeriodEnd = format(addDays(parseISO(periodStart), -1), 'yyyy-MM-dd')
+  const previous = canonicalFinanceBudgetGroups(data)
+    .find((budget) => budget.isPersonal && budget.periodEnd === previousPeriodEnd)
+  if (!previous) return 0
+  return Math.max(0, previous.budget.plannedAmountCents - personalBudgetMovementCents(data, previous))
+}
+
+/**
+ * Reserves only the uncommitted portion of a personal envelope. It lets the
+ * forecast include a Q1/Q2 budget without counting the same personal movement
+ * twice. A budget that has already ended is released unless it was explicitly
+ * carried into another period.
+ */
+export function personalBudgetReservations(data: FinanceData, month: Date, reference = new Date()): FinanceBudgetReservation[] {
+  const selectedMonthStart = monthKey(month)
+  const selectedMonthEnd = format(endOfMonth(month), 'yyyy-MM-dd')
+  const referenceKey = format(reference, 'yyyy-MM-dd')
+  const selectedIsCurrent = isSameMonth(month, reference)
+  const budgets = canonicalFinanceBudgetGroups(data)
+    .filter((budget) => budget.isPersonal
+      && budget.periodStart <= selectedMonthEnd && budget.periodEnd >= selectedMonthStart
+      && (!selectedIsCurrent || budget.periodEnd >= referenceKey))
+  return budgets
+    .map((budget) => {
+      const previousPeriodEnd = format(addDays(parseISO(budget.periodStart), -1), 'yyyy-MM-dd')
+      // Before Q2 begins, Q1's reservation is already represented in the
+      // same curve. After Q1 expires, carry it into the current envelope so
+      // the balance does not silently release money the user still reserved.
+      const carryIsAlreadyReserved = budgets.some((candidate) =>
+        candidate.isPersonal && candidate.periodEnd === previousPeriodEnd)
+      const carryOverCents = budget.budget.carryOverEnabled
+        ? carryIsAlreadyReserved ? 0 : personalBudgetCarryOverIntoPeriod(data, budget.periodStart)
+        : 0
+      const amountCents = Math.max(0, budget.budget.plannedAmountCents + carryOverCents - personalBudgetMovementCents(data, budget))
+      return {
+        id: `budget:${budget.budget.id}`,
+        budgetId: budget.budget.id,
+        date: budget.periodStart,
+        periodStart: budget.periodStart,
+        periodEnd: budget.periodEnd,
+        label: `Reserva · ${budget.budget.name ?? 'Gastos Personales'} (${budget.periodStart.slice(-2) === '01' ? 'Q1' : 'Q2'})`,
+        amountCents,
+        sourceBudgetIds: budget.sourceBudgetIds,
+      }
+    })
+    .filter((budget) => budget.amountCents > 0)
+}
+
+/**
+ * The complete personal envelope used only by the liquidity Radar's
+ * conservative mode.  Unlike `personalBudgetReservations`, it deliberately
+ * does not subtract recorded use: every personal payment is paired in the
+ * Radar with a release of this reservation on the same date.  That keeps the
+ * cash curve stable while making both the real payment and the envelope use
+ * auditable.
+ */
+export function personalBudgetEnvelopeReservations(data: FinanceData, month: Date, reference = new Date()): FinanceBudgetReservation[] {
+  const selectedMonthStart = monthKey(month)
+  const selectedMonthEnd = format(endOfMonth(month), 'yyyy-MM-dd')
+  const referenceKey = format(reference, 'yyyy-MM-dd')
+  const selectedIsCurrent = isSameMonth(month, reference)
+  const budgets = canonicalFinanceBudgetGroups(data)
+    .filter((budget) => budget.isPersonal
+      && budget.periodStart <= selectedMonthEnd && budget.periodEnd >= selectedMonthStart
+      && (!selectedIsCurrent || budget.periodEnd >= referenceKey))
+
+  return budgets
+    .map((budget) => {
+      const previousPeriodEnd = format(addDays(parseISO(budget.periodStart), -1), 'yyyy-MM-dd')
+      const carryIsAlreadyReserved = budgets.some((candidate) =>
+        candidate.isPersonal && candidate.periodEnd === previousPeriodEnd)
+      const carryOverCents = budget.budget.carryOverEnabled && !carryIsAlreadyReserved
+        ? personalBudgetCarryOverIntoPeriod(data, budget.periodStart)
+        : 0
+      return {
+        id: `budget:${budget.budget.id}`,
+        budgetId: budget.budget.id,
+        date: budget.periodStart,
+        periodStart: budget.periodStart,
+        periodEnd: budget.periodEnd,
+        label: `Reserva · ${budget.budget.name ?? 'Gastos Personales'} (${budget.periodStart.slice(-2) === '01' ? 'Q1' : 'Q2'})`,
+        amountCents: Math.max(0, budget.budget.plannedAmountCents + carryOverCents),
+        sourceBudgetIds: budget.sourceBudgetIds,
+      }
+    })
+    .filter((budget) => budget.amountCents > 0)
+}
+
+export function personalBudgetForDate<T extends Pick<FinanceBudget, 'id' | 'name' | 'periodStart' | 'periodEnd'> & Partial<Pick<FinanceBudget, 'categoryId' | 'plannedAmountCents' | 'updatedAt'>>>(
+  budgets: T[],
   date: string,
 ) {
-  return budgets
+  const byPeriod = new Map<string, T>()
+  budgets
     .filter((budget) => (budget.name ?? 'Gastos Personales') === 'Gastos Personales'
       && Boolean(budget.periodStart && budget.periodEnd)
       && budget.periodStart! <= date && budget.periodEnd! >= date)
+    .forEach((budget) => {
+      const key = `${budget.periodStart}:${budget.periodEnd}`
+      const existing = byPeriod.get(key)
+      if (!existing || (budget.updatedAt ?? '').localeCompare(existing.updatedAt ?? '') >= 0) byPeriod.set(key, budget)
+    })
+  return [...byPeriod.values()]
     .sort((a, b) => (b.periodStart ?? '').localeCompare(a.periodStart ?? ''))[0]
 }
 
 export function budgetPerformance(data: FinanceData, month: Date): BudgetPerformance[] {
-  return data.budgets.filter((budget) => (budget.periodStart??budget.month) <= format(month,'yyyy-MM-dd') && (budget.periodEnd??format(endOfMonth(parseISO(budget.month)),'yyyy-MM-dd')) >= format(month,'yyyy-MM-dd')).map((budget) => {
-    const linkedCategory = data.categories.find((item) => item.id === budget.categoryId)
+  const selectedMonthStart = monthKey(month)
+  const selectedMonthEnd = format(endOfMonth(month), 'yyyy-MM-dd')
+  const personalCategoryIds = new Set(data.categories.filter((item) => item.type === 'expense' && isPersonalName(item.name)).map((item) => item.id))
+  return canonicalFinanceBudgetGroups(data)
+    .filter((budget) => budget.periodStart <= selectedMonthEnd && budget.periodEnd >= selectedMonthStart)
+    .map((group) => {
+    const { budget, category: linkedCategory, periodStart, periodEnd, isPersonal, sourceBudgetIds } = group
+    const sourceIds = new Set(sourceBudgetIds)
     const actualCents = data.transactions.filter((item) =>
-      (item.budgetId === budget.id || (!item.budgetId && item.categoryId === budget.categoryId && (linkedCategory?.name === 'Personal' || !budget.periodStart)))
-      && item.transactionDate >= (budget.periodStart??budget.month) && item.transactionDate <= (budget.periodEnd??format(endOfMonth(parseISO(budget.month)),'yyyy-MM-dd'))
+      (Boolean(item.budgetId && sourceIds.has(item.budgetId))
+        || (!item.budgetId && (isPersonal ? Boolean(item.categoryId && personalCategoryIds.has(item.categoryId)) : item.categoryId === budget.categoryId)))
+      && item.transactionDate >= periodStart && item.transactionDate <= periodEnd
       && completed(item) && (item.type === 'expense' || item.type === 'debt_payment'))
       .reduce((sum, item) => sum + item.amountCents, 0)
     return {
       ...budget,
+      periodStart,
+      periodEnd,
       category: linkedCategory,
+      sourceBudgetIds,
       actualCents,
       remainingCents: budget.plannedAmountCents - actualCents,
       usedPercentage: budget.plannedAmountCents ? actualCents / budget.plannedAmountCents * 100 : 0,
@@ -353,9 +728,15 @@ export function financeSummary(data: FinanceData, month: Date) {
   return [
     { label: 'Ingresos', planned: planned(['income']), actual: actual(['income']) },
     { label: 'Gastos fijos', planned: fixedPlanned, actual: fixedActual },
-    { label: 'Gastos variables', planned: data.budgets.filter((item) => item.month === monthKey(month)).reduce((sum, item) => sum + item.plannedAmountCents, 0), actual: variableActual },
+    {
+      label: 'Gastos variables',
+      planned: canonicalFinanceBudgetGroups(data)
+        .filter((item) => item.periodStart <= format(endOfMonth(month), 'yyyy-MM-dd') && item.periodEnd >= monthKey(month))
+        .reduce((sum, item) => sum + item.budget.plannedAmountCents, 0),
+      actual: variableActual,
+    },
     { label: 'Ahorro', planned: planned(['saving']), actual: actual(['saving']) },
-    { label: 'Balance', planned: metrics.projectedBalanceCents, actual: metrics.actualBalanceCents },
+    { label: 'Saldo al cierre', planned: metrics.projectedBalanceCents, actual: metrics.actualBalanceCents },
   ].map((row) => ({ ...row, difference: row.actual - row.planned }))
 }
 
@@ -371,9 +752,12 @@ export function financeDecision(data: FinanceData, month: Date, today = new Date
   const selectedMonth = format(month, 'yyyy-MM')
   const currentMonth = format(today, 'yyyy-MM')
   const performances = budgetPerformance(data, month)
-  const remainingBudgetCents = performances.reduce((sum, item) => sum + item.remainingCents, 0)
+  const todayKey = format(today, 'yyyy-MM-dd')
+  const activePerformances = performances.filter((item) =>
+    (item.periodStart ?? item.month) <= todayKey && (item.periodEnd ?? item.month) >= todayKey)
+  const remainingBudgetCents = activePerformances.reduce((sum, item) => sum + item.remainingCents, 0)
 
-  if (selectedMonth === currentMonth && performances.length) {
+  if (selectedMonth === currentMonth && activePerformances.length) {
     const remainingDays = Math.max(1, endOfMonth(today).getDate() - today.getDate() + 1)
     const spendableCents = Math.max(0, Math.min(metrics.availableBalanceCents, remainingBudgetCents))
     if (spendableCents <= 0) {

@@ -126,6 +126,27 @@ export interface FinanceGoalContribution {
   createdAt: string
 }
 
+/**
+ * A personal liquidity guardrail. It is informational only: FARO never moves
+ * money or reserves it automatically from this value.
+ */
+export interface FinanceLiquidityPreference {
+  minimumOperatingBufferCents: number
+  updatedAt?: string
+}
+
+/**
+ * Immutable first reading of a month's deterministic liquidity projection.
+ */
+export interface FinanceLiquiditySnapshot {
+  id: string
+  month: string
+  projectionVersion: number
+  initialProjectedMinimumCents: number
+  initialProjectedClosingBalanceCents: number
+  snapshotDate: string
+}
+
 export interface FinanceData {
   accounts: FinanceAccount[]
   categories: FinanceCategory[]
@@ -139,6 +160,8 @@ export interface FinanceData {
   savingsFund?: FinanceSavingsFund
   savingsFundEntries: FinanceSavingsFundEntry[]
   goalItems: FinanceGoalItem[]
+  liquidityPreference: FinanceLiquidityPreference
+  liquiditySnapshots: FinanceLiquiditySnapshot[]
 }
 
 export interface FinanceMetrics {

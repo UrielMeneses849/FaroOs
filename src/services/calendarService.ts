@@ -180,7 +180,11 @@ export function normalizeCalendarData(input: {
 
 export function mergePlanningCalendarItems(remote: CalendarItem[], local: CalendarItem[]) {
   const localIds = new Set(local.map((item) => item.id))
-  return [...remote.filter((item) => item.sourceType === 'event' || !localIds.has(item.id)), ...local]
+  const focusedTaskIds = new Set(remote.filter((item) => item.entryKind === 'focus' && item.linkedTaskId).map((item) => item.linkedTaskId))
+  return [
+    ...remote.filter((item) => item.sourceType === 'event' || !localIds.has(item.id)),
+    ...local.filter((item) => item.sourceType !== 'task' || !focusedTaskIds.has(item.sourceId)),
+  ]
 }
 
 export function normalizeGoogleCalendarEvents(events: GoogleCalendarEvent[], calendarId: string, calendarName?: string): CalendarItem[] {
@@ -191,10 +195,12 @@ export function normalizeGoogleCalendarEvents(events: GoogleCalendarEvent[], cal
     const start = event.start?.dateTime ?? normalizeDateOnly(event.start?.date)
     const end = event.end?.dateTime ?? normalizeDateOnly(event.end?.date) ?? undefined
     if (!start) continue
-    const key = `${calendarId}:${event.id}`
+    const sourceCalendarId = event.calendarId ?? calendarId
+    const sourceCalendarName = event.calendarName ?? calendarName
+    const key = `${sourceCalendarId}:${event.id}`
     unique.set(key, {
       id: `google:${key}`, sourceType: 'event', sourceId: event.id,
-      externalId: event.id, calendarId, calendarName,
+      externalId: event.id, calendarId: sourceCalendarId, calendarName: sourceCalendarName,
       title: event.summary?.trim() || 'Evento de Google', start, end,
       allDay, status: 'scheduled', editable: false, readOnly: true,
       source: 'google', entryKind: 'event',

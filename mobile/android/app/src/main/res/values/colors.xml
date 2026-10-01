@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <color name="faro_black">#05070C</color>
+  <color name="faro_blue">#2F77FF</color>
+  <color name="faro_white">#F3F7FF</color>
+</resources>

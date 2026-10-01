@@ -15,7 +15,7 @@ type SessionContext = {
 }
 type ClientCalendarItem = { id: string; kind: 'event' | 'task'; title: string; start: string; end?: string; allDay?: boolean; workspaceId?: string }
 type LocalContext = { now: string; timezone: string; calendarItems?: ClientCalendarItem[] }
-type CalendarItem = {
+export type CalendarBusyItem = {
   id: string
   kind: 'event' | 'task' | 'google'
   title: string
@@ -27,6 +27,7 @@ type CalendarItem = {
   workspaceId?: string
   clientSnapshot?: boolean
 }
+type CalendarItem = CalendarBusyItem
 export type CalendarResolution =
   | { kind: 'read'; intent: CalendarFastIntent; message: string; result: unknown; references?: Reference[] }
   | { kind: 'clarify'; intent: CalendarFastIntent; message: string; references?: Reference[]; missingFields?: string[]; entities?: Record<string, unknown> }
@@ -238,7 +239,7 @@ async function loadItems(db: Db, userId: string, start: string, end: string, tra
   })
 }
 
-function slots(items: CalendarItem[], range: { start: string; end: string }, duration: number, local: LocalContext, startAfter?: string) {
+function slots(items: CalendarBusyItem[], range: { start: string; end: string }, duration: number, local: LocalContext, startAfter?: string) {
   const found: Array<{ start: string; end: string }> = []
   const rangeEnd = new Date(range.end).getTime()
   const now = new Date(local.now).getTime()
@@ -257,6 +258,28 @@ function slots(items: CalendarItem[], range: { start: string; end: string }, dur
     if (found.length < 3 && limit - cursor >= duration * 60000) found.push({ start: new Date(cursor).toISOString(), end: new Date(cursor + duration * 60000).toISOString() })
   }
   return found.slice(0, 3)
+}
+
+/**
+ * Shared availability primitive for Calendar and Backlog. It intentionally
+ * includes FARO tasks, FARO events, Lab fixtures, and read-only Google events;
+ * callers only receive conflicts/slots and never a Google mutation capability.
+ */
+export async function getCalendarAvailability(
+  db: Db,
+  userId: string,
+  range: { start: string; end: string },
+  durationMinutes: number,
+  local: LocalContext,
+  trace: ServerVoiceTrace,
+  options: { startAfter?: string; ignoreTaskId?: string } = {},
+) {
+  const items = await loadItems(db, userId, range.start, range.end, trace, local)
+  const relevant = options.ignoreTaskId ? items.filter((item) => !(item.kind === 'task' && item.id === options.ignoreTaskId)) : items
+  return {
+    items: relevant,
+    slots: slots(relevant, range, durationMinutes, local, options.startAfter),
+  }
 }
 
 function selectedRef(context: SessionContext | undefined, ordinal?: number) {

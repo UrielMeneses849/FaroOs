@@ -2,15 +2,16 @@ import { corsHeaders, json } from '../_shared/http.ts'
 import { accessToken, authenticatedUser, decryptRefreshToken, GoogleApiError, googleJson, googleRequest, revokeGoogleToken, serviceClient } from '../_shared/googleCalendar.ts'
 import { googleEventsUrl, maskCalendarId } from '../_shared/googleCalendarPure.ts'
 
-type Connection = { id:string;user_id:string;google_account_email:string|null;calendar_id:string|null;calendar_name:string|null;encrypted_refresh_token:string;refresh_token_iv:string;connected_at:string;last_synced_at:string|null;status:string;granted_scopes?:string[];calendar_access_role?:string|null;write_enabled?:boolean }
+type Connection = { id:string;user_id:string;google_account_email:string|null;calendar_id:string|null;calendar_name:string|null;calendar_ids?:string[];calendar_names?:string[];encrypted_refresh_token:string;refresh_token_iv:string;connected_at:string;last_synced_at:string|null;status:string;granted_scopes?:string[];calendar_access_role?:string|null;write_enabled?:boolean }
 
 const publicConnection = (connection: Connection | null) => connection ? ({
   connected: true, accountEmail: connection.google_account_email, calendarId: connection.calendar_id,
-  calendarName: connection.calendar_name, connectedAt: connection.connected_at,
+  calendarName: connection.calendar_name,
+  calendars: (connection.calendar_ids?.length ? connection.calendar_ids : connection.calendar_id ? [connection.calendar_id] : []).map((id, index) => ({ id, name: connection.calendar_names?.[index] ?? (id === connection.calendar_id ? connection.calendar_name : null) ?? id, primary: id === connection.google_account_email, accessRole: connection.calendar_access_role ?? 'reader' })), connectedAt: connection.connected_at,
   lastSyncedAt: connection.last_synced_at,
   status: connection.granted_scopes?.includes('https://www.googleapis.com/auth/calendar.events')
     ? 'reconnect_required'
-    : connection.status === 'reconnect_required' ? (connection.calendar_id ? 'active' : 'needs_calendar') : connection.status,
+    : connection.status,
   accessRole: connection.calendar_access_role, scopes: connection.granted_scopes ?? [],
   writeEnabled: false,
 }) : ({ connected: false, status: 'disconnected' })
@@ -90,46 +91,51 @@ Deno.serve(async (request) => {
       primary: Boolean(item.primary), accessRole: String(item.accessRole ?? 'reader'),
     }))
     if (action === 'list') return json({ calendars, connection: publicConnection(connection) })
-    const selected = calendars.find((calendar: { id:string }) => calendar.id === body.calendarId)
-    if (!selected) return json({ error: 'El calendario seleccionado ya no está disponible.' }, 400)
+    const selectedIds = Array.isArray(body.calendarIds) ? body.calendarIds.map(String) : body.calendarId ? [String(body.calendarId)] : []
+    const selected = calendars.filter((calendar: { id:string }) => selectedIds.includes(calendar.id))
+    if (!selected.length || selected.length !== new Set(selectedIds).size) return json({ error: 'Uno de los calendarios seleccionados ya no está disponible.' }, 400)
     const primary = calendars.find((calendar: { primary:boolean }) => calendar.primary)
     const now = new Date().toISOString()
     const { error: selectionError } = await db.from('google_calendar_connections').update({
-      calendar_id: selected.id, calendar_name: selected.name,
+      calendar_id: selected[0].id, calendar_name: selected[0].name,
+      calendar_ids: selected.map((calendar: { id:string }) => calendar.id), calendar_names: selected.map((calendar: { name:string }) => calendar.name),
       google_account_email: primary?.id ?? connection.google_account_email,
       calendar_access_role: selected.accessRole,
       write_enabled: false,
       status: 'active', updated_at: now,
     }).eq('id', connection.id)
     if (selectionError) {
-      logGoogle(action, user.id, selected.id, 'persist_calendar_selection', selectionError)
+      logGoogle(action, user.id, selected[0].id, 'persist_calendar_selection', selectionError)
       return json({ error: 'calendar_selection_failed', message: 'No pudimos guardar el calendario seleccionado. Intenta nuevamente.' }, 500)
     }
-    return json({ connection: { ...publicConnection(connection), calendarId:selected.id, calendarName:selected.name, accountEmail:primary?.id, accessRole:selected.accessRole, writeEnabled:false, status:'active' } })
+    return json({ connection: { ...publicConnection(connection), calendarId:selected[0].id, calendarName:selected[0].name, calendars: selected, accountEmail:primary?.id, accessRole:selected[0].accessRole, writeEnabled:false, status:'active' } })
   }
   if (action === 'events') {
-    if (!connection.calendar_id) return json({ error: 'Selecciona un calendario antes de sincronizar.', code: 'calendar_required' }, 409)
+    const calendarIds = connection.calendar_ids?.length ? connection.calendar_ids : connection.calendar_id ? [connection.calendar_id] : []
+    if (!calendarIds.length) return json({ error: 'Selecciona un calendario antes de sincronizar.', code: 'calendar_required' }, 409)
     const timeMin = new Date(String(body.timeMin)); const timeMax = new Date(String(body.timeMax))
     if (!Number.isFinite(timeMin.getTime()) || !Number.isFinite(timeMax.getTime()) || timeMax <= timeMin || timeMax.getTime() - timeMin.getTime() > 420 * 86_400_000) {
       logGoogle(action, user.id, connection.calendar_id, 'validate_event_range')
       return json({ error: 'invalid_event_range', message: 'El rango solicitado para sincronizar no es válido.' }, 400)
     }
-    let payload
-    try { payload = await googleJson(googleEventsUrl(connection.calendar_id, timeMin, timeMax), token) }
+    let payloads
+    try { payloads = await Promise.all(calendarIds.map((calendarId) => googleJson(googleEventsUrl(calendarId, timeMin, timeMax), token))) }
     catch (error) {
       logGoogle(action, user.id, connection.calendar_id, 'google_events_list', error)
       return googleFailure(error, 'google_events_failed', 'No pudimos sincronizar los eventos de Google Calendar.')
     }
     const syncedAt = new Date().toISOString()
     await db.from('google_calendar_connections').update({ last_synced_at: syncedAt, status: 'active', updated_at: syncedAt }).eq('id', connection.id)
-    return json({ events: payload.items ?? [], calendarId: connection.calendar_id, calendarName: connection.calendar_name, lastSyncedAt: syncedAt })
+    const events = payloads.flatMap((payload, index) => (payload.items ?? []).map((event: Record<string, unknown>) => ({ ...event, calendarId: calendarIds[index], calendarName: connection.calendar_names?.[index] ?? (calendarIds[index] === connection.calendar_id ? connection.calendar_name : calendarIds[index]) })))
+    return json({ events, calendarId: connection.calendar_id, calendarName: connection.calendar_name, lastSyncedAt: syncedAt })
   }
   if (action === 'freebusy') {
     const timeMin = new Date(String(body.timeMin)); const timeMax = new Date(String(body.timeMax))
-    if (!connection.calendar_id || !Number.isFinite(timeMin.getTime()) || !Number.isFinite(timeMax.getTime()) || timeMax <= timeMin) return json({ error:'invalid_freebusy_range', message:'El rango de disponibilidad no es válido.' },400)
+    const calendarIds = connection.calendar_ids?.length ? connection.calendar_ids : connection.calendar_id ? [connection.calendar_id] : []
+    if (!calendarIds.length || !Number.isFinite(timeMin.getTime()) || !Number.isFinite(timeMax.getTime()) || timeMax <= timeMin) return json({ error:'invalid_freebusy_range', message:'El rango de disponibilidad no es válido.' },400)
     try {
-      const payload=await googleRequest('https://www.googleapis.com/calendar/v3/freeBusy',token,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({timeMin:timeMin.toISOString(),timeMax:timeMax.toISOString(),timeZone:String(body.timeZone??'UTC'),items:[{id:connection.calendar_id}]})})
-      return json({busy:payload.calendars?.[connection.calendar_id]?.busy??[]})
+      const payload=await googleRequest('https://www.googleapis.com/calendar/v3/freeBusy',token,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({timeMin:timeMin.toISOString(),timeMax:timeMax.toISOString(),timeZone:String(body.timeZone??'UTC'),items:calendarIds.map((id) => ({id}))})})
+      return json({busy:calendarIds.flatMap((id) => payload.calendars?.[id]?.busy??[])})
     } catch(error){return googleFailure(error,'google_freebusy_failed','No pudimos consultar la disponibilidad en Google Calendar.')}
   }
   if (action === 'get') {

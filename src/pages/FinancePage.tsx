@@ -2,33 +2,35 @@ import { addDays, addMonths, endOfMonth, format, isSameDay, parseISO, subMonths 
 import { es } from 'date-fns/locale'
 import {
   ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight,
-  Ban, Calculator, CalendarDays, ChartNoAxesCombined, Check, Clock3, Copy, CreditCard, Landmark, MoreHorizontal, Pencil, PiggyBank, Plus, RefreshCw, Repeat2,
+  Ban, Calculator, CalendarDays, ChartNoAxesCombined, Check, Clock3, Copy, CreditCard, FileDown, Landmark, Pencil, PiggyBank, Plus, RefreshCw, Repeat2,
   RotateCcw, Target, Trash2, WalletCards,
 } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import orbUrl from '../assets/faro-orb-v1.png'
 import { Button, ConfirmDialog, EmptyState, Modal, ProgressBar } from '../components/common'
+import { PageHeader } from '../components/layout'
 import { ExpenseCategoryDonut } from '../features/finance/ExpenseCategoryDonut'
+import { FinanceLiquidityRadar } from '../features/finance/FinanceLiquidityRadar'
 import {
   financeAccountSchema, financeBudgetSchema, financeGoalSchema, financeTransactionSchema,
 } from '../features/finance/financeSchemas'
 import type {
-  FinanceAccount, FinanceBudget, FinanceData, FinanceGoal, FinanceGoalContribution, FinanceGoalItem, FinanceRecurringOccurrence, FinanceRecurringTransaction, FinanceTransaction,
+  FinanceAccount, FinanceBudget, FinanceCategory, FinanceCategoryType, FinanceData, FinanceGoal, FinanceGoalContribution, FinanceGoalItem, FinanceRecurringOccurrence, FinanceRecurringTransaction, FinanceTransaction,
   FinanceTransactionStatus, FinanceTransactionType,
 } from '../features/finance/financeTypes'
 import { useFinance } from '../hooks/useFinance'
-import { FaroVoicePresence } from '../features/voice/FaroVoicePresence'
 import {
-  financeAccountRepository, financeBudgetRepository, financeGoalRepository,
-  financePlanningRepository, financeRecurringOccurrenceRepository, financeRecurringRepository, financeTransactionRepository,
+  financeAccountRepository, financeBudgetRepository, financeCategoryRepository, financeGoalRepository,
+  financeLiquidityRepository, financePlanningRepository, financeRecurringOccurrenceRepository, financeRecurringRepository, financeTransactionRepository,
 } from '../repositories/financeRepositories'
 import {
-  accountBalance, annualFinanceTotals, budgetPerformance, calculateFinanceMetrics, financePeriodFlow, financeSummary, personalBudgetForDate,
+  accountBalance, annualFinanceTotals, budgetPerformance, calculateFinanceMetrics, canRegisterEventualIncome, eventualIncomeTransactions, financePeriodFlow, financeProjectionBreakdown, financeSummary, personalBudgetCarryOverIntoPeriod, personalBudgetForDate, personalBudgetReservations,
   financeGoalProjections, formatFinanceDate, formatMxn, goalAvailableCents, goalProgress, goalSpentCents, goalTargetCents, monthKey, recurringAppliesToMonth, recurringExpectedDate, savingsFundMetrics,
 } from '../services/financeService'
+import { fortnightPeriodForMonth } from '../services/financeBudgetCycle'
+import { FINANCE_LIQUIDITY_PROJECTION_VERSION, financeLiquidityProjection } from '../services/financeLiquidityProjection'
 
-type Panel = 'overview' | 'transactions' | 'income' | 'accounts' | 'budgets' | 'recurring' | 'savings' | 'fund' | 'goals'
+type Panel = 'overview' | 'advisor' | 'transactions' | 'income' | 'accounts' | 'budgets' | 'recurring' | 'savings' | 'fund' | 'goals'
 type Dialog = 'movementMenu' | 'transaction' | 'account' | 'budget' | 'budgetClose' | 'recurring' | 'goal' | 'goalDetail' | 'contribution' | 'fundEntry' | 'goalItem' | 'purchaseItem' | null
 interface MovementPreset { type?: FinanceTransactionType; categoryName?: string; status?: FinanceTransactionStatus; contribution?: boolean }
 const typeLabel: Record<FinanceTransactionType, string> = {
@@ -38,13 +40,23 @@ const typeLabel: Record<FinanceTransactionType, string> = {
 const statusLabel: Record<FinanceTransactionStatus, string> = {
   planned: 'Planeado', pending: 'Pendiente', completed: 'Completado', cancelled: 'Cancelado',
 }
+const categoryTypeForTransaction = (type: FinanceTransactionType): FinanceCategoryType | undefined => {
+  if (type === 'income' || type === 'refund') return 'income'
+  if (type === 'saving') return 'saving'
+  if (type === 'debt_payment') return 'debt'
+  if (type === 'expense') return 'expense'
+  return undefined
+}
+const categoryTypeLabel: Record<FinanceCategoryType, string> = {
+  income: 'ingresos', expense: 'gastos', saving: 'ahorro', debt: 'pagos de deuda', transfer: 'transferencias',
+}
 
 export function FinancePage() {
   const { data, loading, error, refresh, user } = useFinance()
   const [month, setMonth] = useState(() => new Date())
   const [panel, setPanel] = useState<Panel>(() => {
     const stored = sessionStorage.getItem('faro-finance-panel')
-    return ['overview', 'transactions', 'income', 'recurring', 'savings', 'fund', 'budgets', 'goals', 'accounts'].includes(stored ?? '')
+    return ['overview', 'advisor', 'transactions', 'income', 'recurring', 'savings', 'fund', 'budgets', 'goals', 'accounts'].includes(stored ?? '')
       ? stored as Panel : 'overview'
   })
   const [dialog, setDialog] = useState<Dialog>(null)
@@ -54,17 +66,19 @@ export function FinancePage() {
   const [editingRecurring, setEditingRecurring] = useState<FinanceRecurringTransaction>()
   const [recurringEditMode, setRecurringEditMode] = useState<'period' | 'template'>('period')
   const [editingGoal, setEditingGoal] = useState<FinanceGoal>()
+  const [budgetHalfToEdit, setBudgetHalfToEdit] = useState<'q1' | 'q2'>()
   const [selectedGoal, setSelectedGoal] = useState<FinanceGoal>()
   const [selectedGoalItem, setSelectedGoalItem] = useState<FinanceGoalItem>()
   const [deletingGoalItem, setDeletingGoalItem] = useState<FinanceGoalItem>()
+  const [deletingGoal, setDeletingGoal] = useState<FinanceGoal>()
   const [closingBudget,setClosingBudget]=useState<FinanceBudget>()
   const [dismissedBudgetIds,setDismissedBudgetIds]=useState<string[]>([])
   const [deleting, setDeleting] = useState<FinanceTransaction>()
   const [deletingAccount, setDeletingAccount] = useState<FinanceAccount>()
   const [deletingRecurring, setDeletingRecurring] = useState<FinanceRecurringTransaction>()
   const [revertingOccurrence, setRevertingOccurrence] = useState<FinanceRecurringOccurrence>()
-  const [actionsFor, setActionsFor] = useState<string>()
   const paymentLocks = useRef(new Set<string>())
+  const promptedFortnights = useRef(new Set<string>())
   const [savingPaymentId, setSavingPaymentId] = useState<string>()
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
@@ -79,8 +93,68 @@ export function FinancePage() {
     return () => window.clearTimeout(timeout)
   }, [feedback])
   useEffect(()=>{if(loading||dialog)return;const candidate=data.budgets.find(item=>(item.periodEnd??item.month)<format(new Date(),'yyyy-MM-dd')&&!dismissedBudgetIds.includes(item.id)&&!data.budgetClosures.some(closure=>closure.budgetId===item.id));if(candidate)queueMicrotask(()=>{setClosingBudget(candidate);setDialog('budgetClose')})},[data.budgetClosures,data.budgets,dialog,dismissedBudgetIds,loading])
+  useEffect(() => {
+    if (loading || dialog || !user || monthKey(month) !== monthKey(new Date())) return
+    const today = format(new Date(), 'yyyy-MM-dd')
+    const half = today.slice(-2) <= '15' ? 'q1' : 'q2'
+    const period = fortnightPeriodForMonth(monthKey(month), half)
+    const promptKey = `${user.id}:${period.periodStart}`
+    const hasPersonalCategory = data.categories.some((category) => category.isActive
+      && category.type === 'expense'
+      && category.name.trim().toLocaleLowerCase('es-MX') === 'personal')
+    if (!hasPersonalCategory || personalBudgetForDate(data.budgets, period.periodStart) || promptedFortnights.current.has(promptKey)) return
+    promptedFortnights.current.add(promptKey)
+    queueMicrotask(() => {
+      setBudgetHalfToEdit(half)
+      setDialog('budget')
+    })
+  }, [data.budgets, data.categories, dialog, loading, month, user])
 
   const metrics = useMemo(() => calculateFinanceMetrics(data, month), [data, month])
+  const projectionBreakdown = useMemo(() => financeProjectionBreakdown(data, month), [data, month])
+  const baselineLiquidityProjection = useMemo(() => financeLiquidityProjection({
+    data,
+    month,
+    currentAvailableBalanceCents: metrics.availableBalanceCents,
+    minimumOperatingBufferCents: data.liquidityPreference.minimumOperatingBufferCents,
+    includePersonalBudgetReservations: true,
+  }), [data, metrics.availableBalanceCents, month])
+  const midMonthProjection = useMemo(() => {
+    const midpointDate = format(new Date(month.getFullYear(), month.getMonth(), 15), 'yyyy-MM-dd')
+    const datedBalanceCents = baselineLiquidityProjection.days.find((day) => day.date === midpointDate)?.balanceCents
+      ?? baselineLiquidityProjection.closingBalanceCents
+    return {
+      date: midpointDate,
+      balanceCents: datedBalanceCents,
+    }
+  }, [baselineLiquidityProjection.closingBalanceCents, baselineLiquidityProjection.days, month])
+  const liquiditySnapshot = data.liquiditySnapshots.find((snapshot) =>
+    snapshot.month === monthKey(month) && snapshot.projectionVersion === FINANCE_LIQUIDITY_PROJECTION_VERSION)
+  const liquiditySnapshotRequests = useRef(new Set<string>())
+  useEffect(() => {
+    if (!user || loading || liquiditySnapshot) return
+    const key = monthKey(month)
+    if (liquiditySnapshotRequests.current.has(key)) return
+    liquiditySnapshotRequests.current.add(key)
+    void financeLiquidityRepository.captureInitialSnapshot({
+      month: key,
+      projectionVersion: FINANCE_LIQUIDITY_PROJECTION_VERSION,
+      projectedMinimumCents: baselineLiquidityProjection.minimumBalanceCents,
+      projectedClosingBalanceCents: baselineLiquidityProjection.closingBalanceCents,
+    }, user.id).then(() => refresh()).catch((reason: unknown) => {
+      liquiditySnapshotRequests.current.delete(key)
+      if (import.meta.env.DEV) console.debug('[FARO finance] No se pudo capturar snapshot de liquidez.', reason)
+    })
+  }, [baselineLiquidityProjection.closingBalanceCents, baselineLiquidityProjection.minimumBalanceCents, liquiditySnapshot, loading, month, refresh, user])
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    console.debug('[FARO finance] Liquidity projection computed.', {
+      projection_compute_ms: Math.round(baselineLiquidityProjection.computeMs * 100) / 100,
+      number_of_movements: baselineLiquidityProjection.events.length,
+      period: baselineLiquidityProjection.periodStart,
+      status: baselineLiquidityProjection.status,
+    })
+  }, [baselineLiquidityProjection.computeMs, baselineLiquidityProjection.events.length, baselineLiquidityProjection.periodStart, baselineLiquidityProjection.status])
   const periodFlow = useMemo(() => financePeriodFlow(data, month), [data, month])
   const approvedPeriodFlow = useMemo(() => ({
     incomeCents: periodFlow.incomeCents,
@@ -100,6 +174,7 @@ export function FinancePage() {
   const previousMonthKey = format(subMonths(month, 1), 'yyyy-MM')
   const hasPreviousData = data.transactions.some((item) => item.transactionDate.startsWith(previousMonthKey))
   const monthlyTransactions = data.transactions.filter((item) => item.transactionDate.startsWith(format(month, 'yyyy-MM')))
+  const eventualIncomes = eventualIncomeTransactions(monthlyTransactions)
   const selectedPeriod = monthKey(month)
   const recurringForMonth = data.recurring
     .filter((item) => recurringAppliesToMonth(item, month))
@@ -117,19 +192,29 @@ export function FinancePage() {
     const matches = (type: FinanceTransaction['type']) => kind === 'income'
       ? type === 'income' || type === 'refund'
       : type === 'expense' || type === 'debt_payment'
-    const recurringCents = recurringForMonth
-      .filter(({ item, occurrence }) => matches(item.type)
-        && occurrence?.status !== 'skipped'
-        && (item.isActive || occurrence?.status === 'paid'))
-      .reduce((sum, { occurrence }) => sum + (occurrence?.amountCents ?? 0), 0)
+    const pendingRecurring = data.recurring.filter((item) => item.isActive && matches(item.type) && recurringAppliesToMonth(item, month)).flatMap((item) => {
+      const occurrence = data.recurringOccurrences.find((candidate) => candidate.recurringTransactionId === item.id && candidate.period === selectedPeriod)
+      const generatedMovementExists = Boolean(occurrence?.transactionId && data.transactions.some((transaction) =>
+        transaction.id === occurrence.transactionId && transaction.status === 'completed'))
+      if (!occurrence?.amountCents || !occurrence.expectedDate.startsWith(format(month, 'yyyy-MM')) || occurrence.status === 'skipped' || (occurrence.status === 'paid' && generatedMovementExists)) return []
+      return [occurrence]
+    })
+    const recurringCents = monthlyTransactions
+      .filter((item) => Boolean(item.recurringTransactionId) && matches(item.type) && item.status === 'completed')
+      .reduce((sum, item) => sum + item.amountCents, 0)
+      + pendingRecurring.reduce((sum, occurrence) => sum + (occurrence.amountCents ?? 0), 0)
     const eventualCents = monthlyTransactions
       .filter((item) => !item.recurringTransactionId && matches(item.type) && item.status !== 'cancelled')
       .reduce((sum, item) => sum + item.amountCents, 0)
     const realizedCents = monthlyTransactions
       .filter((item) => matches(item.type) && item.status === 'completed')
       .reduce((sum, item) => sum + item.amountCents, 0)
-    const totalCents = recurringCents + eventualCents
-    return { recurringCents, eventualCents, totalCents, realizedCents, pendingCents: Math.max(0, totalCents - realizedCents) }
+    const pendingCents = kind === 'income' ? projectionBreakdown.ingresosPendientes : projectionBreakdown.gastosPendientes
+    const budgetReservationCents = kind === 'expense'
+      ? personalBudgetReservations(data, month).reduce((sum, reservation) => sum + reservation.amountCents, 0)
+      : 0
+    const pendingCount = pendingRecurring.length + monthlyTransactions.filter((item) => !item.recurringTransactionId && matches(item.type) && ['planned', 'pending'].includes(item.status)).length
+    return { recurringCents, eventualCents, totalCents: realizedCents + pendingCents, realizedCents, pendingCents, pendingCount, budgetReservationCents }
   }
   const incomeProjection = projectionFor('income')
   const expenseProjection = projectionFor('expense')
@@ -146,6 +231,33 @@ export function FinancePage() {
       && (item.type === 'expense' || item.type === 'debt_payment'))
       .reduce((sum, item) => sum + item.amountCents, 0),
   })).filter((item) => item.value > 0)
+  const reportExpenses = monthlyTransactions
+    .filter((item) => item.status === 'completed' && (item.type === 'expense' || item.type === 'debt_payment'))
+    .map((item) => ({
+      date: item.transactionDate,
+      amountCents: item.amountCents,
+      description: item.description,
+      category: data.categories.find((category) => category.id === item.categoryId)?.name,
+    }))
+  const exportMonthlyReport = async () => {
+    setFeedback('Generando reporte financiero…')
+    try {
+      const { downloadFinanceReportPdf } = await import('../services/financeReportPdf')
+      downloadFinanceReportPdf({
+        month,
+        metrics,
+        summary,
+        categories: categoryExpenses,
+        incomeCents: metrics.monthlyIncomeCents,
+        expenseCents: metrics.monthlyExpensesCents,
+        pendingExpenseCents: expenseProjection.pendingCents,
+        completedExpenses: reportExpenses,
+      })
+      setFeedback('Reporte financiero descargado en PDF.')
+    } catch (reason) {
+      setFeedback(reason instanceof Error ? reason.message : 'No se pudo generar el reporte PDF.')
+    }
+  }
   const finish = async (message: string) => {
     setDialog(null); setEditingTransaction(undefined); setEditingAccount(undefined)
     setEditingRecurring(undefined); setEditingGoal(undefined); setSelectedGoal(undefined)
@@ -225,7 +337,7 @@ export function FinancePage() {
     }
   }
   const registerEventualPayment = async (item: FinanceTransaction) => {
-    if (item.status !== 'planned' || paymentLocks.current.has(item.id)) return
+    if (!canRegisterEventualIncome(item) || paymentLocks.current.has(item.id)) return
     paymentLocks.current.add(item.id); setSavingPaymentId(item.id)
     try { await status(item, 'completed') }
     finally { paymentLocks.current.delete(item.id); setSavingPaymentId(undefined) }
@@ -235,18 +347,16 @@ export function FinancePage() {
   if (error && !data.categories.length) return <div className="page"><EmptyState title="No pudimos cargar Finanzas" description={error} action={<Button onClick={refresh}>Reintentar</Button>} /></div>
 
   return <div className={`page finance-os finance-os--${panel}`}>
-    <header className="finance-header">
-      <div className="finance-header__copy"><span className="eyebrow">{format(new Date(), "EEEE, d 'de' MMMM", { locale: es })}</span><h1>Finanzas</h1><p>Control real, proyección y dirección financiera.</p>
-        <div className="finance-period"><button aria-label="Mes anterior" onClick={() => setMonth((value) => subMonths(value, 1))}><ArrowLeft size={15} /></button><label><CalendarDays size={16} /><span>{format(month, "MMMM 'de' yyyy", { locale: es })}</span><input aria-label="Periodo" type="month" value={format(month, 'yyyy-MM')} onChange={(event) => event.target.value && setMonth(parseISO(`${event.target.value}-01`))} /></label><button aria-label="Mes siguiente" onClick={() => setMonth((value) => addMonths(value, 1))}><ArrowRight size={15} /></button><button aria-label="Actualizar datos financieros" title="Actualizar" onClick={() => void refresh()}><RefreshCw size={14} /></button></div>
-      </div>
-      <div className="finance-header__orb" aria-hidden="true"><span /><img src={orbUrl} alt="" /></div>
-      <FaroVoicePresence surface="finances" />
-    </header>
+    <PageHeader
+      eyebrow={format(new Date(), "EEEE, d 'de' MMMM", { locale: es })}
+      title="Finanzas"
+      trailing={<div className="finance-period finance-period--page-toolbar"><button aria-label="Mes anterior" onClick={() => setMonth((value) => subMonths(value, 1))}><ArrowLeft size={15} /></button><label><CalendarDays size={16} /><span>{format(month, "MMMM 'de' yyyy", { locale: es })}</span><input aria-label="Periodo" type="month" value={format(month, 'yyyy-MM')} onChange={(event) => event.target.value && setMonth(parseISO(`${event.target.value}-01`))} /></label><button aria-label="Mes siguiente" onClick={() => setMonth((value) => addMonths(value, 1))}><ArrowRight size={15} /></button><button aria-label="Actualizar datos financieros" title="Actualizar" onClick={() => void refresh()}><RefreshCw size={14} /></button><button aria-label="Descargar reporte financiero en PDF" title="Descargar reporte PDF" onClick={exportMonthlyReport}><FileDown size={14} /></button></div>}
+    />
     {feedback && <div className="finance-feedback" role="status">{feedback}<button onClick={() => setFeedback('')}>×</button></div>}
     {!data.accounts.length && <section className="finance-onboarding"><WalletCards /><div><strong>Crea tu primera cuenta</strong><p>El saldo inicial será la base de tus cálculos. Después podrás registrar tu primer ingreso sin ingresar datos bancarios sensibles.</p></div><Button onClick={() => setDialog('account')}>Crear cuenta</Button><Button variant="ghost" disabled title="Crea una cuenta antes de registrar el ingreso">Registrar ingreso</Button></section>}
     <div className="finance-tabs-row">
       <nav className="finance-tabs" aria-label="Secciones financieras">
-        {([['overview', 'Resumen'], ['transactions', 'Movimientos'], ['income', 'Ingresos'], ['recurring', 'Gastos'], ['savings', 'Ahorro'], ['budgets', 'Presupuesto'], ['goals', 'Metas'], ['accounts', 'Cuentas'], ['fund', 'Fondo']] as const).map(([id, label]) =>
+        {([['overview', 'Resumen'], ['advisor', 'FARO Finanzas'], ['transactions', 'Movimientos'], ['income', 'Ingresos'], ['recurring', 'Gastos'], ['savings', 'Ahorro'], ['budgets', 'Presupuesto'], ['goals', 'Metas'], ['accounts', 'Cuentas'], ['fund', 'Fondo']] as const).map(([id, label]) =>
           <button key={id} className={panel === id ? 'active' : ''} onClick={() => changePanel(id)}>{label}</button>)}
       </nav>
       <Button className="finance-new-movement" icon={<Plus size={17} />} disabled={!activeAccounts.length} onClick={() => setDialog('movementMenu')}>Nuevo movimiento</Button>
@@ -261,7 +371,7 @@ export function FinancePage() {
           { icon: <WalletCards />, label: 'Ingresos proyectados', value: incomeProjection.totalCents, tone: 'positive' },
           { icon: <Calculator />, label: 'Gastos proyectados', value: expenseProjection.totalCents, tone: 'negative' },
           { icon: <ChartNoAxesCombined />, label: 'Flujo neto proyectado', value: incomeProjection.totalCents - expenseProjection.totalCents, tone: incomeProjection.totalCents >= expenseProjection.totalCents ? 'positive' : 'negative' },
-          { icon: <PiggyBank />, label: 'Ahorro proyectado', text: `${metrics.savingsRate.toFixed(1)}%`, context: 'del ingreso', tone: 'savings' },
+          { icon: <PiggyBank />, label: 'Tasa de ahorro realizada', text: `${metrics.savingsRate.toFixed(1)}%`, context: 'sobre ingresos cobrados', tone: 'savings' },
         ]}
       />
       <div className="finance-summary-grid">
@@ -276,6 +386,19 @@ export function FinancePage() {
         <section className="finance-available-evolution"><header><span className="eyebrow">Disponible operativo</span><h2>Evolución del disponible</h2></header><div className="finance-waterfall"><span><small>Inicial</small><strong>{formatMxn(approvedAvailableEvolution.initialCents)}</strong></span><i>+</i><span className="positive"><small>Ingresos</small><strong>{formatMxn(approvedAvailableEvolution.incomeCents)}</strong></span><i>−</i><span className="negative"><small>Gastos</small><strong>{formatMxn(approvedAvailableEvolution.expenseCents)}</strong></span><i>=</i><span className="final"><small>Final</small><strong>{formatMxn(approvedAvailableEvolution.finalCents)}</strong></span></div><p>Las transferencias sólo redistribuyen dinero entre cuentas y no alteran este resultado.</p></section>
       </div>
     </>}
+
+    {panel === 'advisor' && <FinanceLiquidityRadar
+      data={data}
+      month={month}
+      availableTodayCents={metrics.availableBalanceCents}
+      snapshot={liquiditySnapshot}
+      userId={user?.id}
+      onSaveMinimumBuffer={async (minimumOperatingBufferCents) => {
+        if (!user) throw new Error('No hay una sesión activa.')
+        await financeLiquidityRepository.saveMinimumOperatingBuffer(minimumOperatingBufferCents, user.id)
+        await refresh()
+      }}
+    />}
 
     {panel === 'transactions' && <section className="finance-section">
       <div className="finance-toolbar"><input aria-label="Buscar movimientos" placeholder="Buscar…" value={search} onChange={(event) => setSearch(event.target.value)} /><select aria-label="Cuenta" value={accountFilter} onChange={(event) => setAccountFilter(event.target.value)}><option value="all">Todas las cuentas</option>{data.accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><select aria-label="Tipo" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}><option value="all">Todos los tipos</option>{Object.entries(typeLabel).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select><select aria-label="Estado" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">Todos los estados</option>{Object.entries(statusLabel).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></div>
@@ -318,19 +441,19 @@ export function FinancePage() {
       </article>)}</div>
     </section>}
 
-    {panel === 'budgets' && <section className="finance-section finance-budgets"><SectionHead eyebrow="Control quincenal" title="Gastos Personales" action="Definir presupuesto" onClick={() => setDialog('budget')} />{budgets.length ? <div className="finance-budget-list">{budgets.map((budget) => <article key={budget.id} className={budget.usedPercentage > 100 ? 'exceeded' : budget.usedPercentage >= 85 ? 'warning' : budget.usedPercentage >= 70 ? 'attention' : ''}><div><div><small>Periodo activo</small><strong>{budget.name ?? 'Gastos Personales'}</strong></div><span>{budget.periodStart} — {budget.periodEnd}</span></div><div className="finance-budget-amounts"><span>Asignado<strong>{formatMxn(budget.plannedAmountCents)}</strong></span><span>Gastado<strong>{formatMxn(budget.actualCents)}</strong></span><span>Disponible<b>{formatMxn(budget.remainingCents)}</b></span></div><ProgressBar value={Math.min(100, budget.usedPercentage)} /><footer><span>{budget.usedPercentage.toFixed(0)}% utilizado · {budget.usedPercentage > 100 ? 'Excedido' : budget.usedPercentage >= 100 ? 'Límite alcanzado' : budget.usedPercentage >= 85 ? 'Alerta 85%' : budget.usedPercentage >= 70 ? 'Atención 70%' : 'En control'}</span><b>{Math.max(0, 100 - budget.usedPercentage).toFixed(0)}% libre</b></footer></article>)}</div> : <EmptyState title="Sin presupuesto quincenal" description="Define el límite de Gastos Personales para esta quincena." action={<Button onClick={() => setDialog('budget')}>Crear presupuesto</Button>} />}</section>}
+    {panel === 'budgets' && <section className="finance-section finance-budgets"><SectionHead eyebrow="Control quincenal" title="Gastos Personales" action="Definir presupuesto" onClick={() => { setBudgetHalfToEdit(undefined); setDialog('budget') }} />{budgets.length ? <div className="finance-budget-list">{budgets.map((budget) => { const half = budget.periodStart?.slice(-2) === '01' ? 'q1' : 'q2'; return <article key={budget.id} className={budget.usedPercentage > 100 ? 'exceeded' : budget.usedPercentage >= 85 ? 'warning' : budget.usedPercentage >= 70 ? 'attention' : ''}><div><div><small>{half === 'q1' ? 'Q1 · 1 al 15' : 'Q2 · 16 al cierre'}</small><strong>{budget.name ?? 'Gastos Personales'}</strong></div><span>{budget.periodStart} — {budget.periodEnd}</span></div><div className="finance-budget-amounts"><span>Asignado<strong>{formatMxn(budget.plannedAmountCents)}</strong></span><span>Gastado<strong>{formatMxn(budget.actualCents)}</strong></span><span>Disponible<b>{formatMxn(budget.remainingCents)}</b></span></div><ProgressBar value={Math.min(100, budget.usedPercentage)} /><footer><span>{budget.usedPercentage.toFixed(0)}% utilizado · {budget.usedPercentage > 100 ? 'Excedido' : budget.usedPercentage >= 100 ? 'Límite alcanzado' : budget.usedPercentage >= 85 ? 'Alerta 85%' : budget.usedPercentage >= 70 ? 'Atención 70%' : 'En control'}</span><div className="finance-budget-actions"><b>{Math.max(0, 100 - budget.usedPercentage).toFixed(0)}% libre</b><Button variant="ghost" size="sm" icon={<Pencil size={12} />} onClick={() => { setBudgetHalfToEdit(half); setDialog('budget') }}>Editar {half.toUpperCase()}</Button></div></footer></article> })}</div> : <EmptyState title="Sin presupuesto quincenal" description="Define el límite de Gastos Personales para esta quincena." action={<Button onClick={() => { setBudgetHalfToEdit(undefined); setDialog('budget') }}>Crear presupuesto</Button>} />}</section>}
 
     {panel === 'income' && <div className="finance-expenses-grid">
       <ProjectionStrip items={projectionItems(incomeProjection)} />
       <section className="finance-expense-panel">
         <SectionHead eyebrow="Entradas previsibles" title="Ingresos recurrentes" action="+" actionLabel="Registrar ingreso recurrente" onClick={() => { setMovementPreset({ type: 'income' }); setDialog('recurring') }} />
-        <div className="finance-expense-list">{recurringForMonth.filter(({ item }) => item.type === 'income').map(({ item, expectedDate, occurrence }) => <RecurringCard key={item.id} item={item} expectedDate={expectedDate} occurrence={occurrence} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={data.categories.find((category) => category.id === item.categoryId)?.name} busy={savingPaymentId === item.id} menuOpen={actionsFor === item.id} onToggleMenu={() => setActionsFor((current) => current === item.id ? undefined : item.id)} onRegister={() => void registerRecurringPayment(item)} onEdit={() => { setRecurringEditMode('period'); setEditingRecurring(item); setDialog('recurring'); setActionsFor(undefined) }} onPostpone={() => void setRecurringMonthStatus(item, 'postponed')} onSkip={() => void setRecurringMonthStatus(item, 'skipped')} onToggleActive={async () => { if (!user) return; await financeRecurringRepository.setActive(item.id, !item.isActive, user.id); setActionsFor(undefined); await finish(item.isActive ? 'Ingreso pausado.' : 'Ingreso reanudado.') }} onDelete={() => { setDeletingRecurring(item); setActionsFor(undefined) }} onRevert={() => occurrence && setRevertingOccurrence(occurrence)} />)}</div>
+        <div className="finance-expense-list">{recurringForMonth.filter(({ item }) => item.type === 'income').map(({ item, expectedDate, occurrence }) => <RecurringCard key={item.id} item={item} expectedDate={expectedDate} occurrence={occurrence} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={data.categories.find((category) => category.id === item.categoryId)?.name} busy={savingPaymentId === item.id} onRegister={() => void registerRecurringPayment(item)} onEdit={() => { setRecurringEditMode('period'); setEditingRecurring(item); setDialog('recurring') }} onDelete={() => setDeletingRecurring(item)} />)}</div>
         {!recurringForMonth.some(({ item }) => item.type === 'income') && <EmptyState title="Sin ingresos recurrentes" description="Registra sueldo, honorarios o pagos periódicos esperados." />}
       </section>
       <section className="finance-expense-panel">
         <SectionHead eyebrow="Entradas extraordinarias" title="Ingresos eventuales" action="+" actionLabel="Registrar eventual" onClick={() => startMovement({ type: 'income', status: 'planned' })} />
-        <div className="finance-expense-list">{monthlyTransactions.filter((item) => ['planned', 'pending'].includes(item.status) && (item.type === 'income' || item.type === 'refund')).map((item) => <article key={item.id}><header><div><strong>{item.description}</strong><small>{item.transactionDate} · {item.status === 'planned' ? 'Esperado' : 'Pospuesto'}</small></div><b className="positive">{formatMxn(item.amountCents)}</b></header><small>{data.accounts.find((account) => account.id === item.accountId)?.name} · {data.categories.find((category) => category.id === item.categoryId)?.name}</small><footer><Button disabled={savingPaymentId === item.id} onClick={() => void registerEventualPayment(item)}>{savingPaymentId === item.id ? 'Registrando…' : 'Registrar cobro'}</Button><Button variant="ghost" onClick={() => { setEditingTransaction(item); setDialog('transaction') }}>Editar</Button><Button variant="ghost" onClick={() => void status(item, 'pending')}>Posponer</Button><Button variant="ghost" onClick={() => void status(item, 'cancelled')}>Cancelar</Button></footer></article>)}</div>
-        {!monthlyTransactions.some((item) => ['planned', 'pending'].includes(item.status) && (item.type === 'income' || item.type === 'refund')) && <EmptyState title="Sin ingresos eventuales" description="Planea bonos, ventas o pagos extraordinarios sin afectar el saldo real." />}
+        <div className="finance-expense-list">{eventualIncomes.map((item) => <EventualIncomeCard key={item.id} item={item} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={data.categories.find((category) => category.id === item.categoryId)?.name} busy={savingPaymentId === item.id} onRegister={() => void registerEventualPayment(item)} onEdit={() => { setEditingTransaction(item); setDialog('transaction') }} onStatus={(next) => void status(item, next)} />)}</div>
+        {!eventualIncomes.length && <EmptyState title="Sin ingresos eventuales" description="Planea bonos, ventas o pagos extraordinarios sin afectar el saldo real." />}
       </section>
     </div>}
 
@@ -338,7 +461,7 @@ export function FinancePage() {
       <ProjectionStrip items={projectionItems(expenseProjection)} />
       <section className="finance-expense-panel">
         <SectionHead eyebrow="Calendario financiero" title="Gastos recurrentes" action="+" actionLabel="Registrar gasto recurrente" onClick={() => setDialog('recurring')} />
-        <div className="finance-expense-list">{recurringForMonth.filter(({ item }) => item.type !== 'income' && item.type !== 'refund').map(({ item, expectedDate, occurrence }) => <RecurringCard key={item.id} item={item} expectedDate={expectedDate} occurrence={occurrence} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={data.categories.find((category) => category.id === item.categoryId)?.name} busy={savingPaymentId === item.id} menuOpen={actionsFor === item.id} onToggleMenu={() => setActionsFor((current) => current === item.id ? undefined : item.id)} onRegister={() => void registerRecurringPayment(item)} onEdit={() => { setRecurringEditMode('period'); setEditingRecurring(item); setDialog('recurring'); setActionsFor(undefined) }} onEditTemplate={() => { setRecurringEditMode('template'); setEditingRecurring(item); setDialog('recurring'); setActionsFor(undefined) }} onPostpone={() => void setRecurringMonthStatus(item, 'postponed')} onSkip={() => void setRecurringMonthStatus(item, 'skipped')} onToggleActive={async () => { if (!user) return; await financeRecurringRepository.setActive(item.id, !item.isActive, user.id); setActionsFor(undefined); await finish(item.isActive ? 'Recurrente pausado.' : 'Recurrente reanudado.') }} onDelete={() => { setDeletingRecurring(item); setActionsFor(undefined) }} onRevert={() => occurrence && setRevertingOccurrence(occurrence)} />)}</div>
+        <div className="finance-expense-list">{recurringForMonth.filter(({ item }) => item.type !== 'income' && item.type !== 'refund').map(({ item, expectedDate, occurrence }) => <RecurringCard key={item.id} item={item} expectedDate={expectedDate} occurrence={occurrence} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={data.categories.find((category) => category.id === item.categoryId)?.name} busy={savingPaymentId === item.id} onRegister={() => void registerRecurringPayment(item)} onEdit={() => { setRecurringEditMode('period'); setEditingRecurring(item); setDialog('recurring') }} onDelete={() => setDeletingRecurring(item)} />)}</div>
         {!recurringForMonth.some(({ item }) => item.type !== 'income' && item.type !== 'refund') && <EmptyState title="Sin gastos recurrentes" description="Registra renta, servicios o cualquier gasto periódico." />}
       </section>
       <section className="finance-expense-panel">
@@ -347,13 +470,14 @@ export function FinancePage() {
           const rank = (status: FinanceTransactionStatus) => status === 'planned' ? 0 : status === 'pending' ? 1 : 2
           return rank(a.status) - rank(b.status) || a.transactionDate.localeCompare(b.transactionDate)
         }).map((item) => <article key={item.id}>
-          <header><div><strong>{item.description}</strong><small>{item.transactionDate} · {item.status === 'completed' ? 'Pagado' : item.status === 'pending' ? 'Pospuesto' : statusLabel[item.status]}</small></div><b>{formatMxn(item.amountCents)}</b></header>
-          <span className={`finance-occurrence-status finance-occurrence-status--${item.status === 'completed' ? 'paid' : item.status}`}>{item.status === 'completed' ? 'Pagado' : item.status === 'pending' ? 'Pospuesto' : statusLabel[item.status]}</span>
+          <header><div><strong>{item.description}</strong><small>{item.transactionDate}</small></div><div className="finance-expense-amount"><b>{formatMxn(item.amountCents)}</b><span className={`finance-occurrence-status finance-occurrence-status--${item.status === 'completed' ? 'paid' : item.status}`}>{item.status === 'completed' ? 'Pagado' : item.status === 'pending' ? 'Pospuesto' : statusLabel[item.status]}</span></div></header>
+          <div className="finance-expense-meta"><small>{data.accounts.find((account) => account.id === item.accountId)?.name ?? 'Sin cuenta'}{data.categories.find((category) => category.id === item.categoryId)?.name ? ` · ${data.categories.find((category) => category.id === item.categoryId)?.name}` : ''}</small></div>
           <footer>
             <Button disabled={item.status !== 'planned' || savingPaymentId === item.id} onClick={() => void registerEventualPayment(item)}>{item.status === 'completed' ? 'Pagado' : savingPaymentId === item.id ? 'Registrando…' : 'Registrar pago'}</Button>
             <Button variant="ghost" onClick={() => { setEditingTransaction(item); setDialog('transaction') }}>Editar</Button>
             {item.status === 'planned' && <Button variant="ghost" onClick={() => void status(item, 'pending')}>Posponer</Button>}
             {!['completed', 'cancelled'].includes(item.status) && <Button variant="ghost" onClick={() => void status(item, 'cancelled')}>Cancelar</Button>}
+            <Button variant="ghost" icon={<Trash2 size={13} />} onClick={() => setDeleting(item)}>Eliminar</Button>
           </footer>
         </article>)}</div>
         {!monthlyTransactions.some((item) => !item.recurringTransactionId && (item.type === 'expense' || item.type === 'debt_payment')) && <EmptyState title="Sin gastos eventuales" description="Planea una compra o pago futuro sin afectar todavía tu saldo real." />}
@@ -364,17 +488,18 @@ export function FinancePage() {
 
     {panel === 'fund' && <section className="finance-section finance-fund"><SectionHead eyebrow="Reserva flexible" title="Fondo de Ahorro" action="Registrar movimiento" onClick={() => setDialog('fundEntry')} /><div className="finance-fund-hero"><div><PiggyBank size={24} /><span>Saldo disponible en el fondo</span><strong>{formatMxn(fundMetrics.balanceCents)}</strong><small>Dinero reservado sin asignarlo a una meta específica.</small></div><div><span>Ritmo del mes</span><strong>{formatMxn(fundMetrics.monthCents)}</strong><small>{fundMetrics.lastEntry ? `Último movimiento · ${fundMetrics.lastEntry.entryDate}` : 'Haz tu primera aportación'}</small></div></div><div className="finance-fund-kpis"><FinanceKpi label="Aportado este año" value={fundMetrics.yearCents} /><FinanceKpi label="Última aportación" value={fundMetrics.lastEntry?.amountCents ?? 0} context={fundMetrics.lastEntry?.entryDate ?? 'Sin movimientos'} /></div><div className="finance-fund-history"><header><span>Fecha</span><span>Concepto</span><span>Monto</span></header>{data.savingsFundEntries.map(item=><article key={item.id}><time>{item.entryDate}</time><span>{item.description??(item.amountCents>0?'Aportación':'Retiro')}</span><strong className={item.amountCents>=0?'positive':'negative'}>{item.amountCents >= 0 ? '+' : '−'}{formatMxn(Math.abs(item.amountCents))}</strong></article>)}{!data.savingsFundEntries.length&&<EmptyState title="Fondo vacío" description="Reserva dinero sin asignarlo a una meta específica." />}</div></section>}
 
-    {panel === 'goals' && <section className="finance-section"><SectionHead eyebrow="Dirección" title="Metas financieras" action="Nueva meta" onClick={() => setDialog('goal')} /><div className="finance-goals">{data.goals.map((goal) => { const progress=goalProgress(goal.id,data);const target=goalTargetCents(goal.id,data);const spent=goalSpentCents(goal.id,data);const available=goalAvailableCents(goal.id,data);return <article className="finance-goal-summary" key={goal.id} onClick={()=>{setSelectedGoal(goal);setDialog('goalDetail')}}><header><Target /><div><strong>{goal.name}</strong><small>{goal.priority} · {goal.status}</small></div><b>{progress.percentage.toFixed(0)}%</b></header><ProgressBar value={progress.percentage}/><div className="finance-goal-metrics"><span>Objetivo total<strong>{formatMxn(target)}</strong></span><span>Total aportado<strong>{formatMxn(progress.savedCents)}</strong></span><span>Total gastado<strong>{formatMxn(spent)}</strong></span><span>Disponible en meta<strong>{formatMxn(available)}</strong></span><span>Pendiente por comprar<strong>{formatMxn(Math.max(0,target-spent))}</strong></span><span>Pendiente por financiar<strong>{formatMxn(Math.max(0,target-progress.savedCents))}</strong></span></div><footer onClick={event=>event.stopPropagation()}><Button variant="secondary" onClick={()=>{setSelectedGoal(goal);setDialog('goalDetail')}}>Ver detalle</Button><Button variant="secondary" onClick={()=>{setSelectedGoal(goal);setDialog('contribution')}}>Registrar aportación</Button><Button variant="ghost" onClick={()=>{setEditingGoal(goal);setDialog('goal')}}>Editar meta</Button>{goal.status==='active'&&<Button variant="ghost" onClick={async()=>{if(!user)return;await financeGoalRepository.save({...goal,status:'paused'},user.id);await finish('Meta pausada.')}}>Pausar</Button>}{goal.status==='paused'&&<Button variant="ghost" onClick={async()=>{if(!user)return;await financeGoalRepository.save({...goal,status:'active'},user.id);await finish('Meta reanudada.')}}>Reanudar</Button>}</footer></article>})}</div>{!data.goals.length&&<EmptyState title="Sin metas financieras" description="Convierte una intención de ahorro en una dirección medible."/>}</section>}
+    {panel === 'goals' && <section className="finance-section"><SectionHead eyebrow="Dirección" title="Metas financieras" action="Nueva meta" onClick={() => setDialog('goal')} /><div className="finance-goals">{data.goals.map((goal) => { const progress=goalProgress(goal.id,data);const target=goalTargetCents(goal.id,data);const spent=goalSpentCents(goal.id,data);const available=goalAvailableCents(goal.id,data);return <article className="finance-goal-summary" key={goal.id} onClick={()=>{setSelectedGoal(goal);setDialog('goalDetail')}}><header><Target /><div><strong>{goal.name}</strong><small>{goal.priority} · {goal.status}</small></div><b>{progress.percentage.toFixed(0)}%</b></header><ProgressBar value={progress.percentage}/><div className="finance-goal-metrics"><span>Objetivo total<strong>{formatMxn(target)}</strong></span><span>Total aportado<strong>{formatMxn(progress.savedCents)}</strong></span><span>Total gastado<strong>{formatMxn(spent)}</strong></span><span>Disponible en meta<strong>{formatMxn(available)}</strong></span><span>Pendiente por comprar<strong>{formatMxn(Math.max(0,target-spent))}</strong></span><span>Pendiente por financiar<strong>{formatMxn(Math.max(0,target-progress.savedCents))}</strong></span></div><footer onClick={event=>event.stopPropagation()}><Button variant="secondary" onClick={()=>{setSelectedGoal(goal);setDialog('goalDetail')}}>Ver detalle</Button><Button variant="secondary" onClick={()=>{setSelectedGoal(goal);setDialog('contribution')}}>Registrar aportación</Button><Button variant="ghost" onClick={()=>{setEditingGoal(goal);setDialog('goal')}}>Editar meta</Button>{goal.status==='active'&&<Button variant="ghost" onClick={async()=>{if(!user)return;await financeGoalRepository.save({...goal,status:'paused'},user.id);await finish('Meta pausada.')}}>Pausar</Button>}{goal.status==='paused'&&<Button variant="ghost" onClick={async()=>{if(!user)return;await financeGoalRepository.save({...goal,status:'active'},user.id);await finish('Meta reanudada.')}}>Reanudar</Button>}<Button variant="danger" icon={<Trash2 size={13}/>} onClick={()=>setDeletingGoal(goal)}>Eliminar meta</Button></footer></article>})}</div>{!data.goals.length&&<EmptyState title="Sin metas financieras" description="Convierte una intención de ahorro en una dirección medible."/>}</section>}
     </div>
-    <aside className="finance-side-kpis"><FinanceMetrics metrics={metrics} previous={previous} hasPreviousData={hasPreviousData} /></aside>
+    <aside className="finance-side-kpis"><FinanceMetrics metrics={metrics} previous={previous} hasPreviousData={hasPreviousData} midMonthProjection={midMonthProjection} projection={baselineLiquidityProjection} projectionBreakdown={projectionBreakdown} month={month} /></aside>
     </div>
 
     {dialog === 'movementMenu' && <MovementMenu canTransfer={activeAccounts.length > 1} onClose={() => setDialog(null)} onSelect={startMovement} />}
-    {dialog === 'transaction' && <TransactionDialog initial={editingTransaction} preset={movementPreset} accounts={data.accounts.filter((item) => item.isActive)} categories={data.categories.filter((item) => item.isActive)} budgets={data.budgets} onClose={() => { setDialog(null); setEditingTransaction(undefined); setMovementPreset(undefined) }} onSave={async (item) => { if (!user) return; await financeTransactionRepository.save(item, user.id); setMovementPreset(undefined); await finish('Movimiento guardado.') }} />}
+    {dialog === 'transaction' && <TransactionDialog initial={editingTransaction} preset={movementPreset} accounts={data.accounts.filter((item) => item.isActive)} categories={data.categories.filter((item) => item.isActive)} budgets={data.budgets} onClose={() => { setDialog(null); setEditingTransaction(undefined); setMovementPreset(undefined) }} onCreateCategory={async (item) => { if (!user) throw new Error('Inicia sesión para crear una categoría.'); return financeCategoryRepository.save(item, user.id) }} onSave={async (item) => { if (!user) return; await financeTransactionRepository.save(item, user.id); setMovementPreset(undefined); await finish('Movimiento guardado.') }} />}
     {dialog === 'account' && <AccountDialog initial={editingAccount} onClose={() => { setDialog(null); setEditingAccount(undefined) }} onSave={async (item) => { if (!user) return; await financeAccountRepository.save(item, user.id); await finish('Cuenta guardada.') }} />}
-    {dialog === 'budget' && <BudgetDialog month={monthKey(month)} categories={data.categories.filter((item) => item.type === 'expense' && item.isActive)} onClose={() => setDialog(null)} onSave={async (item) => { if (!user) return; await financeBudgetRepository.save(item, user.id); await finish('Presupuesto guardado.') }} />}
+    {dialog === 'budget' && <BudgetDialog data={data} month={monthKey(month)} initialHalf={budgetHalfToEdit} budgets={data.budgets} categories={data.categories.filter((item) => item.type === 'expense' && item.isActive)} onClose={() => { setDialog(null); setBudgetHalfToEdit(undefined) }} onSave={async (item) => { if (!user) return; await financeBudgetRepository.save(item, user.id); await finish('Presupuesto guardado.') }} />}
     {dialog==='budgetClose'&&closingBudget&&<BudgetCloseDialog budget={closingBudget} performance={budgetPerformance(data,parseISO(closingBudget.periodEnd??closingBudget.month)).find(item=>item.id===closingBudget.id)} goals={data.goals.filter(goal=>goal.status==='active')} onClose={()=>{setDismissedBudgetIds(current=>[...current,closingBudget.id]);setDialog(null);setClosingBudget(undefined)}} onSave={async(destination,goalId)=>{if(!user)return;await financePlanningRepository.closeBudget(closingBudget.id,destination,goalId,user.id);setClosingBudget(undefined);await finish('Cierre de quincena guardado.')}}/>}
     {dialog === 'recurring' && <RecurringDialog
+      key={recurringEditMode}
       initial={editingRecurring}
       editMode={recurringEditMode}
       occurrence={editingRecurring ? data.recurringOccurrences.find((item) => item.recurringTransactionId === editingRecurring.id && item.period === selectedPeriod) : undefined}
@@ -384,6 +509,18 @@ export function FinancePage() {
       accounts={data.accounts.filter((item) => item.isActive)}
       categories={data.categories.filter((item) => item.isActive)}
       onClose={() => { setDialog(null); setEditingRecurring(undefined); setMovementPreset(undefined) }}
+      onOpenTemplate={editingRecurring && recurringEditMode === 'period' ? () => setRecurringEditMode('template') : undefined}
+      onPostpone={editingRecurring ? () => void setRecurringMonthStatus(editingRecurring, 'postponed') : undefined}
+      onSkip={editingRecurring ? () => void setRecurringMonthStatus(editingRecurring, 'skipped') : undefined}
+      onToggleActive={editingRecurring ? async () => {
+        if (!user) return
+        await financeRecurringRepository.setActive(editingRecurring.id, !editingRecurring.isActive, user.id)
+        await finish(editingRecurring.isActive ? 'Recurrente pausado.' : 'Recurrente reanudado.')
+      } : undefined}
+      onRevert={editingRecurring ? () => {
+        const occurrence = data.recurringOccurrences.find((item) => item.recurringTransactionId === editingRecurring.id && item.period === selectedPeriod)
+        if (occurrence) setRevertingOccurrence(occurrence)
+      } : undefined}
       onSave={async (item) => {
         if (!user) return
         if (editingRecurring && recurringEditMode === 'period') {
@@ -405,6 +542,7 @@ export function FinancePage() {
     {dialog === 'goalItem' && selectedGoal && <GoalItemDialog goal={selectedGoal} initial={selectedGoalItem} onClose={()=>setDialog('goalDetail')} onSave={async item=>{if(!user)return;await financePlanningRepository.saveGoalItem(item,user.id);await refresh();setFeedback('Artículo guardado.');setSelectedGoalItem(undefined);setDialog('goalDetail')}} />}
     {dialog === 'purchaseItem' && selectedGoalItem && <PurchaseItemDialog item={selectedGoalItem} accounts={activeAccounts} categories={data.categories.filter(item=>item.type==='expense'&&item.isActive)} transactions={data.transactions} onClose={()=>setDialog('goalDetail')} onSave={async (item,movement)=>{if(!user)return;if(movement)await financeTransactionRepository.save(movement,user.id);await financePlanningRepository.saveGoalItem(item,user.id);await refresh();setFeedback('Compra vinculada a la meta.');setDialog('goalDetail')}} />}
     <ConfirmDialog open={Boolean(deletingGoalItem)} title={deletingGoalItem?.transactionId?'Conservar movimiento financiero':'Eliminar artículo'} description={deletingGoalItem?.transactionId?'Este artículo tiene un movimiento asociado. El movimiento no se eliminará; el artículo se marcará como descartado.':'El artículo se eliminará definitivamente de la meta. ¿Deseas continuar?'} confirmLabel={deletingGoalItem?.transactionId?'Descartar artículo':'Eliminar'} onClose={()=>setDeletingGoalItem(undefined)} onConfirm={async()=>{if(!user||!deletingGoalItem)return;if(deletingGoalItem.transactionId)await financePlanningRepository.saveGoalItem({...deletingGoalItem,status:'discarded'},user.id);else await financePlanningRepository.removeGoalItem(deletingGoalItem.id,user.id);setDeletingGoalItem(undefined);await refresh();setFeedback(deletingGoalItem.transactionId?'Artículo descartado; el movimiento se conservó.':'Artículo eliminado.')}} />
+    <ConfirmDialog open={Boolean(deletingGoal)} title="Eliminar meta" description={`Eliminarás “${deletingGoal?.name ?? ''}” y sus artículos/aportaciones de planeación. Los movimientos financieros reales que registraste se conservarán intactos.`} confirmLabel="Eliminar meta" onClose={()=>setDeletingGoal(undefined)} onConfirm={async()=>{if(!user||!deletingGoal)return;const goal=deletingGoal;try{await financeGoalRepository.remove(goal.id,user.id);setDeletingGoal(undefined);if(selectedGoal?.id===goal.id){setSelectedGoal(undefined);setDialog(null)}await refresh();window.dispatchEvent(new Event('faro:finance-updated'));setFeedback(`Meta “${goal.name}” eliminada. Tus movimientos se conservaron.`)}catch(reason){setDeletingGoal(undefined);setFeedback(reason instanceof Error?reason.message:'No se pudo eliminar la meta.')}}} />
     <ConfirmDialog open={Boolean(deleting)} title="Eliminar movimiento" description="Esta acción elimina el movimiento definitivamente y recalcula los saldos. ¿Deseas continuar?" onClose={() => setDeleting(undefined)} onConfirm={async () => { if (!user || !deleting) return; await financeTransactionRepository.remove(deleting.id, user.id); setDeleting(undefined); await finish('Movimiento eliminado.') }} />
     <ConfirmDialog open={Boolean(deletingAccount)} title="Eliminar cuenta definitivamente" description="Solo se eliminará si no tiene movimientos ni relaciones. Si conserva historial, FARO bloqueará la operación y la cuenta permanecerá archivada." onClose={() => setDeletingAccount(undefined)} onConfirm={async () => {
       if (!user || !deletingAccount) return
@@ -432,55 +570,103 @@ export function FinancePage() {
   </div>
 }
 
-function RecurringCard({ item, expectedDate, occurrence, account, category, busy, menuOpen, onToggleMenu, onRegister, onEdit, onEditTemplate, onPostpone, onSkip, onToggleActive, onDelete, onRevert }: {
+function RecurringCard({ item, expectedDate, occurrence, account, category, busy, onRegister, onEdit, onDelete }: {
   item: FinanceRecurringTransaction
   expectedDate?: string
   occurrence?: FinanceRecurringOccurrence
   account?: string
   category?: string
   busy: boolean
-  menuOpen: boolean
-  onToggleMenu: () => void
   onRegister: () => void
   onEdit: () => void
-  onEditTemplate?: () => void
-  onPostpone: () => void
-  onSkip: () => void
-  onToggleActive: () => void
   onDelete: () => void
-  onRevert: () => void
 }) {
   const income = item.type === 'income'
   const paid = occurrence?.status === 'paid'
   const configured = Boolean(occurrence?.amountCents && expectedDate)
+  const statusText = !item.isActive ? 'Pausado' : paid ? income ? 'Cobrado' : 'Pagado' : occurrence?.status === 'skipped' ? 'Omitido' : occurrence?.status === 'postponed' ? 'Pospuesto' : income ? 'Esperado' : 'Pendiente'
   return <article className={`finance-expense--${occurrence?.status ?? 'pending'} ${!item.isActive ? 'finance-expense--paused' : ''}`}>
-    <header><Repeat2 /><div><strong>{occurrence?.description ?? item.description}</strong><small>{configured ? formatFinanceDate(expectedDate!) : 'Monto y fecha por definir'}</small></div><b className={income ? 'positive' : ''}>{configured ? formatMxn(occurrence!.amountCents!) : '—'}</b></header>
-    <small>{account}{category ? ` · ${category}` : ''}</small>
-    <span className={`finance-occurrence-status finance-occurrence-status--${occurrence?.status ?? 'pending'}`}>{!item.isActive ? 'Pausado' : paid ? income ? 'Cobrado' : 'Pagado' : occurrence?.status === 'skipped' ? 'Omitido' : occurrence?.status === 'postponed' ? 'Pospuesto' : income ? 'Esperado' : 'Pendiente'}</span>
+    <header><div><strong>{occurrence?.description ?? item.description}</strong><small>{configured ? formatFinanceDate(expectedDate!) : 'Monto y fecha por definir'}</small></div><div className="finance-expense-amount"><b className={income ? 'positive' : ''}>{configured ? formatMxn(occurrence!.amountCents!) : '—'}</b><span className={`finance-occurrence-status finance-occurrence-status--${occurrence?.status ?? 'pending'}`}>{statusText}</span></div></header>
+    <div className="finance-expense-meta"><small>{account}{category ? ` · ${category}` : ''}</small></div>
     <footer>
-      {paid
-        ? <Button variant="secondary" disabled={busy} onClick={onRevert}>{income ? 'Deshacer cobro' : 'Deshacer pago'}</Button>
-        : <Button disabled={!item.isActive || !configured || occurrence?.status === 'skipped' || busy} loading={busy} onClick={onRegister}>{income ? 'Registrar cobro' : 'Registrar pago'}</Button>}
-      <Button variant="ghost" onClick={onEdit}>{configured ? 'Editar periodo' : 'Definir periodo'}</Button>
-      <div className="finance-card-menu">
-        <button aria-label={`Más acciones para ${item.description}`} aria-haspopup="menu" aria-expanded={menuOpen} onClick={onToggleMenu}><MoreHorizontal size={17} /></button>
-        {menuOpen && <div role="menu">{onEditTemplate && <button role="menuitem" onClick={onEditTemplate}>Editar recurrencia</button>}<button role="menuitem" disabled={paid || busy} onClick={onPostpone}>Posponer</button><button role="menuitem" disabled={paid || busy} onClick={onSkip}>Saltar periodo</button><button role="menuitem" onClick={onToggleActive}>{item.isActive ? 'Pausar' : 'Reanudar'}</button><button role="menuitem" className="danger" onClick={onDelete}>Eliminar</button></div>}
-      </div>
+      <Button disabled={paid || !item.isActive || !configured || occurrence?.status === 'skipped' || busy} loading={busy} onClick={onRegister}>{paid ? income ? 'Cobrado' : 'Pagado' : income ? 'Registrar cobro' : 'Registrar pago'}</Button>
+      <Button variant="ghost" onClick={onEdit}>Editar</Button>
+      <Button variant="ghost" icon={<Trash2 size={13} />} onClick={onDelete}>Eliminar</Button>
     </footer>
   </article>
 }
 
-function FinanceMetrics({ metrics, previous, hasPreviousData }: {
+function EventualIncomeCard({ item, account, category, busy, onRegister, onEdit, onStatus }: {
+  item: FinanceTransaction
+  account?: string
+  category?: string
+  busy: boolean
+  onRegister: () => void
+  onEdit: () => void
+  onStatus: (status: FinanceTransactionStatus) => void
+}) {
+  const collected = item.status === 'completed'
+  const postponed = item.status === 'pending'
+  return <article>
+    <header><div><strong>{item.description}</strong><small>{formatFinanceDate(item.transactionDate)} · {collected ? 'Cobrado' : postponed ? 'Pospuesto' : 'Esperado'}</small></div><b className="positive">{formatMxn(item.amountCents)}</b></header>
+    <small>{account ?? 'Sin cuenta'} · {category ?? 'Sin categoría'}</small>
+    <footer>
+      <Button disabled={collected || busy} loading={busy} onClick={onRegister}>{collected ? 'Cobrado' : busy ? 'Registrando…' : 'Registrar cobro'}</Button>
+      <Button variant="ghost" onClick={onEdit}>Editar</Button>
+      {!collected && <Button variant="ghost" onClick={() => onStatus(postponed ? 'planned' : 'pending')}>{postponed ? 'Marcar esperado' : 'Posponer'}</Button>}
+      {!collected && <Button variant="ghost" onClick={() => onStatus('cancelled')}>Cancelar</Button>}
+    </footer>
+  </article>
+}
+
+function FinanceMetrics({ metrics, previous, hasPreviousData, midMonthProjection, projection, projectionBreakdown, month }: {
   metrics: ReturnType<typeof calculateFinanceMetrics>
   previous: ReturnType<typeof calculateFinanceMetrics>
   hasPreviousData: boolean
+  midMonthProjection: { date: string; balanceCents: number }
+  projection: ReturnType<typeof financeLiquidityProjection>
+  projectionBreakdown: ReturnType<typeof financeProjectionBreakdown>
+  month: Date
 }) {
+  const todayLabel = format(parseISO(projection.currentDate), 'd MMM', { locale: es })
+  const selectedMonthLabel = format(month, 'MMMM', { locale: es })
+  const previousMonthLabel = projection.openingBalanceSourcePeriod
+    ? format(parseISO(projection.openingBalanceSourcePeriod), 'MMM yyyy', { locale: es })
+    : ''
+  const compareWithPrevious = projection.periodMode === 'past' && hasPreviousData
+  const isHistorical = projection.periodMode === 'past'
+  const realizedFlowContext = projection.periodMode === 'future'
+    ? 'El periodo aún no inicia'
+    : projection.periodMode === 'current'
+      ? 'Periodo en curso'
+      : undefined
+  const projectedOpeningCents = metrics.projectedBalanceCents
+    - projectionBreakdown.ingresosPendientes
+    + projectionBreakdown.gastosPendientes
+  const closingContext = projection.periodMode === 'future'
+    ? `Base: ${formatMxn(projectedOpeningCents)} · cierre de ${previousMonthLabel}`
+    : projection.periodMode === 'current'
+      ? 'Saldo de hoy + flujo pendiente'
+      : 'Sólo movimientos realizados'
+  const midpointContext = isHistorical
+    ? 'Sólo movimientos realizados'
+    : 'Incluye compromisos y reservas'
   return <section className="finance-kpis finance-kpis--primary" aria-label="Métricas financieras del periodo">
-    <FinanceKpi featured icon={<Landmark />} label="Disponible operativo" value={metrics.availableBalanceCents} context="Dinero disponible en cuentas activas" />
-    <FinanceKpi icon={<ArrowUpRight />} label="Ingresos del periodo" value={metrics.monthlyIncomeCents} previous={previous.monthlyIncomeCents} hasPrevious={hasPreviousData} />
-    <FinanceKpi icon={<ArrowDownRight />} label="Gastos del periodo" value={metrics.monthlyExpensesCents} previous={previous.monthlyExpensesCents} hasPrevious={hasPreviousData} inverse />
-    <FinanceKpi icon={<Clock3 />} label="Balance proyectado" value={metrics.projectedBalanceCents} context="Saldo real + ingresos pendientes − gastos pendientes" />
-    <FinanceKpi icon={<CreditCard />} label="Balance real" value={metrics.actualBalanceCents} context="Saldo actual de todas tus cuentas" />
+    <div className="finance-kpi-group finance-kpi-group--position">
+      <header><span>Posición de hoy</span></header>
+      <FinanceKpi tone="available" featured icon={<Landmark />} label="Disponible operativo hoy" value={metrics.availableBalanceCents} context={`Cuentas activas − ahorro · ${todayLabel}`} />
+      <FinanceKpi tone="actual" icon={<CreditCard />} label="Saldo total hoy" value={metrics.actualBalanceCents} context={`Todas tus cuentas · ${todayLabel}`} />
+    </div>
+    <div className="finance-kpi-group finance-kpi-group--flow">
+      <header><span>Realizado en {selectedMonthLabel}</span></header>
+      <FinanceKpi tone="income" icon={<ArrowUpRight />} label="Ingresos cobrados" value={metrics.monthlyIncomeCents} previous={previous.monthlyIncomeCents} hasPrevious={compareWithPrevious} context={realizedFlowContext} />
+      <FinanceKpi tone="expense" icon={<ArrowDownRight />} label="Gastos pagados" value={metrics.monthlyExpensesCents} previous={previous.monthlyExpensesCents} hasPrevious={compareWithPrevious} inverse context={realizedFlowContext} />
+    </div>
+    <div className="finance-kpi-group finance-kpi-group--projection">
+      <header><span>{isHistorical ? 'Cierre de' : 'Proyección de'} {selectedMonthLabel}</span></header>
+      <FinanceKpi tone="projected" icon={<Clock3 />} label="Saldo total al cierre" value={metrics.projectedBalanceCents} context={closingContext} />
+      <FinanceKpi tone="projected" icon={<CalendarDays />} label="Disponible operativo al 15" value={midMonthProjection.balanceCents} context={midpointContext} />
+    </div>
   </section>
 }
 
@@ -545,19 +731,25 @@ function SavingsPanel({ metrics, annual, year, goals, contributions }: {
   </section>
 }
 
-function FinanceKpi({ icon, label, value, previous, inverse, text, featured, hasPrevious, context }: { icon?: React.ReactNode; label: string; value?: number; previous?: number; inverse?: boolean; text?: string; featured?: boolean; hasPrevious?: boolean; context?: string }) {
+function FinanceKpi({ icon, label, value, previous, inverse, text, featured, hasPrevious, context, tone = 'neutral' }: { icon?: React.ReactNode; label: string; value?: number; previous?: number; inverse?: boolean; text?: string; featured?: boolean; hasPrevious?: boolean; context?: string; tone?: 'neutral' | 'available' | 'actual' | 'income' | 'expense' | 'projected' }) {
   const delta = hasPrevious && previous != null && value != null ? value - previous : null
   const good = delta == null || (inverse ? delta <= 0 : delta >= 0)
-  return <article className={featured ? 'finance-kpi--featured' : ''}>{icon}<span>{label}</span><strong>{text ?? formatMxn(value ?? 0)}</strong>{context ? <small>{context}</small> : hasPrevious ? <small className={good ? 'positive' : 'negative'}>{delta === 0 ? 'Sin cambio' : `${(delta ?? 0) > 0 ? '+' : ''}${formatMxn(delta ?? 0)} vs anterior`}</small> : previous != null && <small>Sin datos del periodo anterior</small>}</article>
+  return <article className={`finance-kpi finance-kpi--${tone}${featured ? ' finance-kpi--featured' : ''}`}>{icon}<span>{label}</span><strong>{text ?? formatMxn(value ?? 0)}</strong>{context ? <small>{context}</small> : hasPrevious ? <small className={good ? 'positive' : 'negative'}>{delta === 0 ? 'Sin cambio' : `${(delta ?? 0) > 0 ? '+' : ''}${formatMxn(delta ?? 0)} vs anterior`}</small> : previous != null && <small>Sin datos del periodo anterior</small>}</article>
 }
-type Projection = { recurringCents: number; eventualCents: number; totalCents: number; realizedCents: number; pendingCents: number }
+type Projection = { recurringCents: number; eventualCents: number; totalCents: number; realizedCents: number; pendingCents: number; pendingCount: number; budgetReservationCents: number }
 function projectionItems(projection: Projection) {
+  const reserveContext = projection.budgetReservationCents > 0
+    ? `Incluye ${formatMxn(projection.budgetReservationCents)} de presupuesto reservado`
+    : undefined
+  const pendingContext = projection.budgetReservationCents > 0
+    ? `${projection.pendingCount} compromiso${projection.pendingCount === 1 ? '' : 's'} + reserva por aplicar`
+    : `${projection.pendingCount} compromiso${projection.pendingCount === 1 ? '' : 's'} por liquidar`
   return [
     { icon: <Repeat2 />, label: 'Recurrente proyectado', value: projection.recurringCents, tone: 'accent' as const },
     { icon: <CalendarDays />, label: 'Eventual proyectado', value: projection.eventualCents, tone: 'accent' as const },
-    { icon: <Calculator />, label: 'Total proyectado', value: projection.totalCents },
+    { icon: <Calculator />, label: 'Total proyectado', value: projection.totalCents, context: reserveContext },
     { icon: <Check />, label: 'Realizado', value: projection.realizedCents, tone: 'positive' as const },
-    { icon: <Clock3 />, label: 'Pendiente', value: projection.pendingCents, tone: 'negative' as const },
+    { icon: <Clock3 />, label: 'Pendiente', value: projection.pendingCents, context: pendingContext, tone: 'negative' as const },
   ]
 }
 function ProjectionStrip({ items, compact = false }: { items: { icon?: React.ReactNode; label: string; value?: number; text?: string; context?: string; tone?: 'accent' | 'positive' | 'negative' | 'muted' | 'savings' }[]; compact?: boolean }) {
@@ -566,7 +758,8 @@ function ProjectionStrip({ items, compact = false }: { items: { icon?: React.Rea
   </section>
 }
 function SectionHead({ eyebrow, title, action, actionLabel, onClick }: { eyebrow: string; title: string; action: string; actionLabel?: string; onClick: () => void }) {
-  return <header className="finance-section__head"><div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2></div><Button aria-label={actionLabel} icon={action === '+' ? undefined : <Plus size={14} />} onClick={onClick}>{action}</Button></header>
+  const compactAction = action === '+'
+  return <header className="finance-section__head"><div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2></div><Button className={compactAction ? 'finance-section__add' : undefined} aria-label={actionLabel} icon={compactAction ? <Plus size={22} strokeWidth={2.25} /> : <Plus size={14} />} onClick={onClick}>{compactAction ? '' : action}</Button></header>
 }
 function moneyToCents(value: string) { return Math.round(Number(value) * 100) }
 function ErrorText({ value }: { value: string }) { return value ? <p className="finance-form-error" role="alert">{value}</p> : null }
@@ -590,7 +783,7 @@ function MovementMenu({ canTransfer, onClose, onSelect }: { canTransfer: boolean
   return <Modal open title="Nuevo movimiento" onClose={onClose}><div className="finance-movement-menu">{options.map(([label, preset, description]) => { const disabled = (preset.type === 'transfer' && !canTransfer); return <button key={label} disabled={disabled} title={disabled ? 'Necesitas al menos dos cuentas activas para mover dinero entre ellas.' : undefined} onClick={() => onSelect(preset)}><span>{label}</span><small>{disabled ? 'Crea o restaura otra cuenta para transferir' : description}</small><ArrowRight size={15} /></button> })}</div></Modal>
 }
 
-function TransactionDialog({ initial, preset, accounts, categories, budgets, onClose, onSave }: { initial?: FinanceTransaction; preset?: MovementPreset; accounts: FinanceAccount[]; categories: { id: string; name: string; type: string }[]; budgets: Array<{id:string;name?:string;periodStart?:string;periodEnd?:string}>; onClose: () => void; onSave: (item: Omit<FinanceTransaction, 'createdAt' | 'updatedAt'>) => Promise<void> }) {
+function TransactionDialog({ initial, preset, accounts, categories, budgets, onClose, onCreateCategory, onSave }: { initial?: FinanceTransaction; preset?: MovementPreset; accounts: FinanceAccount[]; categories: FinanceCategory[]; budgets: Array<{id:string;name?:string;periodStart?:string;periodEnd?:string}>; onClose: () => void; onCreateCategory: (item: FinanceCategory) => Promise<FinanceCategory>; onSave: (item: Omit<FinanceTransaction, 'createdAt' | 'updatedAt'>) => Promise<void> }) {
   const [type, setType] = useState<FinanceTransactionType>(initial?.type ?? preset?.type ?? 'expense')
   const [amount, setAmount] = useState(initial ? String(initial.amountCents / 100) : '')
   const [date, setDate] = useState(initial?.transactionDate ?? format(new Date(), 'yyyy-MM-dd'))
@@ -601,8 +794,15 @@ function TransactionDialog({ initial, preset, accounts, categories, budgets, onC
   const [status, setStatus] = useState<FinanceTransactionStatus>(initial?.status ?? preset?.status ?? 'completed')
   const [notes, setNotes] = useState(initial?.notes ?? '')
   const [budgetId,setBudgetId]=useState(initial?.budgetId??'')
+  const [newCategories, setNewCategories] = useState<FinanceCategory[]>([])
+  const [creatingCategory, setCreatingCategory] = useState(false)
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [creatingCategorySaving, setCreatingCategorySaving] = useState(false)
   const [error, setError] = useState(''); const [saving, setSaving] = useState(false)
-  const isPersonalExpense = type === 'expense' && categories.find(item=>item.id===categoryId)?.name === 'Personal'
+  const availableCategories = [...categories, ...newCategories]
+  const categoryType = categoryTypeForTransaction(type)
+  const selectedCategoryName = availableCategories.find((item) => item.id === categoryId)?.name?.trim().toLocaleLowerCase('es-MX')
+  const isPersonalExpense = type === 'expense' && (selectedCategoryName === 'personal' || selectedCategoryName === 'gastos personales')
   const automaticBudget = isPersonalExpense ? personalBudgetForDate(budgets, date) : undefined
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -613,8 +813,31 @@ function TransactionDialog({ initial, preset, accounts, categories, budgets, onC
     catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo guardar.') }
     finally { setSaving(false) }
   }
-  const matchingCategories = categories.filter((item) => item.type === (type === 'income' || type === 'refund' ? 'income' : type === 'saving' ? 'saving' : type === 'debt_payment' ? 'debt' : 'expense'))
-  return <Modal open title={initial ? 'Editar movimiento' : 'Nuevo movimiento'} onClose={onClose}><form className="finance-form" onSubmit={submit}><div className="finance-form-grid"><label>Tipo<select value={type} onChange={(event) => { setType(event.target.value as FinanceTransactionType); setCategoryId('') }}>{Object.entries(typeLabel).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label><label>Monto MXN<input type="number" min=".01" step=".01" required value={amount} onChange={(event) => setAmount(event.target.value)} /></label></div><label>Descripción<input autoFocus required maxLength={160} value={description} onChange={(event) => setDescription(event.target.value)} /></label><div className="finance-form-grid"><label>Fecha<input type="date" required value={date} onChange={(event) => setDate(event.target.value)} /></label><label>Estado<select value={status} onChange={(event) => setStatus(event.target.value as FinanceTransactionStatus)}>{Object.entries(statusLabel).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label></div><label>Cuenta<select required value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="">Selecciona</option>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>{type === 'transfer' ? <label>Cuenta destino<select required value={destinationAccountId} onChange={(event) => setDestinationAccountId(event.target.value)}><option value="">Selecciona</option>{accounts.filter((item) => item.id !== accountId).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label> : <><label>Categoría<select required value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="">Selecciona</option>{matchingCategories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>{isPersonalExpense?<p className="finance-form-hint">{automaticBudget?`Vinculado automáticamente a Gastos Personales · ${automaticBudget.periodStart} — ${automaticBudget.periodEnd}`:'No existe un presupuesto personal para la fecha elegida. El gasto se guardará sin presupuesto.'}</p>:type==='expense'&&<label>Presupuesto asociado <span>opcional</span><select value={budgetId} onChange={event=>setBudgetId(event.target.value)}><option value="">Sin presupuesto</option>{budgets.map(item=><option key={item.id} value={item.id}>{item.name??'Gastos Personales'} · {item.periodStart}</option>)}</select></label>}</>}<label>Notas<textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} /></label><p className="privacy-note">No ingreses números de cuenta, tarjeta ni credenciales bancarias.</p><ErrorText value={error} /><div className="modal-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit" disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button></div></form></Modal>
+  const matchingCategories = availableCategories.filter((item) => item.type === categoryType)
+  const createCategory = async () => {
+    if (!categoryType) return
+    const name = newCategoryName.trim().replace(/\s+/g, ' ')
+    if (!name) { setError('Escribe el nombre de la nueva categoría.'); return }
+    const existing = matchingCategories.find((item) => item.name.localeCompare(name, 'es', { sensitivity: 'accent' }) === 0)
+    if (existing) {
+      setCategoryId(existing.id); setNewCategoryName(''); setCreatingCategory(false); setError('')
+      return
+    }
+    setCreatingCategorySaving(true); setError('')
+    try {
+      const category = await onCreateCategory({ id: crypto.randomUUID(), name, type: categoryType, isDefault: false, isActive: true })
+      setNewCategories((current) => [...current, category])
+      setCategoryId(category.id); setNewCategoryName(''); setCreatingCategory(false)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo crear la categoría.')
+    } finally {
+      setCreatingCategorySaving(false)
+    }
+  }
+  const changeType = (next: FinanceTransactionType) => {
+    setType(next); setCategoryId(''); setCreatingCategory(false); setNewCategoryName(''); setError('')
+  }
+  return <Modal open title={initial ? 'Editar movimiento' : 'Nuevo movimiento'} onClose={onClose}><form className="finance-form" onSubmit={submit}><div className="finance-form-grid"><label>Tipo<select value={type} onChange={(event) => changeType(event.target.value as FinanceTransactionType)}>{Object.entries(typeLabel).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label><label>Monto MXN<input type="number" min=".01" step=".01" required value={amount} onChange={(event) => setAmount(event.target.value)} /></label></div><label>Descripción<input autoFocus required maxLength={160} value={description} onChange={(event) => setDescription(event.target.value)} /></label><div className="finance-form-grid"><label>Fecha<input type="date" required value={date} onChange={(event) => setDate(event.target.value)} /></label><label>Estado<select value={status} onChange={(event) => setStatus(event.target.value as FinanceTransactionStatus)}>{Object.entries(statusLabel).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label></div><label>Cuenta<select required value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="">Selecciona</option>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>{type === 'transfer' ? <label>Cuenta destino<select required value={destinationAccountId} onChange={(event) => setDestinationAccountId(event.target.value)}><option value="">Selecciona</option>{accounts.filter((item) => item.id !== accountId).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label> : <><div className="finance-category-field"><label>Categoría<select required value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="">Selecciona</option>{matchingCategories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><Button type="button" variant="secondary" size="sm" icon={<Plus size={13} />} onClick={() => { setCreatingCategory((current) => !current); setError('') }}>Nueva categoría</Button></div>{creatingCategory && categoryType && <div className="finance-new-category"><div><strong>Nueva categoría de {categoryTypeLabel[categoryType]}</strong><small>Se guarda en tu cuenta y estará disponible en FARO Desktop y Mobile.</small></div><div><input autoFocus aria-label="Nombre de la nueva categoría" maxLength={60} placeholder="Ej. Deudas" value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void createCategory() } }} /><Button type="button" size="sm" loading={creatingCategorySaving} onClick={() => void createCategory()}>Añadir</Button></div></div>}{isPersonalExpense?<p className="finance-form-hint">{automaticBudget?`Vinculado automáticamente a Gastos Personales · ${automaticBudget.periodStart} — ${automaticBudget.periodEnd}`:'No existe un presupuesto personal para la fecha elegida. El gasto se guardará sin presupuesto.'}</p>:type==='expense'&&<label>Presupuesto asociado <span>opcional</span><select value={budgetId} onChange={event=>setBudgetId(event.target.value)}><option value="">Sin presupuesto</option>{budgets.map(item=><option key={item.id} value={item.id}>{item.name??'Gastos Personales'} · {item.periodStart}</option>)}</select></label>}</>}<label>Notas<textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} /></label><p className="privacy-note">No ingreses números de cuenta, tarjeta ni credenciales bancarias.</p><ErrorText value={error} /><div className="modal-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit" disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button></div></form></Modal>
 }
 
 function FundEntryDialog({onClose,onSave}:{onClose:()=>void;onSave:(item:{id:string;fundId:string;amountCents:number;entryDate:string;description?:string})=>Promise<void>}){const[kind,setKind]=useState<'deposit'|'withdraw'>('deposit');const[amount,setAmount]=useState('');const[date,setDate]=useState(format(new Date(),'yyyy-MM-dd'));const[description,setDescription]=useState('');const[error,setError]=useState('');return <Modal open title="Movimiento del Fondo" onClose={onClose}><form className="finance-form" onSubmit={async event=>{event.preventDefault();const cents=moneyToCents(amount);if(cents<=0)return setError('Ingresa un monto mayor que cero.');try{await onSave({id:crypto.randomUUID(),fundId:'',amountCents:kind==='deposit'?cents:-cents,entryDate:date,description:description||undefined})}catch(reason){setError(reason instanceof Error?reason.message:'No se pudo guardar.')}}}><div className="finance-form-grid"><label>Operación<select value={kind} onChange={event=>setKind(event.target.value as typeof kind)}><option value="deposit">Aportar</option><option value="withdraw">Retirar</option></select></label><label>Monto MXN<input autoFocus required type="number" min=".01" step=".01" value={amount} onChange={event=>setAmount(event.target.value)}/></label></div><label>Fecha<input type="date" value={date} onChange={event=>setDate(event.target.value)}/></label><label>Descripción<input value={description} onChange={event=>setDescription(event.target.value)}/></label><p className="finance-form-hint">Es una reserva lógica: no modifica el saldo real de tus cuentas.</p><ErrorText value={error}/><div className="modal-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit">Guardar</Button></div></form></Modal>}
@@ -642,15 +865,118 @@ function AccountDialog({ initial, onClose, onSave }: { initial?: FinanceAccount;
   return <Modal open title={initial ? 'Editar cuenta' : 'Nueva cuenta'} onClose={onClose}><form className="finance-form" onSubmit={submit}><label>Nombre<input autoFocus required value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. BBVA Débito" /></label><div className="finance-form-grid"><label>Tipo<select value={type} onChange={(event) => setType(event.target.value as FinanceAccount['type'])}><option value="cash">Efectivo</option><option value="checking">Débito</option><option value="savings">Ahorro</option><option value="credit">Crédito</option><option value="investment">Inversión</option><option value="loan">Préstamo</option></select></label><label>Saldo inicial MXN<input type="number" step=".01" value={balance} onChange={(event) => setBalance(event.target.value)} /></label></div>{type === 'credit' && <><label>Límite de crédito<input type="number" min="0" step=".01" value={limit} onChange={(event) => setLimit(event.target.value)} /></label><div className="finance-form-grid"><label>Día de corte<input type="number" min="1" max="31" value={closingDay} onChange={(event) => setClosingDay(event.target.value)} /></label><label>Día de pago<input type="number" min="1" max="31" value={paymentDay} onChange={(event) => setPaymentDay(event.target.value)} /></label></div></>}<ErrorText value={error} /><div className="modal-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit" disabled={saving}>Guardar</Button></div></form></Modal>
 }
 
-function BudgetDialog({ month, categories, onClose, onSave }: { month: string; categories: { id: string; name: string }[]; onClose: () => void; onSave: (item: { categoryId: string; month: string; plannedAmountCents: number;name:string;periodStart:string;periodEnd:string;carryOverEnabled:boolean }) => Promise<void> }) {
-  const [categoryId, setCategoryId] = useState(categories.find(item=>item.name==='Personal')?.id??categories[0]?.id ?? ''); const [amount, setAmount] = useState(''); const [error, setError] = useState('');const selected=new Date();const base=parseISO(month);const sameMonth=selected.getFullYear()===base.getFullYear()&&selected.getMonth()===base.getMonth();const day=sameMonth?selected.getDate():1;const periodStart=format(new Date(base.getFullYear(),base.getMonth(),day<=15?1:16),'yyyy-MM-dd')
-  const submit = async (event: FormEvent) => { event.preventDefault(); const result = financeBudgetSchema.safeParse({ categoryId, month, plannedAmountCents: moneyToCents(amount) }); if (!result.success) return setError(result.error.issues[0]?.message ?? 'Revisa los campos.'); try { await onSave({...result.data,name:'Gastos Personales',periodStart,periodEnd:day<=15?format(new Date(base.getFullYear(),base.getMonth(),15),'yyyy-MM-dd'):format(endOfMonth(base),'yyyy-MM-dd'),carryOverEnabled:false}) } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo guardar.') } }
-  return <Modal open title="Presupuesto quincenal" onClose={onClose}><form className="finance-form" onSubmit={submit}><p className="finance-form-hint">Periodo: {periodStart} — {day<=15?format(new Date(base.getFullYear(),base.getMonth(),15),'yyyy-MM-dd'):format(endOfMonth(base),'yyyy-MM-dd')}</p><label>Categoría vinculada<select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>{categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Monto límite MXN<input autoFocus type="number" min="0" step=".01" required value={amount} onChange={(event) => setAmount(event.target.value)} /></label><ErrorText value={error} /><div className="modal-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit">Guardar</Button></div></form></Modal>
+function BudgetDialog({ data, month, initialHalf, budgets, categories, onClose, onSave }: { data: FinanceData; month: string; initialHalf?: 'q1' | 'q2'; budgets: FinanceBudget[]; categories: { id: string; name: string }[]; onClose: () => void; onSave: (item: { categoryId: string; month: string; plannedAmountCents: number;name:string;periodStart:string;periodEnd:string;carryOverEnabled:boolean }) => Promise<void> }) {
+  const current = new Date()
+  const currentMonth = format(current, 'yyyy-MM') === month.slice(0, 7)
+  const [half, setHalf] = useState<'q1' | 'q2'>(initialHalf ?? (currentMonth && current.getDate() > 15 ? 'q2' : 'q1'))
+  const period = fortnightPeriodForMonth(month, half)
+  const personalCategory = categories.find((item) => item.name.trim().toLocaleLowerCase('es-MX') === 'personal')
+  const existingBudget = useMemo(() => personalBudgetForDate(budgets, period.periodStart), [budgets, period.periodStart])
+  const carryOverCents = useMemo(() => half === 'q2'
+    ? personalBudgetCarryOverIntoPeriod(data, period.periodStart)
+    : 0, [data, half, period.periodStart])
+  const [categoryId, setCategoryId] = useState(existingBudget?.categoryId ?? personalCategory?.id ?? categories[0]?.id ?? '')
+  const [amount, setAmount] = useState(existingBudget ? String(existingBudget.plannedAmountCents / 100) : '')
+  const [error, setError] = useState('')
+  const selectHalf = (nextHalf: 'q1' | 'q2') => {
+    const nextPeriod = fortnightPeriodForMonth(month, nextHalf)
+    const nextBudget = personalBudgetForDate(budgets, nextPeriod.periodStart)
+    setHalf(nextHalf)
+    setCategoryId(nextBudget?.categoryId ?? personalCategory?.id ?? categories[0]?.id ?? '')
+    setAmount(nextBudget ? String(nextBudget.plannedAmountCents / 100) : '')
+    setError('')
+  }
+
+  const selectedCategory = categories.find((item) => item.id === categoryId)
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    const result = financeBudgetSchema.safeParse({ categoryId, month: period.month, plannedAmountCents: moneyToCents(amount) })
+    if (!result.success) return setError(result.error.issues[0]?.message ?? 'Revisa los campos.')
+    try {
+      await onSave({ ...result.data, name: 'Gastos Personales', periodStart: period.periodStart, periodEnd: period.periodEnd, carryOverEnabled: true })
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo guardar.')
+    }
+  }
+
+  return <Modal open title="Presupuesto personal" onClose={onClose}><form className="finance-form" onSubmit={submit}>
+    <label>Quincena<select value={half} onChange={(event) => selectHalf(event.target.value as 'q1' | 'q2')}><option value="q1">Q1 · del 1 al 15</option><option value="q2">Q2 · del 16 al cierre</option></select></label>
+    <p className="finance-form-hint">{period.periodStart} — {period.periodEnd}. Se reserva en los balances proyectados de esta quincena; la línea temporal sólo muestra gastos y compromisos con fecha.</p>
+    <label>Categoría vinculada<input value={selectedCategory?.name ?? 'Personal'} readOnly aria-readonly="true" /></label>
+    <label>{half === 'q2' ? 'Presupuesto nuevo para Q2 MXN' : 'Presupuesto nuevo para Q1 MXN'}<input autoFocus type="number" min="0" step=".01" required value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
+    {half === 'q2' && <p className="finance-form-hint">Quedaron {formatMxn(carryOverCents)} de Q1. FARO los acumula para Q2; el monto que indiques se suma como presupuesto nuevo.</p>}
+    {existingBudget && <p className="finance-form-hint">Ya hay un presupuesto para esta quincena: al guardar actualizarás su monto.</p>}
+    <ErrorText value={error} /><div className="modal-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit">{existingBudget ? 'Actualizar presupuesto' : 'Guardar presupuesto'}</Button></div>
+  </form></Modal>
 }
 
-function BudgetCloseDialog({budget,performance,goals,onClose,onSave}:{budget:FinanceBudget;performance?:{actualCents:number;remainingCents:number};goals:FinanceGoal[];onClose:()=>void;onSave:(destination:'next_period'|'goal'|'savings_fund'|'available',goalId?:string)=>Promise<void>}){const remaining=performance?.remainingCents??budget.plannedAmountCents;const exceeded=remaining<0;const[destination,setDestination]=useState<'next_period'|'goal'|'savings_fund'|'available'>(exceeded?'available':'next_period');const[goalId,setGoalId]=useState(goals[0]?.id??'');const[error,setError]=useState('');return <Modal open title="Cierre de quincena" onClose={onClose}><form className="finance-form" onSubmit={async event=>{event.preventDefault();const effectiveDestination=exceeded?'available':destination;if(effectiveDestination==='goal'&&!goalId)return setError('Selecciona una meta.');try{await onSave(effectiveDestination,effectiveDestination==='goal'?goalId:undefined)}catch(reason){setError(reason instanceof Error?reason.message:'No se pudo cerrar el periodo.')}}}><div className="finance-close-summary"><span>Presupuesto<strong>{formatMxn(budget.plannedAmountCents)}</strong></span><span>Gastado<strong>{formatMxn(performance?.actualCents??0)}</strong></span><span>{exceeded?'Exceso':'Sobrante'}<strong>{formatMxn(Math.abs(remaining))}</strong></span></div>{exceeded?<p className="finance-form-hint">Superaste el límite. FARO cerrará la quincena con el exceso registrado y creará la siguiente con tu presupuesto base, sin arrastrar deuda ni reducir el nuevo límite.</p>:<><label>¿Qué deseas hacer con el sobrante?<select value={destination} onChange={event=>setDestination(event.target.value as typeof destination)}><option value="next_period">Sumarlo al límite del siguiente periodo</option><option value="goal">Aportarlo a una Meta</option><option value="savings_fund">Aportarlo al Fondo de Ahorro</option><option value="available">Dejarlo disponible</option></select></label>{destination==='goal'&&<label>Meta<select value={goalId} onChange={event=>setGoalId(event.target.value)}>{goals.map(goal=><option key={goal.id} value={goal.id}>{goal.name}</option>)}</select></label>}<p className="finance-form-hint">Al confirmar, FARO creará automáticamente la siguiente quincena con el mismo presupuesto base. Solo sumará el sobrante si eliges pasarlo al siguiente periodo.</p></>}<ErrorText value={error}/><div className="modal-actions"><Button type="button" variant="ghost" onClick={onClose}>Después</Button><Button type="submit">Cerrar y crear siguiente quincena</Button></div></form></Modal>}
+function BudgetCloseDialog({ budget, performance, goals, onClose, onSave }: { budget: FinanceBudget; performance?: { actualCents: number; remainingCents: number }; goals: FinanceGoal[]; onClose: () => void; onSave: (destination: 'next_period' | 'goal' | 'savings_fund' | 'available', goalId?: string) => Promise<void> }) {
+  const remaining = performance?.remainingCents ?? budget.plannedAmountCents
+  const exceeded = remaining < 0
+  const [destination, setDestination] = useState<'next_period' | 'goal' | 'savings_fund' | 'available'>(exceeded ? 'available' : 'next_period')
+  const [goalId, setGoalId] = useState(goals[0]?.id ?? '')
+  const [error, setError] = useState('')
+  const actual = performance?.actualCents ?? 0
+  const outcomeLabel = exceeded ? 'Exceso registrado' : 'Sobrante disponible'
+  const periodLabel = budget.periodStart && budget.periodEnd
+    ? `${formatFinanceDate(budget.periodStart)} — ${formatFinanceDate(budget.periodEnd)}`
+    : 'Periodo que estás por cerrar'
 
-function RecurringDialog({ initial, editMode = 'period', occurrence, period, suggestedDate, presetType, accounts, categories, onClose, onSave }: {
+  return <Modal open title="Cierre de quincena" panelClassName={`finance-budget-close-modal${exceeded ? ' finance-budget-close-modal--exceeded' : ''}`} onClose={onClose}>
+    <form className="finance-form finance-close-form" onSubmit={async (event) => {
+      event.preventDefault()
+      const effectiveDestination = exceeded ? 'available' : destination
+      if (effectiveDestination === 'goal' && !goalId) return setError('Selecciona una meta.')
+      try {
+        await onSave(effectiveDestination, effectiveDestination === 'goal' ? goalId : undefined)
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'No se pudo cerrar el periodo.')
+      }
+    }}>
+      <div className="finance-close-intro">
+        <span>Resumen del periodo</span>
+        <p>{periodLabel}</p>
+      </div>
+
+      <div className="finance-close-summary" aria-label="Resumen del cierre">
+        <div><span>Presupuesto</span><strong>{formatMxn(budget.plannedAmountCents)}</strong></div>
+        <div><span>Gastado</span><strong>{formatMxn(actual)}</strong></div>
+        <div className={exceeded ? 'finance-close-summary__result finance-close-summary__result--negative' : 'finance-close-summary__result'}><span>{exceeded ? 'Exceso' : 'Sobrante'}</span><strong>{formatMxn(Math.abs(remaining))}</strong></div>
+      </div>
+
+      <section className="finance-close-outcome" aria-live="polite">
+        <span>{outcomeLabel}</span>
+        <strong>{exceeded ? 'Esta quincena superó el límite planeado.' : 'Esta quincena quedó dentro del límite planeado.'}</strong>
+        <p>{exceeded
+          ? 'El exceso queda registrado en este periodo. La siguiente quincena se crea con tu presupuesto base, sin arrastrar deuda ni reducir su límite.'
+          : 'Elige el destino del sobrante antes de crear automáticamente la siguiente quincena con tu mismo presupuesto base.'}
+        </p>
+      </section>
+
+      {!exceeded && <div className="finance-close-options">
+        <label>Destino del sobrante
+          <select value={destination} onChange={(event) => setDestination(event.target.value as typeof destination)}>
+            <option value="next_period">Sumarlo al límite del siguiente periodo</option>
+            <option value="goal">Aportarlo a una meta</option>
+            <option value="savings_fund">Aportarlo al fondo de ahorro</option>
+            <option value="available">Dejarlo disponible</option>
+          </select>
+        </label>
+        {destination === 'goal' && <label>Meta
+          <select value={goalId} onChange={(event) => setGoalId(event.target.value)}>{goals.map((goal) => <option key={goal.id} value={goal.id}>{goal.name}</option>)}</select>
+        </label>}
+      </div>}
+
+      <ErrorText value={error} />
+      <div className="modal-actions finance-close-actions">
+        <Button type="button" variant="ghost" onClick={onClose}>Ahora no</Button>
+        <Button type="submit">Confirmar cierre</Button>
+      </div>
+    </form>
+  </Modal>
+}
+
+function RecurringDialog({ initial, editMode = 'period', occurrence, period, suggestedDate, presetType, accounts, categories, onClose, onOpenTemplate, onPostpone, onSkip, onToggleActive, onRevert, onSave }: {
   initial?: FinanceRecurringTransaction
   editMode?: 'period' | 'template'
   occurrence?: FinanceRecurringOccurrence
@@ -660,6 +986,11 @@ function RecurringDialog({ initial, editMode = 'period', occurrence, period, sug
   accounts: FinanceAccount[]
   categories: { id: string; name: string; type: string }[]
   onClose: () => void
+  onOpenTemplate?: () => void
+  onPostpone?: () => void
+  onSkip?: () => void
+  onToggleActive?: () => void
+  onRevert?: () => void
   onSave: (item: Omit<FinanceRecurringTransaction, 'createdAt' | 'updatedAt'>) => Promise<void>
 }) {
   const [description, setDescription] = useState(initial?.description ?? '')
@@ -695,6 +1026,7 @@ function RecurringDialog({ initial, editMode = 'period', occurrence, period, sug
         <label>Fecha del periodo<input required type="date" min={period} max={periodEnd} value={date} onChange={(event) => setDate(event.target.value)} /></label>
       </div>
       <p className="finance-form-hint">Este monto y esta fecha sólo se aplican a {periodLabel}. Los demás meses no cambiarán.</p>
+      <RecurringManagementTools item={initial} occurrence={occurrence} onOpenTemplate={onOpenTemplate} onPostpone={onPostpone} onSkip={onSkip} onToggleActive={onToggleActive} onRevert={onRevert} />
       <ErrorText value={error} /><div className="modal-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit">Guardar periodo</Button></div>
     </form></Modal>
   }
@@ -704,8 +1036,33 @@ function RecurringDialog({ initial, editMode = 'period', occurrence, period, sug
     <label>Cuenta<select value={accountId} onChange={(event) => setAccountId(event.target.value)}>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
     <label>Categoría<select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="">Selecciona</option>{categories.filter((item) => item.type === (type === 'income' ? 'income' : type === 'saving' ? 'saving' : type === 'debt_payment' ? 'debt' : 'expense')).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
     <div className="finance-form-grid"><label>Frecuencia<select value={frequency} onChange={(event) => setFrequency(event.target.value as FinanceRecurringTransaction['frequency'])}><option value="weekly">Semanal</option><option value="biweekly">Quincenal</option><option value="monthly">Mensual</option><option value="quarterly">Trimestral</option><option value="yearly">Anual</option></select></label><label>{initial ? 'Próxima fecha' : `Fecha de ${periodLabel}`}<input type="date" min={initial ? undefined : period} max={initial ? undefined : periodEnd} value={date} onChange={(event) => setDate(event.target.value)} /></label></div>
+    <RecurringManagementTools item={initial} occurrence={occurrence} onPostpone={onPostpone} onSkip={onSkip} onToggleActive={onToggleActive} onRevert={onRevert} />
     <ErrorText value={error} /><div className="modal-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit">Guardar</Button></div>
   </form></Modal>
+}
+
+function RecurringManagementTools({ item, occurrence, onOpenTemplate, onPostpone, onSkip, onToggleActive, onRevert }: {
+  item?: FinanceRecurringTransaction
+  occurrence?: FinanceRecurringOccurrence
+  onOpenTemplate?: () => void
+  onPostpone?: () => void
+  onSkip?: () => void
+  onToggleActive?: () => void
+  onRevert?: () => void
+}) {
+  if (!item) return null
+  const paid = occurrence?.status === 'paid'
+  const income = item.type === 'income' || item.type === 'refund'
+  return <section className="finance-recurring-tools" aria-label="Administrar recurrencia">
+    <span>Administrar recurrencia</span>
+    <div>
+      {onOpenTemplate && <Button type="button" variant="ghost" onClick={onOpenTemplate}>Editar programación</Button>}
+      {!paid && onPostpone && <Button type="button" variant="ghost" disabled={!item.isActive} onClick={onPostpone}>Posponer periodo</Button>}
+      {!paid && onSkip && <Button type="button" variant="ghost" disabled={!item.isActive} onClick={onSkip}>Omitir periodo</Button>}
+      {onToggleActive && <Button type="button" variant="ghost" onClick={onToggleActive}>{item.isActive ? 'Pausar recurrencia' : 'Reanudar recurrencia'}</Button>}
+      {paid && onRevert && <Button type="button" variant="ghost" onClick={onRevert}>{income ? 'Deshacer cobro' : 'Deshacer pago'}</Button>}
+    </div>
+  </section>
 }
 
 function GoalDialog({ initial, accounts, onClose, onSave }: { initial?: FinanceGoal; accounts: FinanceAccount[]; onClose: () => void; onSave: (item: Omit<FinanceGoal, 'createdAt' | 'updatedAt'>) => Promise<void> }) {

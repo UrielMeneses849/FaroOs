@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+  <shortcut android:shortcutId="quick_expense" android:enabled="true" android:icon="@drawable/ic_faro_orb" android:shortcutShortLabel="@string/shortcut_expense_short" android:shortcutLongLabel="@string/shortcut_expense_long">
+    <intent android:action="android.intent.action.VIEW" android:data="faro://quick/gasto" />
+  </shortcut>
+  <shortcut android:shortcutId="quick_task" android:enabled="true" android:icon="@drawable/ic_faro_orb" android:shortcutShortLabel="@string/shortcut_task_short" android:shortcutLongLabel="@string/shortcut_task_long">
+    <intent android:action="android.intent.action.VIEW" android:data="faro://quick/tarea" />
+  </shortcut>
+  <shortcut android:shortcutId="quick_event" android:enabled="true" android:icon="@drawable/ic_faro_orb" android:shortcutShortLabel="@string/shortcut_event_short" android:shortcutLongLabel="@string/shortcut_event_long">
+    <intent android:action="android.intent.action.VIEW" android:data="faro://quick/evento" />
+  </shortcut>
+  <shortcut android:shortcutId="quick_voice" android:enabled="true" android:icon="@drawable/ic_faro_orb" android:shortcutShortLabel="@string/shortcut_voice_short" android:shortcutLongLabel="@string/shortcut_voice_long">
+    <intent android:action="android.intent.action.VIEW" android:data="faro://voice" />
+  </shortcut>
+</shortcuts>

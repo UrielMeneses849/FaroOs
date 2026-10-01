@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useFaroStore } from './useFaroStore'
+
+afterEach(() => vi.useRealTimers())
 
 describe('flujos del backlog', () => {
   it('convierte una idea en tarea conservando identidad y creación', () => {
@@ -37,5 +39,18 @@ describe('flujos del backlog', () => {
     const task = useFaroStore.getState().tasks.find((item) => item.projectId === project?.id)
     useFaroStore.getState().deleteProject(project!.id)
     expect(useFaroStore.getState().tasks.find((item) => item.id === task?.id)).toMatchObject({ projectId: undefined })
+  })
+
+  it('asigna, limpia y reinicia completedAt al completar una tarea', () => {
+    const id = 'hotfix-completed-at'
+    useFaroStore.getState().createTask({ id, title: 'Política de limpieza', area: 'personal', status: 'todo', priority: 'medium', createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-01T00:00:00.000Z' })
+    vi.setSystemTime(new Date('2026-08-10T10:00:00.000Z'))
+    useFaroStore.getState().updateTask(id, { status: 'done' })
+    expect(useFaroStore.getState().tasks.find((task) => task.id === id)?.completedAt).toBe('2026-08-10T10:00:00.000Z')
+    useFaroStore.getState().updateTask(id, { status: 'doing' })
+    expect(useFaroStore.getState().tasks.find((task) => task.id === id)?.completedAt).toBeUndefined()
+    vi.setSystemTime(new Date('2026-08-11T10:00:00.000Z'))
+    useFaroStore.getState().updateTask(id, { status: 'done' })
+    expect(useFaroStore.getState().tasks.find((task) => task.id === id)?.completedAt).toBe('2026-08-11T10:00:00.000Z')
   })
 })

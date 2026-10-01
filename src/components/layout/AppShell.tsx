@@ -1,18 +1,29 @@
 import { LogOut, Menu, Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { allNavigationItems, settingsItem } from '../../app/navigation'
 import { QuickCaptureDialog } from '../../features/capture/QuickCaptureDialog'
 import { useAuth } from '../../hooks/auth'
 import { IconButton, Modal } from '../common'
 import { MobileNavigation } from './MobileNavigation'
 import { Sidebar } from './Sidebar'
+import { readSidebarPreferences, writeSidebarPreferences } from './sidebarState'
+import { isFaroDesktop } from '../../desktop/desktopBridge'
 
 export function AppShell() {
-  const [collapsed, setCollapsed] = useState(true)
+  const [sidebarPreferences, setSidebarPreferences] = useState(readSidebarPreferences)
   const [captureOpen, setCaptureOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const { signOut } = useAuth()
+  const { pathname } = useLocation()
+
+  const updateSidebarPreferences = (updater: (current: typeof sidebarPreferences) => typeof sidebarPreferences) => {
+    setSidebarPreferences((current) => {
+      const next = updater(current)
+      writeSidebarPreferences(next)
+      return next
+    })
+  }
 
   useEffect(() => {
     const openCapture = (event: KeyboardEvent) => {
@@ -25,10 +36,19 @@ export function AppShell() {
     return () => window.removeEventListener('keydown', openCapture)
   }, [])
 
+  const desktop = isFaroDesktop()
+  const visibleMobileItems = allNavigationItems.filter((item) => !item.desktopOnly || desktop)
+
   return (
-    <div className={`app-shell ${collapsed ? 'app-shell--collapsed' : ''}`}>
+    <div className="app-shell app-shell--sidebar-v2 app-shell--persistent-sidebar">
       <a className="skip-link" href="#main-content">Saltar al contenido</a>
-      <Sidebar collapsed={collapsed} onToggle={() => setCollapsed((value) => !value)} />
+      <Sidebar
+        openGroups={sidebarPreferences.openGroups}
+        onToggleGroup={(groupId) => updateSidebarPreferences((current) => ({
+          ...current,
+          openGroups: current.openGroups[groupId] ? {} : { [groupId]: true },
+        }))}
+      />
       <div className="app-body">
         <div className="mobile-topbar">
           <div className="brand brand--mobile"><div className="brand__mark" aria-hidden="true"><span /></div><strong>FARO</strong></div>
@@ -43,10 +63,10 @@ export function AppShell() {
       {captureOpen && <QuickCaptureDialog open onClose={() => setCaptureOpen(false)} />}
       <Modal open={menuOpen} title="Explorar FARO" onClose={() => setMenuOpen(false)}>
         <nav className="mobile-menu" aria-label="Todas las secciones">
-          {allNavigationItems.map(({ path, label, icon: Icon }) => (
-            <NavLink key={path} to={path} onClick={() => setMenuOpen(false)} className={location.pathname === path ? 'active' : ''}><Icon size={18} />{label}</NavLink>
+          {visibleMobileItems.map(({ route, label, icon: Icon }) => (
+            <NavLink key={route} to={route} onClick={() => setMenuOpen(false)} className={pathname === route ? 'active' : ''}><Icon size={18} />{label}</NavLink>
           ))}
-          <NavLink to={settingsItem.path} onClick={() => setMenuOpen(false)}><settingsItem.icon size={18} />Ajustes</NavLink>
+          <NavLink to={settingsItem.route} onClick={() => setMenuOpen(false)}><settingsItem.icon size={18} />Ajustes</NavLink>
           <button
             type="button"
             onClick={() => {

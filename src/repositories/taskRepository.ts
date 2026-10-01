@@ -27,6 +27,7 @@ export function taskFromRow(row: TaskRow): Task {
     dueDate: dueDate ?? undefined,
     dueAt: dueAt ?? undefined,
     estimatedMinutes: row.estimated_minutes ?? undefined,
+    completedAt: row.completed_at ?? undefined,
     sortOrder: row.sort_order,
     archivedAt: row.archived_at ?? undefined,
     workspaceId: row.workspace_id ?? undefined,
@@ -52,7 +53,7 @@ export function taskToInsert(task: Task, userId: string): TaskInsert {
     due_at: task.dueAt ?? task.dueDate ?? null,
     estimated_minutes: task.estimatedMinutes ?? null,
     sort_order: task.sortOrder ?? 0,
-    completed_at: task.status === 'done' ? task.updatedAt : null,
+    completed_at: task.status === 'done' ? task.completedAt ?? task.updatedAt : null,
     archived_at: task.archivedAt ?? null,
     created_at: task.createdAt,
     updated_at: task.updatedAt,
@@ -79,7 +80,7 @@ export function taskToUpdate(task: Task): TaskUpdate {
     due_at: task.dueAt ?? task.dueDate ?? null,
     estimated_minutes: task.estimatedMinutes ?? null,
     sort_order: task.sortOrder ?? 0,
-    completed_at: task.status === 'done' ? task.updatedAt : null,
+    completed_at: task.status === 'done' ? task.completedAt ?? task.updatedAt : null,
     archived_at: task.archivedAt ?? null,
     goal_id: task.goalId && isSupabaseId(task.goalId) ? task.goalId : null,
     project_id: task.projectId && isSupabaseProjectId(task.projectId)
@@ -164,16 +165,22 @@ export const taskRepository = {
 
     if (error) throw error
   },
-  async removeCompletedBefore(cutoff: string, userId: string): Promise<string[]> {
-    const { data, error } = await supabase
-      .from('tasks')
-      .delete()
-      .eq('user_id', userId)
-      .eq('status', 'done')
-      .lt('completed_at', cutoff)
-      .select('id')
+  async runSmartCleaner(userId: string): Promise<{ cleanedIds: string[]; scanned: number; eligible: number; cleaned: number; skippedMissingCompletedAt: number; errors: number }> {
+    // The RPC always scopes itself to auth.uid(); retaining userId here keeps the
+    // repository API explicit and prevents callers from assuming cross-user work.
+    void userId
+    const call = supabase.rpc.bind(supabase) as unknown as (name: string) => Promise<{ data: unknown; error: { message: string } | null }>
+    const { data, error } = await call('faro_task_smart_cleaner')
     if (error) throw error
-    return (data ?? []).map((item) => item.id)
+    const result = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+    return {
+      cleanedIds: Array.isArray(result.cleaned_ids) ? result.cleaned_ids.filter((id): id is string => typeof id === 'string') : [],
+      scanned: Number(result.scanned ?? 0),
+      eligible: Number(result.eligible ?? 0),
+      cleaned: Number(result.cleaned ?? 0),
+      skippedMissingCompletedAt: Number(result.skipped_missing_completed_at ?? 0),
+      errors: Number(result.errors ?? 0),
+    }
   },
   async toggleComplete(id: string, userId: string) {
     const task = await this.getById(id, userId)
@@ -186,16 +193,21 @@ export const taskRepository = {
     if (!task) throw new Error('La tarea ya no existe.')
     return this.update({ ...task, workspaceId, updatedAt: new Date().toISOString() }, userId)
   },
-  async updateSchedule(id: string, dueAt: string, estimatedMinutes: number | undefined, userId: string) {
+  async updateSchedule(id: string, dueAt: string | null, estimatedMinutes: number | undefined, userId: string) {
     const task = await this.getById(id, userId)
     if (!task) throw new Error('La tarea ya no existe.')
     return this.update({
       ...task,
-      dueAt: dueAt.includes('T') ? dueAt : undefined,
-      dueDate: dueAt.slice(0, 10),
+      dueAt: dueAt?.includes('T') ? dueAt : undefined,
+      dueDate: dueAt ? dueAt.slice(0, 10) : undefined,
       estimatedMinutes,
       updatedAt: new Date().toISOString(),
     }, userId)
+  },
+  async unschedule(id: string, userId: string) {
+    const task = await this.getById(id, userId)
+    if (!task) throw new Error('La tarea ya no existe.')
+    return this.update({ ...task, dueAt: undefined, dueDate: undefined, updatedAt: new Date().toISOString() }, userId)
   },
 }
 

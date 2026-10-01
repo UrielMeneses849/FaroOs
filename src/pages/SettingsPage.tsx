@@ -5,6 +5,9 @@ import { PageHeader } from '../components/layout'
 import { usePageCapture } from '../hooks/usePageCapture'
 import { createBackup, parseBackup } from '../lib/backup'
 import { useFaroStore } from '../store'
+import { isFaroDesktop } from '../desktop/desktopBridge'
+import { DesktopSettings } from '../desktop/DesktopSettings'
+import '../desktop/desktopSettings.css'
 
 export function SettingsPage() {
   const { capture } = usePageCapture()
@@ -47,6 +50,7 @@ export function SettingsPage() {
     {feedback && <div className={`settings-feedback settings-feedback--${feedback.type}`} role="status">{feedback.message}<button onClick={() => setFeedback(null)} aria-label="Cerrar mensaje">×</button></div>}
     <section className="settings-intro"><ShieldCheck /><div><h2>FARO protege cada capa.</h2><p>Supabase conserva los módulos conectados y el respaldo JSON protege el estado local restante. Las claves privadas viven sólo en funciones del servidor.</p></div></section>
     <section className="settings-group"><div className="settings-group__head"><DatabaseBackup /><div><h2>Respaldo y portabilidad</h2><p>Exporta todo FARO como JSON o recupera un respaldo validado.</p></div></div><div className="settings-actions"><div><strong>Exportar respaldo</strong><span>Incluye objetivos, tareas y todos tus registros personales.</span><Button variant="secondary" icon={<Download size={15} />} onClick={exportData}>Exportar JSON</Button></div><div><strong>Importar respaldo</strong><span>Reemplaza los datos actuales sólo si el archivo es válido.</span><input ref={inputRef} className="sr-only" type="file" accept="application/json,.json" onChange={importData} /><Button variant="secondary" icon={<Upload size={15} />} onClick={() => inputRef.current?.click()}>Elegir archivo</Button></div></div></section>
+    {isFaroDesktop() && <DesktopSettings />}
     <section className="settings-group"><div className="settings-group__head"><RefreshCcw /><div><h2>Datos de demostración</h2><p>Restaura la experiencia inicial de Uriel para explorar FARO.</p></div></div><div className="settings-single"><span>Esta acción reemplazará todos tus datos actuales.</span><Button variant="secondary" onClick={() => setRestoreOpen(true)}>Restaurar demo</Button></div></section>
     <section className="settings-group settings-danger"><div className="settings-group__head"><Trash2 /><div><h2>Borrar todos los datos</h2><p>Vacía las colecciones locales. Esta acción no se puede deshacer.</p></div></div><div className="settings-single"><span>Exporta un respaldo antes de continuar.</span><Button variant="danger" onClick={() => { setDeletePhrase(''); setDeleteOpen(true) }}>Borrar datos</Button></div></section>
     <ConfirmDialog open={restoreOpen} title="Restaurar datos demo" description="Tus datos actuales serán reemplazados por el conjunto de demostración." onClose={() => setRestoreOpen(false)} onConfirm={() => { restoreDemoData(); setRestoreOpen(false); setFeedback({ type: 'success', message: 'Datos demo restaurados.' }) }} />

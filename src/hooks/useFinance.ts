@@ -7,6 +7,8 @@ const emptyFinanceData: FinanceData = {
   accounts: [], categories: [], transactions: [], recurring: [],
   recurringOccurrences: [], budgets: [], goals: [], contributions: [],
   budgetClosures: [], savingsFundEntries: [], goalItems: [],
+  liquidityPreference: { minimumOperatingBufferCents: 1_500_000 },
+  liquiditySnapshots: [],
 }
 
 export function useFinance() {

@@ -1,5 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { corsHeaders, json } from '../_shared/http.ts'
+import { upsertFaroRequestMetric } from '../_shared/voice/observability/requestMetric.ts'
 
 const MAX_TEXT_LENGTH = 600
 const safeProviderBody = (value: unknown): unknown => {
@@ -37,13 +38,20 @@ Deno.serve(async (request) => {
     const requestedModel = body?.model === 'flash' ? 'flash' : 'current'
     const selectedModel = requestedModel === 'flash' ? 'eleven_flash_v2_5' : modelId
     const stream = body?.stream !== false
+    const requestId = crypto.randomUUID()
     const providerStartedAt = performance.now()
-    const provider = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}${stream ? '/stream' : ''}?output_format=mp3_44100_128${stream ? '&optimize_streaming_latency=2' : ''}`, {
-      method: 'POST',
-      headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
-      body: JSON.stringify({ text, model_id: selectedModel }),
-    })
+    let provider: Response
+    try {
+      provider = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}${stream ? '/stream' : ''}?output_format=mp3_44100_128${stream ? '&optimize_streaming_latency=2' : ''}`, {
+        method: 'POST', headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
+        body: JSON.stringify({ text, model_id: selectedModel }),
+      })
+    } catch (error) {
+      await recordSpeechMetric(db, user.id, requestId, selectedModel, performance.now() - providerStartedAt, false)
+      throw error
+    }
     if (!provider.ok || !provider.body) {
+      await recordSpeechMetric(db, user.id, requestId, selectedModel, performance.now() - providerStartedAt, false)
       const contentType = provider.headers.get('Content-Type')?.toLowerCase() ?? ''
       let providerBody: unknown
       try { providerBody = contentType.includes('application/json') ? await provider.json() : await provider.text() }
@@ -58,6 +66,8 @@ Deno.serve(async (request) => {
       })
       return json({ error: 'speech_provider_failed', providerStatus: provider.status, providerCode, providerMessage }, provider.status)
     }
+
+    await recordSpeechMetric(db, user.id, requestId, selectedModel, performance.now() - providerStartedAt, true)
 
     return new Response(provider.body, {
       status: 200,
@@ -75,3 +85,27 @@ Deno.serve(async (request) => {
     return json({ error: 'speech_failed', message: 'No fue posible generar la voz de FARO.' }, 500)
   }
 })
+
+async function recordSpeechMetric(fallbackDb: ReturnType<typeof createClient>, userId: string, requestId: string, model: string, elapsedMs: number, success: boolean) {
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  const url = Deno.env.get('SUPABASE_URL')
+  const db = serviceKey && url ? createClient(url, serviceKey) : fallbackDb
+  try {
+    await upsertFaroRequestMetric(db, userId, {
+      requestId, sessionId: null, source: 'voice', surface: 'web', pipeline: 'optimized',
+      decision: {
+        skill: 'unknown', intent: 'speech_synthesis', route: 'reasoning_model', confidence: 1,
+        provider: 'elevenlabs', model, reason: 'speech_provider',
+        tierRequested: 'premium', tierUsed: 'premium', escalated: false, fallbackReason: null,
+      },
+    }, {
+      module: 'assistant', skill: 'unknown', parsed_intent: 'speech_synthesis', used_llm: false,
+      status: success ? 'completed' : 'error', execution_status: success ? 'completed' : 'failed',
+      error_message: success ? undefined : 'speech_provider_failed',
+      timings: { totalLatencyMs: Math.round(elapsedMs * 100) / 100 },
+      provider_metadata: { provider: 'elevenlabs', model, ttsProvider: 'elevenlabs' },
+    })
+  } catch (error) {
+    console.error('FARO speech observability metric could not be persisted.', { name: error instanceof Error ? error.name : 'UnknownError' })
+  }
+}

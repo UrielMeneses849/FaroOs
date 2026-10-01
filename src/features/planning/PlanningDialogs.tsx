@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import { z } from 'zod'
 import { Button, Modal } from '../../components/common'
 import { StatusSelector } from '../../components/common/StatusSelector'
@@ -90,7 +90,7 @@ export function ProjectFormDialog({ open, initial, goalId: defaultGoalId, worksp
   </form></Modal>
 }
 
-export function TaskFormDialog({ open, initial, projectId: defaultProjectId, goalId: defaultGoalId, workspaceId: defaultWorkspaceId, dueAt: defaultDueAt, estimatedMinutes: defaultEstimatedMinutes, status: defaultStatus, onClose }: DialogProps<Task> & { projectId?: string; goalId?: string; workspaceId?: string; dueAt?: string; estimatedMinutes?: number; status?: TaskStatus }) {
+export function TaskFormDialog({ open, initial, projectId: defaultProjectId, goalId: defaultGoalId, workspaceId: defaultWorkspaceId, dueAt: defaultDueAt, estimatedMinutes: defaultEstimatedMinutes, status: defaultStatus, onSaved, onSavedError, onClose }: DialogProps<Task> & { projectId?: string; goalId?: string; workspaceId?: string; dueAt?: string; estimatedMinutes?: number; status?: TaskStatus; onSaved?: (task: Task) => void | Promise<void>; onSavedError?: (reason: unknown, task: Task) => void }) {
   const { data: workspaces, loading: workspacesLoading } = useWorkspaces()
   const projects = useFaroStore((state) => state.projects)
   const initialProjectId = initial?.projectId ?? defaultProjectId ?? ''
@@ -110,10 +110,13 @@ export function TaskFormDialog({ open, initial, projectId: defaultProjectId, goa
   const [blockerReason, setBlockerReason] = useState(initial?.blockerReason ?? '')
   const [pausedUntil, setPausedUntil] = useState(initial?.pausedUntil?.slice(0, 10) ?? '')
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const submissionRef = useRef(false)
   const create = useFaroStore((state) => state.createTask)
   const update = useFaroStore((state) => state.updateTask)
   const submit = (event: FormEvent) => {
     event.preventDefault()
+    if (submissionRef.current) return
     const parsed = titleSchema.safeParse(title)
     if (!parsed.success) { setError(parsed.error.issues[0].message); return }
     const selectedWorkspace = workspaceId || fallbackWorkspace
@@ -122,9 +125,31 @@ export function TaskFormDialog({ open, initial, projectId: defaultProjectId, goa
     const contextArea: LifeArea = workspaceName === 'nexvora' ? 'nexvora' : workspaceName === 'portfolio' ? 'portfolio' : initial?.area ?? 'personal'
     const relatedProject = projects.find((project) => project.id === initialProjectId && project.workspaceId === selectedWorkspace)
     const values = { title: parsed.data, description: description || undefined, notes: undefined, area: contextArea, status, priority, projectId: relatedProject?.id, goalId: relatedProject ? goalId || undefined : undefined, dueDate: dueDate || undefined, dueAt: dueDate && dueTime ? localDateTimeToTimestamp(dueDate, dueTime) : undefined, estimatedMinutes: Math.max(0, Number(estimatedMinutes) || 0), workspaceId: selectedWorkspace, blockerReason: status === 'blocked' ? blockerReason || undefined : undefined, pausedUntil: status === 'paused' ? pausedUntil || undefined : undefined }
-    if (initial) update(initial.id, values)
-    else { const timestamp = now(); create({ ...values, id: crypto.randomUUID(), createdAt: timestamp, updatedAt: timestamp }) }
-    onClose()
+    submissionRef.current = true
+    setSaving(true)
+    setError('')
+    try {
+      if (initial) update(initial.id, values)
+      else {
+        const timestamp = now()
+        const task = { ...values, id: crypto.randomUUID(), createdAt: timestamp, updatedAt: timestamp }
+        create(task)
+        // Calendar side effects (for example, a Focus block) continue in the
+        // background. The primary task already exists, so the modal must close
+        // immediately and must never expose a second enabled submit.
+        if (onSaved) void Promise.resolve()
+          .then(() => onSaved(task))
+          .catch((reason) => {
+            onSavedError?.(reason, task)
+            if (import.meta.env.DEV) console.error('[FARO task] Secondary save failed.', reason)
+          })
+      }
+      onClose()
+    } catch (reason) {
+      submissionRef.current = false
+      setSaving(false)
+      setError(reason instanceof Error ? reason.message : 'No se pudo guardar la tarea. Intenta nuevamente.')
+    }
   }
   return <Modal panelClassName="task-form-modal" open={open} title={initial ? 'Editar tarea' : 'Nueva tarea'} onClose={onClose}><form className="planning-form task-form" onSubmit={submit}>
     <label>Título<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} aria-invalid={Boolean(error)} />{error && <span className="field-error">{error}</span>}</label>
@@ -134,6 +159,6 @@ export function TaskFormDialog({ open, initial, projectId: defaultProjectId, goa
     <div className="planning-form__grid planning-form__grid--schedule"><TaskDatePicker value={dueDate} onChange={(value) => { setDueDate(value); if (!value) setDueTime('') }} /><label>Hora <span>opcional</span><input type="time" value={dueTime} onChange={(event) => setDueTime(event.target.value)} /></label><label>Estimación (min)<input type="number" min="0" step="5" value={estimatedMinutes} onChange={(event) => setEstimatedMinutes(event.target.value)} /></label></div>
     {status === 'blocked' && <label>Motivo de bloqueo<input value={blockerReason} onChange={(event) => setBlockerReason(event.target.value)} /></label>}
     {status === 'paused' && <TaskDatePicker label="Pausada hasta" value={pausedUntil} onChange={setPausedUntil} />}
-    <div className="modal-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit">{initial ? 'Guardar' : 'Crear tarea'}</Button></div>
+    <div className="modal-actions"><Button type="button" variant="ghost" disabled={saving} onClick={onClose}>Cancelar</Button><Button type="submit" loading={saving}>{saving ? initial ? 'Guardando…' : 'Creando…' : initial ? 'Guardar' : 'Crear tarea'}</Button></div>
   </form></Modal>
 }

@@ -1,0 +1,6 @@
+# Copy this file to local.properties. Do not commit your actual credentials.
+# The values are the same project URL and publishable/anon key that Web/Desktop use.
+# On this repository's local bootstrap, SDK lives in mobile/android/.sdk.
+sdk.dir=/absolute/path/to/FaroOS/mobile/android/.sdk
+SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+SUPABASE_PUBLISHABLE_KEY=sb_publishable_YOUR_KEY

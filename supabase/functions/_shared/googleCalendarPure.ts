@@ -10,6 +10,16 @@ export const googleReadOnlyScopes = [
   'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
 ] as const
 
+export type GoogleOAuthCompletionMode = 'web' | 'desktop'
+
+export function googleOAuthState(randomState: string, completionMode: GoogleOAuthCompletionMode) {
+  return completionMode === 'desktop' ? `desktop.${randomState}` : randomState
+}
+
+export function googleOAuthCompletionMode(state: string | null | undefined): GoogleOAuthCompletionMode {
+  return state?.startsWith('desktop.') ? 'desktop' : 'web'
+}
+
 export function calendarAppUrl(appUrl: string, result: 'connected' | 'error', reason?: string) {
   const normalizedBase = appUrl.endsWith('/') ? appUrl : `${appUrl}/`
   const url = new URL('calendar', normalizedBase)

@@ -12,6 +12,7 @@ const repositoryMocks = vi.hoisted(() => ({
   create: vi.fn(async (task) => task),
   update: vi.fn(async (task) => task),
   remove: vi.fn().mockResolvedValue(undefined),
+  runSmartCleaner: vi.fn().mockResolvedValue({ cleanedIds: [], scanned: 0, eligible: 0, cleaned: 0, skippedMissingCompletedAt: 0, errors: 0 }),
 }))
 
 const realtimeMocks = vi.hoisted(() => {
@@ -143,5 +144,31 @@ describe('TaskSyncProvider', () => {
 
     view.unmount()
     await waitFor(() => expect(realtimeMocks.removeChannel).toHaveBeenCalledWith(realtimeMocks.channel))
+  })
+
+  it('carga el Backlog aunque el Smart Cleaner opcional no esté disponible', async () => {
+    const id = '550e8400-e29b-41d4-a716-446655440000'
+    repositoryMocks.runSmartCleaner.mockRejectedValueOnce(new Error('RPC no disponible'))
+    repositoryMocks.list.mockResolvedValueOnce([{
+      id,
+      title: 'Tarea remota existente',
+      area: 'personal',
+      status: 'todo',
+      priority: 'medium',
+      workspaceId: 'workspace-1',
+      createdAt: '2026-08-16T12:00:00.000Z',
+      updatedAt: '2026-08-16T12:00:00.000Z',
+    }])
+
+    render(
+      <AuthProvider service={authService}>
+        <TaskSyncProvider><SyncProbe /></TaskSyncProvider>
+      </AuthProvider>,
+    )
+
+    expect(await screen.findByText('ready')).toBeInTheDocument()
+    expect(useFaroStore.getState().tasks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id, title: 'Tarea remota existente' }),
+    ]))
   })
 })

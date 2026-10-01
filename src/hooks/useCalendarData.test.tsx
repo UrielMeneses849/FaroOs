@@ -9,7 +9,10 @@ vi.mock('../store', () => ({ useFaroStore: (selector: (state: {tasks:never[];pro
 import { useCalendarData } from './useCalendarData'
 
 describe('useCalendarData refresh reactivo', () => {
+  let userSequence = 0
+
   beforeEach(() => {
+    mocks.user = { id: `user-${++userSequence}`, is_anonymous: true }
     mocks.getAll.mockReset().mockResolvedValue({ items: [], timezone: 'America/Mexico_City', omittedCount: 0 })
   })
 
@@ -19,5 +22,15 @@ describe('useCalendarData refresh reactivo', () => {
     const initialCalls = mocks.getAll.mock.calls.length
     act(() => window.dispatchEvent(new CustomEvent('faro:calendar-updated', { detail: { toolName: 'createCalendarEvent' } })))
     await waitFor(() => expect(mocks.getAll.mock.calls.length).toBeGreaterThan(initialCalls))
+  })
+
+  it('reutiliza los datos recientes al volver a montar Calendar', async () => {
+    const first = renderHook(() => useCalendarData())
+    await waitFor(() => expect(mocks.getAll).toHaveBeenCalledTimes(1))
+    first.unmount()
+
+    renderHook(() => useCalendarData())
+    await act(async () => { await Promise.resolve() })
+    expect(mocks.getAll).toHaveBeenCalledTimes(1)
   })
 })

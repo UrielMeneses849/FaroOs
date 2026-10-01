@@ -11,6 +11,14 @@ describe('FARO Voice contracts', () => {
     expect(value.message).toBe('Crea una tarea para hoy')
   })
 
+  it('separa la plataforma de la página para observabilidad productiva', () => {
+    const value = voiceActionSchema.parse({
+      requestId: '48e30c50-e4bb-44a0-bdeb-bf098b2c3547', source: 'voice', message: '¿Qué tengo mañana?',
+      surface: 'web', pageSurface: 'today',
+    })
+    expect(value).toMatchObject({ surface: 'web', pageSurface: 'today' })
+  })
+
   it('rejects empty requests', () => {
     expect(() => voiceActionSchema.parse({
       requestId: '48e30c50-e4bb-44a0-bdeb-bf098b2c3547',

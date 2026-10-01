@@ -1,13 +1,17 @@
 import { supabase } from '../lib/supabase/client'
+import { getConfiguredFaroVoiceAdapters, type AudioPlaybackAdapter } from '../core/voice/adapters'
 import type { FaroTtsModel } from '../features/voice/voiceSchemas'
+import { webAudioPlaybackAdapter } from '../features/voice/webVoiceAdapters'
 
 type SpeechDependencies = {
   getAccessToken: () => Promise<string>
   endpoint: string
-  fetch: typeof window.fetch
-  createAudio: (url: string) => HTMLAudioElement
-  createObjectURL: (value: Blob | MediaSource) => string
-  revokeObjectURL: (url: string) => void
+  fetch: typeof fetch
+  audioPlayback?: () => AudioPlaybackAdapter
+  /** Legacy injection shape kept for existing tests and embedders. */
+  createAudio?: (url: string) => HTMLAudioElement
+  createObjectURL?: (value: Blob | MediaSource) => string
+  revokeObjectURL?: (url: string) => void
 }
 
 export type SpeechPlaybackMode = 'auto' | 'stream' | 'blob'
@@ -56,6 +60,16 @@ export class SpeechService {
 
   constructor(private readonly dependencies: SpeechDependencies) {}
 
+  private audioPlayback(): AudioPlaybackAdapter {
+    if (this.dependencies.audioPlayback) return this.dependencies.audioPlayback()
+    if (!this.dependencies.createAudio || !this.dependencies.createObjectURL || !this.dependencies.revokeObjectURL) throw new Error('Falta un adapter de reproducción de audio.')
+    return {
+      id: 'legacy-browser-audio', supportsStreaming: () => false,
+      createAudio: this.dependencies.createAudio, createObjectURL: this.dependencies.createObjectURL, revokeObjectURL: this.dependencies.revokeObjectURL,
+      createMediaSource: () => new MediaSource(), stopFallback: () => undefined, speakFallback: () => false,
+    }
+  }
+
   async health(signal?: AbortSignal) {
     const token = await this.dependencies.getAccessToken()
     const response = await this.dependencies.fetch(this.dependencies.endpoint, {
@@ -70,7 +84,7 @@ export class SpeechService {
     this.audio?.pause(); this.audio?.removeAttribute('src'); this.audio?.load(); this.audio = undefined
     const reject = this.rejectPlayback; this.rejectPlayback = undefined
     if (reject) reject(abortError())
-    else if (this.objectUrl) this.dependencies.revokeObjectURL(this.objectUrl)
+    else if (this.objectUrl) this.audioPlayback().revokeObjectURL(this.objectUrl)
     this.objectUrl = undefined
   }
 
@@ -78,7 +92,7 @@ export class SpeechService {
     this.stop()
     const controller = new AbortController(); this.controller = controller
     const model = options.model ?? 'current'
-    const canStream = options.mode !== 'blob' && typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported?.('audio/mpeg')
+    const canStream = options.mode !== 'blob' && this.audioPlayback().supportsStreaming()
     try {
       if (canStream) {
         try { return await this.requestAndStream(text, model, controller) }
@@ -114,7 +128,7 @@ export class SpeechService {
     const { response, startedAt, ttsRequestMs, providerModel } = await this.request(text, model, false, controller)
     const { blob, firstByte } = await readAudioBlob(response, startedAt)
     if (controller.signal.aborted) throw abortError()
-    const objectUrl = this.dependencies.createObjectURL(blob); const audio = this.dependencies.createAudio(objectUrl)
+    const playback = this.audioPlayback(); const objectUrl = playback.createObjectURL(blob); const audio = playback.createAudio(objectUrl)
     this.objectUrl = objectUrl; this.audio = audio
     const audioPlaybackStartMs = await this.playToEnd(audio, startedAt, objectUrl)
     return { ttsRequestMs, ttsFirstByteMs: firstByte, audioPlaybackStartMs, ttsTotalMs: performance.now() - startedAt, mode: 'blob' as const, model, providerModel }
@@ -123,7 +137,7 @@ export class SpeechService {
   private async requestAndStream(text: string, model: FaroTtsModel, controller: AbortController) {
     const { response, startedAt, ttsRequestMs, providerModel } = await this.request(text, model, true, controller)
     if (!response.body) throw new Error('El navegador no recibió un stream de audio.')
-    const mediaSource = new MediaSource(); const objectUrl = this.dependencies.createObjectURL(mediaSource); const audio = this.dependencies.createAudio(objectUrl)
+    const playback = this.audioPlayback(); const mediaSource = playback.createMediaSource(); const objectUrl = playback.createObjectURL(mediaSource); const audio = playback.createAudio(objectUrl)
     this.objectUrl = objectUrl; this.audio = audio
     let ttsFirstByteMs = 0; let audioPlaybackStartMs = 0
     const ended = this.waitForEnd(audio, objectUrl)
@@ -157,7 +171,7 @@ export class SpeechService {
         if (settled) return; settled = true; this.rejectPlayback = undefined; audio.onended = null; audio.onerror = null
         if (this.audio === audio) this.audio = undefined
         if (this.objectUrl === objectUrl) this.objectUrl = undefined
-        this.dependencies.revokeObjectURL(objectUrl)
+        this.audioPlayback().revokeObjectURL(objectUrl)
         if (error) reject(error); else resolve()
       }
       this.rejectPlayback = (reason) => finish(reason)
@@ -174,7 +188,7 @@ export class SpeechService {
 
   private clearPlaybackOnly() {
     this.audio?.pause(); this.audio?.removeAttribute('src'); this.audio?.load(); this.audio = undefined
-    if (this.objectUrl) this.dependencies.revokeObjectURL(this.objectUrl)
+    if (this.objectUrl) this.audioPlayback().revokeObjectURL(this.objectUrl)
     this.objectUrl = undefined; this.rejectPlayback = undefined
   }
 }
@@ -196,6 +210,6 @@ async function readAudioBlob(response: Response, startedAt: number) {
 
 export const speechService = new SpeechService({
   getAccessToken: async () => { const { data: { session } } = await supabase.auth.getSession(); if (!session) throw new Error('Tu sesión de FARO expiró.'); return session.access_token },
-  endpoint: `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/faro-speech`, fetch: window.fetch.bind(window),
-  createAudio: (url) => new Audio(url), createObjectURL: (value) => URL.createObjectURL(value), revokeObjectURL: (url) => URL.revokeObjectURL(url),
+  endpoint: `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/faro-speech`, fetch: globalThis.fetch.bind(globalThis),
+  audioPlayback: () => getConfiguredFaroVoiceAdapters().audio ?? webAudioPlaybackAdapter,
 })
