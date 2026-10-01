@@ -706,9 +706,9 @@ function FinanceMetrics({ metrics, previous, hasPreviousData, midMonthProjection
 
 function PeriodFlowChart({ flow }: { flow: { incomeCents: number; expenseCents: number; netCents: number } }) {
   const rows = [
-    { name: 'Ingresos completados', value: flow.incomeCents, color: '#159151' },
-    { name: 'Gastos completados', value: -flow.expenseCents, color: '#ff343d' },
-    { name: 'Resultado neto', value: flow.netCents, color: '#1269e8' },
+    { name: 'Ingresos', value: flow.incomeCents, color: '#159151' },
+    { name: 'Gastos', value: -flow.expenseCents, color: '#ff343d' },
+    { name: 'Neto', value: flow.netCents, color: '#1269e8' },
   ]
   const compactAxis = (value: number) => {
     if (value === 0) return '0'

@@ -4859,7 +4859,11 @@ html[data-faro-window="mini"],html[data-faro-window="mini"] body{width:100%;min-
   #root .workspace-backlog .kanban-board { display:flex; width:100%; flex-direction:column; gap:12px; overflow:visible; }
   #root .workspace-backlog .kanban-column { width:100%!important; min-width:0!important; min-height:0; padding:10px 12px; }
   #root .workspace-backlog .kanban-column__list { max-height:none; padding:8px 0 0; overflow:visible; }
-  #root .workspace-backlog .kanban-card { min-height:0; padding:12px; }
+  #root .workspace-backlog .kanban-card { display:block; min-height:0; padding:12px; }
+  #root .workspace-backlog .kanban-card__grip { top:10px; left:8px; }
+  #root .workspace-backlog .kanban-card > strong { display:block; padding-left:22px; font-size:12px; line-height:1.45; }
+  #root .workspace-backlog .kanban-card__meta { margin-top:8px; padding-left:22px; }
+  #root .workspace-backlog .kanban-card footer { display:flex; margin-top:8px; padding-left:22px; }
 
   /* Calendar: real seven-column month, compact connection, usable filters. */
   #root .calendar-page { padding-top:20px; }
