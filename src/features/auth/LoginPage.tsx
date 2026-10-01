@@ -6,7 +6,7 @@ import { useAuth } from '../../hooks/auth'
 import { loginSchema, type LoginFields } from './loginSchema'
 
 interface LocationState {
-  from?: { pathname?: string }
+  from?: { pathname?: string; search?: string }
 }
 
 export function LoginPage() {
@@ -18,8 +18,8 @@ export function LoginPage() {
   const [feedback, setFeedback] = useState('')
   const [action, setAction] = useState<'signIn' | 'signUp' | 'testLab' | null>(null)
 
-  const destination =
-    (location.state as LocationState | null)?.from?.pathname ?? '/dashboard'
+  const from = (location.state as LocationState | null)?.from
+  const destination = from?.pathname ? `${from.pathname}${from.search ?? ''}` : '/dashboard'
 
   if (!authLoading && session) {
     return <Navigate to={destination} replace />

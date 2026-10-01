@@ -2,7 +2,7 @@ import { addDays, addMonths, endOfMonth, format, isSameDay, parseISO, subMonths 
 import { es } from 'date-fns/locale'
 import {
   ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight,
-  Ban, Calculator, CalendarDays, ChartNoAxesCombined, Check, Clock3, Copy, CreditCard, FileDown, Landmark, Pencil, PiggyBank, Plus, RefreshCw, Repeat2,
+  Ban, Calculator, CalendarDays, ChartNoAxesCombined, Check, Clock3, Copy, CreditCard, FileDown, FileUp, Landmark, Pencil, PiggyBank, Plus, RefreshCw, Repeat2,
   RotateCcw, Target, Trash2, WalletCards,
 } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
@@ -11,6 +11,7 @@ import { Button, ConfirmDialog, EmptyState, Modal, ProgressBar } from '../compon
 import { PageHeader } from '../components/layout'
 import { ExpenseCategoryDonut } from '../features/finance/ExpenseCategoryDonut'
 import { FinanceLiquidityRadar } from '../features/finance/FinanceLiquidityRadar'
+import { SharedReceiptDialog } from '../features/finance/SharedReceiptDialog'
 import {
   financeAccountSchema, financeBudgetSchema, financeGoalSchema, financeTransactionSchema,
 } from '../features/finance/financeSchemas'
@@ -85,16 +86,47 @@ export function FinancePage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [accountFilter, setAccountFilter] = useState('all')
   const [feedback, setFeedback] = useState('')
+  const [sharedReceipt, setSharedReceipt] = useState<File>()
+  const [sharePending, setSharePending] = useState(() => new URLSearchParams(window.location.search).has('sharedReceipt'))
+  const receiptInputRef = useRef<HTMLInputElement>(null)
   const activeAccounts = data.accounts.filter((item) => item.isActive)
+
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    const token = url.searchParams.get('sharedReceipt')
+    const receiptError = url.searchParams.get('receiptError')
+    if (!token && !receiptError) return
+    url.searchParams.delete('sharedReceipt')
+    url.searchParams.delete('receiptError')
+    window.history.replaceState(window.history.state, '', url)
+    if (receiptError) {
+      queueMicrotask(() => setFeedback('El archivo compartido no es una imagen compatible o no pudo abrirse.'))
+      return
+    }
+    void (async () => {
+      try {
+        const cache = await caches.open('faro-shared-receipts-v1')
+        const key = new URL(`${import.meta.env.BASE_URL}__receipt/${token}`, window.location.origin)
+        const response = await cache.match(key.href)
+        if (!response) throw new Error('No encontré el comprobante compartido. Intenta compartirlo de nuevo.')
+        const blob = await response.blob()
+        const name = decodeURIComponent(response.headers.get('X-Faro-File-Name') || 'comprobante.png')
+        await cache.delete(key.href)
+        setSharedReceipt(new File([blob], name, { type: blob.type || 'image/png' }))
+      } catch (reason) {
+        setFeedback(reason instanceof Error ? reason.message : 'No pude abrir el comprobante.')
+      } finally { setSharePending(false) }
+    })()
+  }, [])
 
   useEffect(() => {
     if (!feedback) return
     const timeout = window.setTimeout(() => setFeedback(''), 3000)
     return () => window.clearTimeout(timeout)
   }, [feedback])
-  useEffect(()=>{if(loading||dialog)return;const candidate=data.budgets.find(item=>(item.periodEnd??item.month)<format(new Date(),'yyyy-MM-dd')&&!dismissedBudgetIds.includes(item.id)&&!data.budgetClosures.some(closure=>closure.budgetId===item.id));if(candidate)queueMicrotask(()=>{setClosingBudget(candidate);setDialog('budgetClose')})},[data.budgetClosures,data.budgets,dialog,dismissedBudgetIds,loading])
+  useEffect(()=>{if(loading||dialog||sharedReceipt||sharePending)return;const candidate=data.budgets.find(item=>(item.periodEnd??item.month)<format(new Date(),'yyyy-MM-dd')&&!dismissedBudgetIds.includes(item.id)&&!data.budgetClosures.some(closure=>closure.budgetId===item.id));if(candidate)queueMicrotask(()=>{setClosingBudget(candidate);setDialog('budgetClose')})},[data.budgetClosures,data.budgets,dialog,dismissedBudgetIds,loading,sharedReceipt,sharePending])
   useEffect(() => {
-    if (loading || dialog || !user || monthKey(month) !== monthKey(new Date())) return
+    if (loading || dialog || sharedReceipt || sharePending || !user || monthKey(month) !== monthKey(new Date())) return
     const today = format(new Date(), 'yyyy-MM-dd')
     const half = today.slice(-2) <= '15' ? 'q1' : 'q2'
     const period = fortnightPeriodForMonth(monthKey(month), half)
@@ -108,7 +140,7 @@ export function FinancePage() {
       setBudgetHalfToEdit(half)
       setDialog('budget')
     })
-  }, [data.budgets, data.categories, dialog, loading, month, user])
+  }, [data.budgets, data.categories, dialog, loading, month, sharedReceipt, sharePending, user])
 
   const metrics = useMemo(() => calculateFinanceMetrics(data, month), [data, month])
   const projectionBreakdown = useMemo(() => financeProjectionBreakdown(data, month), [data, month])
@@ -493,7 +525,9 @@ export function FinancePage() {
     <aside className="finance-side-kpis"><FinanceMetrics metrics={metrics} previous={previous} hasPreviousData={hasPreviousData} midMonthProjection={midMonthProjection} projection={baselineLiquidityProjection} projectionBreakdown={projectionBreakdown} month={month} /></aside>
     </div>
 
-    {dialog === 'movementMenu' && <MovementMenu canTransfer={activeAccounts.length > 1} onClose={() => setDialog(null)} onSelect={startMovement} />}
+    <input ref={receiptInputRef} className="finance-receipt-input" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Importar comprobante" onChange={(event) => { const file = event.target.files?.[0]; if (file) setSharedReceipt(file); event.target.value = '' }} />
+    {dialog === 'movementMenu' && <MovementMenu canTransfer={activeAccounts.length > 1} onClose={() => setDialog(null)} onSelect={startMovement} onImport={() => { setDialog(null); receiptInputRef.current?.click() }} />}
+    {sharedReceipt && <SharedReceiptDialog file={sharedReceipt} accounts={activeAccounts} categories={data.categories} budgets={data.budgets} onClose={() => setSharedReceipt(undefined)} onSave={async (item) => { if (!user) throw new Error('Inicia sesión para guardar el gasto.'); await financeTransactionRepository.save(item, user.id); setSharedReceipt(undefined); await finish('Gasto capturado desde el comprobante.') }} />}
     {dialog === 'transaction' && <TransactionDialog initial={editingTransaction} preset={movementPreset} accounts={data.accounts.filter((item) => item.isActive)} categories={data.categories.filter((item) => item.isActive)} budgets={data.budgets} onClose={() => { setDialog(null); setEditingTransaction(undefined); setMovementPreset(undefined) }} onCreateCategory={async (item) => { if (!user) throw new Error('Inicia sesión para crear una categoría.'); return financeCategoryRepository.save(item, user.id) }} onSave={async (item) => { if (!user) return; await financeTransactionRepository.save(item, user.id); setMovementPreset(undefined); await finish('Movimiento guardado.') }} />}
     {dialog === 'account' && <AccountDialog initial={editingAccount} onClose={() => { setDialog(null); setEditingAccount(undefined) }} onSave={async (item) => { if (!user) return; await financeAccountRepository.save(item, user.id); await finish('Cuenta guardada.') }} />}
     {dialog === 'budget' && <BudgetDialog data={data} month={monthKey(month)} initialHalf={budgetHalfToEdit} budgets={data.budgets} categories={data.categories.filter((item) => item.type === 'expense' && item.isActive)} onClose={() => { setDialog(null); setBudgetHalfToEdit(undefined) }} onSave={async (item) => { if (!user) return; await financeBudgetRepository.save(item, user.id); await finish('Presupuesto guardado.') }} />}
@@ -771,7 +805,7 @@ function movementDateLabel(value: string) {
   return format(date, 'EEEE d MMMM', { locale: es })
 }
 
-function MovementMenu({ canTransfer, onClose, onSelect }: { canTransfer: boolean; onClose: () => void; onSelect: (preset: MovementPreset) => void }) {
+function MovementMenu({ canTransfer, onClose, onSelect, onImport }: { canTransfer: boolean; onClose: () => void; onSelect: (preset: MovementPreset) => void; onImport: () => void }) {
   const options: Array<[string, MovementPreset, string]> = [
     ['Registrar ingreso', { type: 'income', categoryName: 'Sueldo' }, 'Dinero que entra'],
     ['Registrar gasto', { type: 'expense' }, 'Gasto fijo o variable'],
@@ -780,7 +814,7 @@ function MovementMenu({ canTransfer, onClose, onSelect }: { canTransfer: boolean
     ['Registrar aportación', { contribution: true }, 'Vincular ahorro a una meta financiera'],
     ['Transferencia', { type: 'transfer' }, 'Mover dinero entre cuentas'],
   ]
-  return <Modal open title="Nuevo movimiento" onClose={onClose}><div className="finance-movement-menu">{options.map(([label, preset, description]) => { const disabled = (preset.type === 'transfer' && !canTransfer); return <button key={label} disabled={disabled} title={disabled ? 'Necesitas al menos dos cuentas activas para mover dinero entre ellas.' : undefined} onClick={() => onSelect(preset)}><span>{label}</span><small>{disabled ? 'Crea o restaura otra cuenta para transferir' : description}</small><ArrowRight size={15} /></button> })}</div></Modal>
+  return <Modal open title="Nuevo movimiento" onClose={onClose}><div className="finance-movement-menu">{options.map(([label, preset, description]) => { const disabled = (preset.type === 'transfer' && !canTransfer); return <button key={label} disabled={disabled} title={disabled ? 'Necesitas al menos dos cuentas activas para mover dinero entre ellas.' : undefined} onClick={() => onSelect(preset)}><span>{label}</span><small>{disabled ? 'Crea o restaura otra cuenta para transferir' : description}</small><ArrowRight size={15} /></button> })}<button type="button" onClick={onImport}><span><FileUp size={15} /> Importar comprobante</span><small>Lee una imagen de Nu y prepara el gasto</small><ArrowRight size={15} /></button></div></Modal>
 }
 
 function TransactionDialog({ initial, preset, accounts, categories, budgets, onClose, onCreateCategory, onSave }: { initial?: FinanceTransaction; preset?: MovementPreset; accounts: FinanceAccount[]; categories: FinanceCategory[]; budgets: Array<{id:string;name?:string;periodStart?:string;periodEnd?:string}>; onClose: () => void; onCreateCategory: (item: FinanceCategory) => Promise<FinanceCategory>; onSave: (item: Omit<FinanceTransaction, 'createdAt' | 'updatedAt'>) => Promise<void> }) {

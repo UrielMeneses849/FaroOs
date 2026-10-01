@@ -4731,3 +4731,191 @@ html[data-faro-window="mini"],html[data-faro-window="mini"] body{width:100%;min-
   #root .dashboard-ops .ops-finance { overflow:visible; height:auto; }
   .dashboard-ops .finance-side-recent__list { max-height:520px; }
 }
+
+/* Mobile PWA: let the document scroll, keep the bottom navigation clear, and
+   replace desktop's fixed workspaces with compact, readable touch surfaces. */
+@media (max-width:900px) {
+  .app-shell:has(.finance-os),
+  .app-shell:has(.calendar-page),
+  .app-shell:has(.workspace-backlog),
+  .app-shell:has(.finance-os) .app-body,
+  .app-shell:has(.calendar-page) .app-body,
+  .app-shell:has(.workspace-backlog) .app-body,
+  .app-shell:has(.finance-os) .main-content,
+  .app-shell:has(.calendar-page) .main-content,
+  .app-shell:has(.workspace-backlog) .main-content {
+    height:auto;
+    min-height:100dvh;
+    overflow:visible;
+  }
+  .finance-os,.calendar-page,.workspace-backlog {
+    height:auto;
+    min-height:0;
+    overflow:visible;
+    padding-bottom:calc(104px + env(safe-area-inset-bottom));
+  }
+  .finance-os .finance-layout { display:flex; height:auto; min-height:0; flex-direction:column; overflow:visible; }
+  .finance-os .finance-content {
+    width:100%;
+    height:auto;
+    max-height:none;
+    flex:none;
+    overflow:visible!important;
+    scrollbar-gutter:auto;
+  }
+  .finance-os .finance-content > .finance-section,
+  .finance-os .finance-content > .finance-expenses-grid { height:auto!important; min-height:0; overflow:visible; }
+  .finance-os .finance-content .finance-section__head { position:static; }
+  .finance-os .finance-side-kpis { width:100%; min-width:0; }
+  .finance-os .finance-side-kpis .finance-kpis,
+  #root .finance-os .finance-side-kpis .finance-kpis--primary { width:100%; height:auto!important; min-height:0!important; }
+  .finance-os--transactions .finance-content > .finance-section:has(.finance-table--transactions) { height:auto!important; overflow:visible; }
+  .finance-os--transactions .finance-table--transactions { max-height:none; overflow-x:auto; overflow-y:visible; }
+  .finance-os .finance-expense-panel { height:auto; min-height:0; max-height:none; }
+  .finance-os .finance-expense-list { max-height:none; overflow:visible; }
+  .workspace-backlog .kanban-board { height:auto; min-height:0; flex:none; overflow:visible; }
+  .workspace-backlog .kanban-column { height:auto; min-height:0; overflow:visible; }
+  .workspace-backlog .kanban-column__list { height:auto; min-height:0; overflow:visible; }
+  .calendar-page .calendar-layout { height:auto; min-height:0; flex:none; }
+  .calendar-page .calendar-surface { height:auto; min-height:580px; flex:none; }
+}
+
+@media (max-width:760px) {
+  #root .page-header--faro { min-height:0; margin-bottom:16px; }
+  #root .page-header--faro.page-header--orb-only { display:block; grid-template-columns:none; }
+  #root .page-header--faro .page-header__orb { display:none; }
+  #root .page-header--faro h1 { font-size:clamp(28px,8vw,36px); line-height:1.08; }
+  #root .page-header--faro .eyebrow { font-size:10px; letter-spacing:.16em; }
+
+  /* Finanzas: period and actions stay in two compact rows; all ten tabs stay
+     reachable by horizontal swiping without widening the page. */
+  #root .finance-os { padding-top:20px; }
+  #root .finance-os > .page-header--with-trailing .page-header__copy { width:100%; }
+  #root .finance-os > .page-header--with-trailing .page-header__trailing { position:static; width:100%; margin-top:18px; transform:none; }
+  #root .finance-os > .page-header--with-trailing .finance-period--page-toolbar {
+    display:grid;
+    width:100%;
+    grid-template-columns:44px minmax(0,1fr) 44px 44px 44px;
+    gap:7px;
+    margin:0;
+  }
+  #root .finance-os .finance-period--page-toolbar > button { width:44px; height:44px; min-height:44px; border-color:#263748; border-radius:11px; color:#c6d4e7; background:#0b121b; }
+  #root .finance-os .finance-period--page-toolbar label { position:relative; min-width:0; min-height:44px; padding:0 8px; border-color:#263748; border-radius:11px; color:#e8eef9; background:#0b121b; font-size:11px; }
+  #root .finance-os .finance-period--page-toolbar label > svg { display:none; }
+  #root .finance-os .finance-period--page-toolbar label span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #root .finance-os .finance-period--page-toolbar input { position:absolute; inset:0; width:100%; height:100%; opacity:0; }
+  #root .finance-os .finance-tabs-row { display:flex; min-width:0; flex-direction:column; gap:12px; margin-bottom:14px; }
+  #root .finance-os .finance-tabs-row > .finance-tabs { display:flex; width:calc(100% + 32px); min-width:0; order:1; gap:3px; margin:0 -16px; padding:0 14px; overflow-x:auto; overscroll-behavior-inline:contain; scrollbar-width:none; }
+  #root .finance-os .finance-tabs-row > .finance-tabs::-webkit-scrollbar { display:none; }
+  #root .finance-os .finance-tabs-row .finance-tabs button { flex:0 0 auto; min-height:44px; padding:0 13px; font-size:12px; }
+  #root .finance-os .finance-tabs-row > .finance-new-movement { width:100%; min-height:48px; order:2; border-radius:12px; font-size:13px; }
+  #root .finance-os .finance-layout { display:flex; grid-template-columns:none!important; }
+  #root .finance-os .finance-side-kpis { order:-1; margin-bottom:14px; }
+  #root .finance-os .finance-side-kpis .finance-kpis { display:grid; grid-template-columns:minmax(0,1fr)!important; gap:9px; overflow:visible; border:0; background:transparent; }
+  #root .finance-os .finance-side-kpis .finance-kpi-group { display:grid; width:100%; grid-template-columns:repeat(2,minmax(0,1fr)); }
+  #root .finance-os .finance-side-kpis .finance-kpi-group > header { grid-column:1/-1; min-height:27px; }
+  #root .finance-os .finance-side-kpis .finance-kpi-group > .finance-kpi + .finance-kpi { border-top:0!important; border-left:1px solid rgba(51,68,86,.64)!important; }
+  #root .finance-os .finance-side-kpis .finance-kpi-group .finance-kpi svg { display:none; }
+  #root .finance-os .finance-projection-strip { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; overflow:visible; border:0; background:transparent; }
+  #root .finance-os .finance-side-kpis .finance-kpis article,
+  #root .finance-os .finance-projection-strip article { width:auto; min-width:0; min-height:98px; margin:0; padding:14px; overflow:hidden; border:1px solid #233348; border-radius:13px; background:linear-gradient(145deg,#0e1723,#080d14); }
+  #root .finance-os .finance-side-kpis .finance-kpis article strong,
+  #root .finance-os .finance-projection-strip article strong { overflow:visible; font-size:clamp(17px,5vw,23px); overflow-wrap:anywhere; }
+  #root .finance-os .finance-side-kpis .finance-kpis article span,
+  #root .finance-os .finance-projection-strip article span { font-size:10px; line-height:1.35; white-space:normal; }
+  #root .finance-os .finance-summary-grid { grid-template-columns:minmax(0,1fr); gap:12px; }
+  #root .finance-os .finance-summary-grid > section { max-height:none; margin:0; overflow:visible; }
+  #root .finance-os .finance-table--summary .finance-table__head { display:none; }
+  #root .finance-os .finance-table--summary .finance-table__row { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px 10px; padding:14px; }
+  #root .finance-os .finance-table--summary .finance-table__row strong { grid-column:1/-1; font-size:12px; }
+  #root .finance-os .finance-table--summary .finance-table__row span { min-width:0; font-size:11px; overflow-wrap:anywhere; }
+  #root .finance-os .finance-table--summary .finance-table__row span::before { display:block; margin-bottom:3px; color:#708198; font-size:9px; content:attr(data-label); }
+  #root .finance-os .finance-content > .finance-expenses-grid { display:flex; flex-direction:column; }
+  #root .finance-os .finance-content > .finance-expenses-grid .finance-expense-panel { height:auto; max-height:none; }
+  #root .finance-os .finance-content > .finance-expenses-grid .finance-expense-list { max-height:none; overflow:visible; }
+
+  /* Dashboard: money and movements first; capacity moves to the end. */
+  #root .dashboard-ops { height:auto; min-height:0; overflow:visible; padding-bottom:calc(104px + env(safe-area-inset-bottom)); }
+  #root .dashboard-ops .dashboard-command { display:flex; height:auto; min-height:0; flex-direction:column; gap:13px; overflow:visible; }
+  #root .dashboard-ops .dashboard-finance-sidebar { display:flex; flex-direction:column; order:-1; gap:13px; }
+  #root .dashboard-ops .dashboard-command__main { display:flex; flex-direction:column; gap:13px; overflow:visible; }
+  #root .dashboard-ops .dashboard-capacity-stack { order:10; }
+  #root .dashboard-ops .finance-side-balance { padding:20px; border-color:#2851a2; background:radial-gradient(circle at 100% 0%,rgba(32,91,218,.2),transparent 48%),#090f18; }
+  #root .dashboard-ops .finance-side-balance > strong { font-size:clamp(32px,10vw,45px); line-height:1.15; overflow-wrap:anywhere; }
+  #root .dashboard-ops .finance-side-recent__list { max-height:none; overflow:visible; }
+  #root .dashboard-ops .dashboard-capacity-stack { grid-template-columns:minmax(0,1fr); }
+  #root .dashboard-ops .dashboard-capacity-card { min-width:0; min-height:130px; padding:14px; }
+  #root .dashboard-ops .dashboard-capacity-card > strong { font-size:20px; }
+
+  /* Backlog: context selection is a swipeable chip rail, then actual tasks. */
+  #root .workspace-backlog { padding-top:20px; }
+  #root .workspace-backlog .workspace-overview-grid { display:flex; width:calc(100% + 32px); gap:8px; margin:0 -16px 16px; padding:0 16px 5px; overflow-x:auto; scrollbar-width:none; }
+  #root .workspace-backlog .workspace-overview-grid::-webkit-scrollbar { display:none; }
+  #root .workspace-backlog .workspace-overview-card { width:auto; min-width:112px; height:auto; min-height:66px; flex:0 0 auto; border-radius:11px; }
+  #root .workspace-backlog .workspace-overview-card__copy { display:grid; height:auto; gap:5px; padding:10px 12px; }
+  #root .workspace-backlog .workspace-overview-card__copy > span { font-size:11px; }
+  #root .workspace-backlog .workspace-overview-card__copy > div { gap:9px; margin:0; }
+  #root .workspace-backlog .workspace-overview-card__copy small { font-size:9px; }
+  #root .workspace-backlog .kanban-board { display:flex; width:100%; flex-direction:column; gap:12px; overflow:visible; }
+  #root .workspace-backlog .kanban-column { width:100%!important; min-width:0!important; min-height:0; padding:10px 12px; }
+  #root .workspace-backlog .kanban-column__list { max-height:none; padding:8px 0 0; overflow:visible; }
+  #root .workspace-backlog .kanban-card { min-height:0; padding:12px; }
+
+  /* Calendar: real seven-column month, compact connection, usable filters. */
+  #root .calendar-page { padding-top:20px; }
+  #root .calendar-page .calendar-layout { display:flex; flex-direction:column; gap:14px; }
+  #root .calendar-page .calendar-sidebar { display:flex; width:100%; flex-direction:column; gap:12px; }
+  #root .calendar-page .calendar-mini-month { display:block; width:100%; min-height:0; order:0; padding:16px; border:1px solid #27405b; border-radius:15px; background:#0b121b; }
+  #root .calendar-page .calendar-mini-month > header { min-height:36px; margin-bottom:11px; }
+  #root .calendar-page .calendar-mini-month > header > strong { color:#eef4ff; font-size:15px; letter-spacing:0; text-transform:capitalize; }
+  #root .calendar-page .calendar-mini-month > header button { width:36px; height:36px; border:1px solid #27384a; border-radius:9px; }
+  #root .calendar-page .calendar-mini-month__weekdays,
+  #root .calendar-page .calendar-mini-month__days { display:grid; width:100%; grid-template-columns:repeat(7,minmax(0,1fr)); gap:3px; }
+  #root .calendar-page .calendar-mini-month__weekdays span { padding:6px 0; color:#8497ae; font-size:10px; text-align:center; }
+  #root .calendar-page .calendar-mini-month__days button { display:grid; width:100%; height:39px; place-items:center; border:0; border-radius:10px; color:#e1eaf7; background:transparent; font-size:12px; }
+  #root .calendar-page .calendar-mini-month__days button.is-outside { color:#536275; }
+  #root .calendar-page .calendar-mini-month__days button.is-selected { color:#fff; background:#245fe0; box-shadow:0 5px 14px rgba(36,95,224,.3); }
+  #root .calendar-page .calendar-google { display:flex; min-height:0; order:2; flex-direction:row; flex-wrap:wrap; align-items:center; gap:10px; padding:12px 14px; border-radius:12px; }
+  #root .calendar-page .calendar-google__identity { display:flex; flex:1 1 160px; align-items:center; gap:10px; }
+  #root .calendar-page .calendar-google__identity > img { width:30px; height:30px; margin:0; }
+  #root .calendar-page .calendar-google__identity strong { font-size:11px; }
+  #root .calendar-page .calendar-google__identity span { margin-top:2px; font-size:9px; white-space:normal; }
+  #root .calendar-page .calendar-google > .button { min-height:34px; margin:0; font-size:10px; }
+  #root .calendar-page .calendar-workspace-filter { display:flex; width:100%; min-height:0; order:1; gap:6px; padding:0 0 4px; overflow-x:auto; border:0; background:transparent; scrollbar-width:none; }
+  #root .calendar-page .calendar-workspace-filter::-webkit-scrollbar { display:none; }
+  #root .calendar-page .calendar-workspace-filter > span { display:none; }
+  #root .calendar-page .calendar-workspace-filter button { display:flex; min-width:max-content; min-height:36px; gap:7px; padding:0 11px; border:1px solid #27384a; border-radius:999px; font-size:10px; }
+  #root .calendar-page .calendar-workspace-filter button.active { border-color:#3976ef; }
+  #root .calendar-page .calendar-workspace-filter b { font-size:10px; }
+  #root .calendar-page .calendar-surface { width:100%; min-height:600px; padding:12px; border-radius:14px; }
+  #root .calendar-page .fc .fc-toolbar { gap:8px; }
+  #root .calendar-page .fc .fc-toolbar-title { font-size:14px; line-height:1.3; }
+  #root .calendar-page .fc .fc-button { min-height:34px; font-size:10px; }
+}
+
+@media (max-width:380px) {
+  #root .finance-os > .page-header--with-trailing .finance-period--page-toolbar { grid-template-columns:40px minmax(0,1fr) 40px 40px 40px; gap:5px; }
+  #root .finance-os .finance-period--page-toolbar > button { width:40px; height:40px; min-height:40px; }
+  #root .dashboard-ops .dashboard-capacity-stack { grid-template-columns:1fr; }
+}
+
+.finance-receipt-input { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+.finance-movement-menu button > span:has(svg) { display:flex; align-items:center; gap:8px; }
+.shared-receipt-modal { width:min(520px,calc(100vw - 24px)); }
+.shared-receipt { display:grid; gap:15px; }
+.shared-receipt__intro > span { display:flex; align-items:center; gap:8px; color:#7fb5ff; font-size:10px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; }
+.shared-receipt__intro p { margin:7px 0 0; color:#a3b0c0; font-size:11px; line-height:1.55; }
+.shared-receipt__preview { display:grid; max-height:190px; place-items:center; overflow:hidden; border:1px solid #27384a; border-radius:11px; background:#111820; }
+.shared-receipt__preview img { width:auto; max-width:100%; max-height:190px; object-fit:contain; }
+.shared-receipt__scanning,.shared-receipt__notice { display:flex; align-items:center; gap:8px; margin:0; padding:9px 11px; border:1px solid #2b4772; border-radius:9px; color:#9ec1f7; background:#0b1b34; font-size:10px; line-height:1.45; }
+.shared-receipt__notice { border-color:#775b39; color:#f1bf7e; background:#241a10; }
+.shared-receipt__amount { display:grid; gap:5px; padding:13px 15px; border:1px solid #3263ba; border-radius:12px; background:linear-gradient(125deg,#10254d,#0a1527); }
+.shared-receipt__amount label { color:#a8c7ff; font-size:10px; font-weight:600; }
+.shared-receipt__amount input { width:100%; min-height:44px; padding:0; border:0; outline:0; color:#f5f8ff; background:transparent; font:600 30px Poppins,sans-serif; }
+.shared-receipt__fields { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.shared-receipt__fields label { display:grid; min-width:0; gap:6px; color:#aab7c8; font-size:10px; }
+.shared-receipt__fields input,.shared-receipt__fields select { width:100%; min-height:43px; padding:0 10px; border:1px solid #28394b; border-radius:9px; color:#f0f4fb; background:#0b121b; font:inherit; font-size:12px; }
+.shared-receipt__details { border-top:1px solid #233140; padding-top:9px; }
+.shared-receipt__details summary { color:#8baddf; font-size:10px; cursor:pointer; }
+.shared-receipt__details .shared-receipt__fields { margin-top:12px; }
+@media(max-width:540px){.shared-receipt__fields{grid-template-columns:1fr}.shared-receipt__preview{max-height:150px}.shared-receipt__preview img{max-height:150px}.shared-receipt-modal{max-height:calc(100dvh - 24px)}}

@@ -48,10 +48,21 @@ export default defineConfig(({ command, mode }) => {
             { name: 'Finanzas', short_name: 'Finanzas', url: `${webScope}finance` },
             { name: 'Calendario', short_name: 'Calendario', url: `${webScope}calendar` },
           ],
+          share_target: {
+            action: `${webScope}share-target`,
+            method: 'POST',
+            enctype: 'multipart/form-data',
+            params: {
+              title: 'title',
+              text: 'text',
+              files: [{ name: 'receipt', accept: ['image/png', 'image/jpeg', 'image/webp', '.png', '.jpg', '.jpeg', '.webp'] }],
+            },
+          },
         },
         workbox: {
           cleanupOutdatedCaches: true,
           clientsClaim: true,
+          importScripts: ['share-target-sw.js'],
           navigateFallback: 'index.html',
           globPatterns: ['**/*.{js,css,html,png,svg,ico,woff,woff2}'],
           // FARO contains private, live Supabase data. Cache only the compiled
