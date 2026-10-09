@@ -3,6 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import { navigationGroups, navigationItemIsActive, settingsItem, type NavigationGroup } from '../../app/navigation'
 import { useAuth } from '../../hooks/auth'
 import { isFaroDesktop } from '../../desktop/desktopBridge'
+import orbUrl from '../../assets/faro-orb-v1.png'
 
 interface SidebarProps {
   openGroups: Partial<Record<NavigationGroup['id'], boolean>>
@@ -17,8 +18,8 @@ export function Sidebar({ openGroups, onToggleGroup }: SidebarProps) {
   return (
     <aside className="sidebar sidebar--v2 sidebar--persistent">
       <div className="brand sidebar-brand">
-        <div className="brand__mark" aria-hidden="true"><span /></div>
-        <div className="sidebar-brand__copy"><strong>FARO</strong><small>Personal OS</small></div>
+        <img className="sidebar-brand__logo" src={orbUrl} alt="" aria-hidden="true" />
+        <div className="sidebar-brand__copy"><strong>FARO</strong><small>Personal operating system</small></div>
       </div>
 
       <nav className="sidebar__nav sidebar-nav-v2" aria-label="Navegación principal">
@@ -26,7 +27,7 @@ export function Sidebar({ openGroups, onToggleGroup }: SidebarProps) {
           const children = group.children.filter((item) => !item.desktopOnly || desktop)
           if (!children.length) return null
           const isGroupActive = children.some((item) => navigationItemIsActive(item, pathname))
-          const isExpanded = Boolean(openGroups[group.id])
+          const isExpanded = Boolean(openGroups[group.id]) || isGroupActive
           const GroupIcon = group.icon
 
           if (!group.collapsible) {

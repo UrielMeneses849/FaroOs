@@ -61,6 +61,7 @@ export function FinancePage() {
       ? stored as Panel : 'overview'
   })
   const [dialog, setDialog] = useState<Dialog>(null)
+  const [quickExpensePending, setQuickExpensePending] = useState(() => new URLSearchParams(window.location.search).get('quick') === 'expense')
   const [movementPreset, setMovementPreset] = useState<MovementPreset>()
   const [editingTransaction, setEditingTransaction] = useState<FinanceTransaction>()
   const [editingAccount, setEditingAccount] = useState<FinanceAccount>()
@@ -90,6 +91,22 @@ export function FinancePage() {
   const [sharePending, setSharePending] = useState(() => new URLSearchParams(window.location.search).has('sharedReceipt'))
   const receiptInputRef = useRef<HTMLInputElement>(null)
   const activeAccounts = data.accounts.filter((item) => item.isActive)
+
+  useEffect(() => {
+    if (!quickExpensePending || loading) return
+    const url = new URL(window.location.href)
+    url.searchParams.delete('quick')
+    window.history.replaceState(window.history.state, '', url)
+    queueMicrotask(() => {
+      setQuickExpensePending(false)
+      if (!activeAccounts.length) {
+        setFeedback('Crea una cuenta antes de registrar tu primer gasto.')
+        return
+      }
+      setMovementPreset({ type: 'expense', status: 'completed' })
+      setDialog('transaction')
+    })
+  }, [activeAccounts.length, loading, quickExpensePending])
 
   useEffect(() => {
     const url = new URL(window.location.href)
@@ -124,9 +141,9 @@ export function FinancePage() {
     const timeout = window.setTimeout(() => setFeedback(''), 3000)
     return () => window.clearTimeout(timeout)
   }, [feedback])
-  useEffect(()=>{if(loading||dialog||sharedReceipt||sharePending)return;const candidate=data.budgets.find(item=>(item.periodEnd??item.month)<format(new Date(),'yyyy-MM-dd')&&!dismissedBudgetIds.includes(item.id)&&!data.budgetClosures.some(closure=>closure.budgetId===item.id));if(candidate)queueMicrotask(()=>{setClosingBudget(candidate);setDialog('budgetClose')})},[data.budgetClosures,data.budgets,dialog,dismissedBudgetIds,loading,sharedReceipt,sharePending])
+  useEffect(()=>{if(loading||dialog||sharedReceipt||sharePending||quickExpensePending)return;const candidate=data.budgets.find(item=>(item.periodEnd??item.month)<format(new Date(),'yyyy-MM-dd')&&!dismissedBudgetIds.includes(item.id)&&!data.budgetClosures.some(closure=>closure.budgetId===item.id));if(candidate)queueMicrotask(()=>{setClosingBudget(candidate);setDialog('budgetClose')})},[data.budgetClosures,data.budgets,dialog,dismissedBudgetIds,loading,quickExpensePending,sharedReceipt,sharePending])
   useEffect(() => {
-    if (loading || dialog || sharedReceipt || sharePending || !user || monthKey(month) !== monthKey(new Date())) return
+    if (loading || dialog || sharedReceipt || sharePending || quickExpensePending || !user || monthKey(month) !== monthKey(new Date())) return
     const today = format(new Date(), 'yyyy-MM-dd')
     const half = today.slice(-2) <= '15' ? 'q1' : 'q2'
     const period = fortnightPeriodForMonth(monthKey(month), half)
@@ -140,7 +157,7 @@ export function FinancePage() {
       setBudgetHalfToEdit(half)
       setDialog('budget')
     })
-  }, [data.budgets, data.categories, dialog, loading, month, sharedReceipt, sharePending, user])
+  }, [data.budgets, data.categories, dialog, loading, month, quickExpensePending, sharedReceipt, sharePending, user])
 
   const metrics = useMemo(() => calculateFinanceMetrics(data, month), [data, month])
   const projectionBreakdown = useMemo(() => financeProjectionBreakdown(data, month), [data, month])
@@ -706,9 +723,9 @@ function FinanceMetrics({ metrics, previous, hasPreviousData, midMonthProjection
 
 function PeriodFlowChart({ flow }: { flow: { incomeCents: number; expenseCents: number; netCents: number } }) {
   const rows = [
-    { name: 'Ingresos', value: flow.incomeCents, color: '#159151' },
-    { name: 'Gastos', value: -flow.expenseCents, color: '#ff343d' },
-    { name: 'Neto', value: flow.netCents, color: '#1269e8' },
+    { name: 'Ingresos', value: flow.incomeCents, color: '#f1f1ef' },
+    { name: 'Gastos', value: -flow.expenseCents, color: '#858a91' },
+    { name: 'Neto', value: flow.netCents, color: '#c5c8cb' },
   ]
   const compactAxis = (value: number) => {
     if (value === 0) return '0'
@@ -718,11 +735,11 @@ function PeriodFlowChart({ flow }: { flow: { incomeCents: number; expenseCents: 
   return <div className="finance-period-flow__chart">
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={rows} margin={{ top: 26, right: 18, bottom: 8, left: 2 }}>
-        <CartesianGrid vertical={false} stroke="#17212b" />
+        <CartesianGrid vertical={false} stroke="#30343a" strokeDasharray="4 6" />
         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#a8b0bb', fontSize: 9 }} interval={0} />
         <YAxis axisLine={false} tickLine={false} width={42} tick={{ fill: '#9aa4b0', fontSize: 8 }} tickFormatter={compactAxis} />
-        <ReferenceLine y={0} stroke="#6e5930" strokeDasharray="4 4" />
-        <Tooltip cursor={{ fill: 'rgba(255,255,255,.025)' }} formatter={(value) => formatMxn(Number(value))} contentStyle={{ background: '#0d131a', border: '1px solid #263341', borderRadius: 8 }} labelStyle={{ color: '#f3f5f8' }} />
+        <ReferenceLine y={0} stroke="#62676e" strokeDasharray="4 4" />
+        <Tooltip cursor={{ fill: 'rgba(255,255,255,.035)' }} formatter={(value) => formatMxn(Number(value))} contentStyle={{ background: '#1d2024', border: '1px solid #44484e', borderRadius: 10 }} labelStyle={{ color: '#f3f3f1' }} />
         <Bar dataKey="value" maxBarSize={92} radius={[2, 2, 0, 0]}>
           {rows.map((row) => <Cell key={row.name} fill={row.color} />)}
           <LabelList dataKey="value" position="top" formatter={(value) => formatMxn(Number(value ?? 0))} fill="#e5ebf3" fontSize={9} />

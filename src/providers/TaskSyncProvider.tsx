@@ -13,6 +13,7 @@ import type { Task } from '../types'
 import { GoalSyncContext } from './GoalSyncContext'
 import { ProjectSyncContext } from './ProjectSyncContext'
 import { TaskSyncContext, type TaskSyncState } from './TaskSyncContext'
+import { shouldUploadMissingLocalTask } from './taskSyncPolicy'
 
 const taskChanged = (previous: Task, current: Task) =>
   previous.title !== current.title
@@ -119,7 +120,9 @@ export function TaskSyncProvider({ children }: { children: ReactNode }) {
         })
         const remoteIds = new Set(normalizedRemoteTasks.map((task) => task.id))
         const pendingLocalTasks = localTasks.filter(
-          (task) => isSupabaseId(task.id) && !remoteIds.has(task.id),
+          (task) => isSupabaseId(task.id)
+            && !remoteIds.has(task.id)
+            && shouldUploadMissingLocalTask(task),
         )
         const pendingRelationshipUpdates = normalizedRemoteTasks.filter((task) => {
           const original = remoteTasks.find((item) => item.id === task.id)

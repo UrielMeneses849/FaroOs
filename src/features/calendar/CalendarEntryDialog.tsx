@@ -15,13 +15,14 @@ interface Props {
   startsAt: string
   estimatedMinutes?: number
   workspaceId?: string
+  initialKind?: CreationKind
   onClose: (saved?: boolean, feedback?: string) => void
 }
 
-export function CalendarEntryDialog({ open, startsAt, estimatedMinutes = 30, workspaceId, onClose }: Props) {
+export function CalendarEntryDialog({ open, startsAt, estimatedMinutes = 30, workspaceId, initialKind = 'task', onClose }: Props) {
   const { user } = useAuth()
   const { data: workspaces } = useWorkspaces()
-  const [kind, setKind] = useState<CreationKind>('task')
+  const [kind, setKind] = useState<CreationKind>(initialKind)
   const [taskMode, setTaskMode] = useState(false)
   const [concentration, setConcentration] = useState(false)
   const parts = timestampToLocalParts(startsAt)

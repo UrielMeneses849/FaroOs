@@ -45,8 +45,8 @@ export default defineConfig(({ command, mode }) => {
           ],
           shortcuts: [
             { name: 'Hoy', short_name: 'Hoy', url: `${webScope}today` },
-            { name: 'Finanzas', short_name: 'Finanzas', url: `${webScope}finance` },
-            { name: 'Calendario', short_name: 'Calendario', url: `${webScope}calendar` },
+            { name: 'Registrar gasto', short_name: 'Gasto', description: 'Anota un gasto en pocos toques', url: `${webScope}finance?quick=expense` },
+            { name: 'Nuevo evento', short_name: 'Evento', description: 'Añade algo a tu calendario', url: `${webScope}calendar?quick=event` },
           ],
           share_target: {
             action: `${webScope}share-target`,

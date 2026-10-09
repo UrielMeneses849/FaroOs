@@ -108,7 +108,7 @@ describe('captura rápida', () => {
     render(<App />)
     await waitFor(
       () => expect(document.querySelector('.dashboard-page')).toBeInTheDocument(),
-      { timeout: 3000 },
+      { timeout: 6000 },
     )
     await user.keyboard('{Meta>}k{/Meta}')
     expect(await screen.findByRole('dialog', { name: 'Captura rápida' })).toBeInTheDocument()

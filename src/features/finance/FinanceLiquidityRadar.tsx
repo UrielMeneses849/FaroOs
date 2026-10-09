@@ -343,29 +343,29 @@ function LiquidityChart({ projection, bufferCents, q2ReleaseDate, onQ2ReleaseCli
         cx={props.cx}
         cy={props.cy}
         r={6}
-        fill="#0d2036"
-        stroke="#8f6cff"
+        fill="#202328"
+        stroke="#f0f0ed"
         strokeWidth={2.4}
         style={{ cursor: 'pointer' }}
         onClick={(event) => { event.stopPropagation(); onQ2ReleaseClick?.() }}
       />
     }
-    return <circle cx={props.cx} cy={props.cy} r={props.payload.isCurrent ? 5 : 3.4} fill={props.payload.isCurrent ? '#f5fbff' : '#dba44f'} stroke={props.payload.isCurrent ? '#3d8cff' : '#111a22'} strokeWidth={2} />
+    return <circle cx={props.cx} cy={props.cy} r={props.payload.isCurrent ? 5 : 3.4} fill={props.payload.isCurrent ? '#f7f7f5' : '#aeb2b7'} stroke={props.payload.isCurrent ? '#ffffff' : '#202328'} strokeWidth={2} />
   }
   return <div className="liquidity-radar__chart">
     <ResponsiveContainer width="100%" height="100%">
       <AreaChart data={rows} margin={{ top: 16, right: 18, bottom: 4, left: 10 }}>
-        <defs><linearGradient id="liquidity-radar-fill" x1="0" x2="0" y1="0" y2="1"><stop stopColor="#3f8dff" stopOpacity=".28" /><stop offset="1" stopColor="#3f8dff" stopOpacity="0" /></linearGradient></defs>
-        <CartesianGrid vertical={false} stroke="#172638" strokeDasharray="3 5" />
-        <ReferenceArea y1={buffer * LIQUIDITY_MODERATION_MULTIPLIER} y2={domain[1]} fill="#173628" fillOpacity={.2} />
-        <ReferenceArea y1={buffer} y2={buffer * LIQUIDITY_MODERATION_MULTIPLIER} fill="#4a4123" fillOpacity={.15} />
-        <ReferenceArea y1={domain[0]} y2={buffer} fill="#482126" fillOpacity={.15} />
+        <defs><linearGradient id="liquidity-radar-fill" x1="0" x2="0" y1="0" y2="1"><stop stopColor="#f2f2ef" stopOpacity=".18" /><stop offset="1" stopColor="#f2f2ef" stopOpacity="0" /></linearGradient></defs>
+        <CartesianGrid vertical={false} stroke="#30343a" strokeDasharray="3 5" />
+        <ReferenceArea y1={buffer * LIQUIDITY_MODERATION_MULTIPLIER} y2={domain[1]} fill="#f1f1ef" fillOpacity={.035} />
+        <ReferenceArea y1={buffer} y2={buffer * LIQUIDITY_MODERATION_MULTIPLIER} fill="#a9adb2" fillOpacity={.035} />
+        <ReferenceArea y1={domain[0]} y2={buffer} fill="#777c83" fillOpacity={.05} />
         <XAxis dataKey="date" axisLine={false} tickLine={false} minTickGap={26} tick={{ fill: '#7e91a7', fontSize: 9 }} tickFormatter={(date: string) => dateLabel(date, 'd')} />
         <YAxis domain={domain} axisLine={false} tickLine={false} width={56} tick={{ fill: '#7e91a7', fontSize: 9 }} tickFormatter={(value: number) => compactCurrency(Math.round(value * 100))} />
         <ReferenceLine y={buffer} stroke="#8796a7" strokeWidth={1.2} strokeDasharray="5 4" label={{ value: 'Colchón mínimo', fill: '#9ba8b7', fontSize: 9, position: 'insideTopLeft' }} />
-        {onQ2ReleaseClick && <ReferenceLine x={q2ReleaseDate} stroke="#8f6cff" strokeDasharray="3 4" strokeOpacity={.62} label={{ value: 'Q2 · simular', fill: '#ad94ff', fontSize: 8, position: 'insideTop' }} />}
+        {onQ2ReleaseClick && <ReferenceLine x={q2ReleaseDate} stroke="#e1e1df" strokeDasharray="3 4" strokeOpacity={.62} label={{ value: 'Q2 · simular', fill: '#c7c9cc', fontSize: 8, position: 'insideTop' }} />}
         <Tooltip content={<LiquidityTooltip periodStart={projection.periodStart} openingBalanceCents={projection.openingBalanceCents} openingIsProjected={projection.openingBalanceSource === 'prior_projected_close'} />} cursor={{ stroke: '#7795b5', strokeDasharray: '3 4' }} />
-        <Area type="monotone" dataKey="balance" stroke="#4d9cff" strokeWidth={2.6} fill="url(#liquidity-radar-fill)" dot={marker} activeDot={{ r: 5, fill: '#dcecff', stroke: '#3986ff', strokeWidth: 2 }} />
+        <Area type="monotone" dataKey="balance" stroke="#f2f2ef" strokeWidth={2.6} fill="url(#liquidity-radar-fill)" dot={marker} activeDot={{ r: 5, fill: '#111316', stroke: '#ffffff', strokeWidth: 2 }} />
       </AreaChart>
     </ResponsiveContainer>
   </div>

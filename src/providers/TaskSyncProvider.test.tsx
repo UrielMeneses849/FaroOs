@@ -6,6 +6,7 @@ import { useFaroStore } from '../store'
 import type { AuthService } from '../services'
 import { AuthProvider } from './AuthProvider'
 import { TaskSyncProvider } from './TaskSyncProvider'
+import { shouldUploadMissingLocalTask } from './taskSyncPolicy'
 
 const repositoryMocks = vi.hoisted(() => ({
   list: vi.fn().mockResolvedValue([]),
@@ -170,5 +171,34 @@ describe('TaskSyncProvider', () => {
     expect(useFaroStore.getState().tasks).toEqual(expect.arrayContaining([
       expect.objectContaining({ id, title: 'Tarea remota existente' }),
     ]))
+  })
+
+  it('no resucita una tarea completada antigua que el limpiador ya borró', async () => {
+    const oldCompletedTask = {
+      id: '550e8400-e29b-41d4-a716-446655440000',
+      title: 'Completada histórica',
+      area: 'personal' as const,
+      status: 'done' as const,
+      priority: 'medium' as const,
+      workspaceId: 'workspace-1',
+      completedAt: '2026-07-29T12:00:00.000Z',
+      createdAt: '2026-07-28T12:00:00.000Z',
+      updatedAt: '2026-07-29T12:00:00.000Z',
+    }
+    useFaroStore.setState({ tasks: [oldCompletedTask] })
+    repositoryMocks.list.mockResolvedValueOnce([])
+
+    render(
+      <AuthProvider service={authService}>
+        <TaskSyncProvider><SyncProbe /></TaskSyncProvider>
+      </AuthProvider>,
+    )
+
+    expect(await screen.findByText('ready')).toBeInTheDocument()
+    expect(shouldUploadMissingLocalTask(oldCompletedTask, new Date('2026-10-08T12:00:00.000Z').getTime())).toBe(false)
+    expect(repositoryMocks.create).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: oldCompletedTask.id }),
+      'user-1',
+    )
   })
 })

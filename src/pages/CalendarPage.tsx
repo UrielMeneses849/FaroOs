@@ -39,13 +39,13 @@ import type { Priority, Task, TaskStatus } from '../types'
 const googleCalendarLogoUrl = 'https://www.gstatic.com/calendar/images/dynamiclogo_2020q4/calendar_31_2x.png'
 const calendarWorkspaceOrder = ['BIMSA', 'BBVA', 'FARO OS', 'Nexvora', 'Portfolio', 'Portafolio', 'Personal']
 const calendarWorkspaceColors: Record<string, string> = {
-  BIMSA: '#ff9100',
-  BBVA: '#38aaf2',
-  'FARO OS': '#2868ff',
-  Nexvora: '#8b5cf6',
-  Portfolio: '#8b93a1',
-  Portafolio: '#8b93a1',
-  Personal: '#57a34b',
+  BIMSA: '#f3f3f1',
+  BBVA: '#d2d4d7',
+  'FARO OS': '#ffffff',
+  Nexvora: '#a9adb2',
+  Portfolio: '#858b92',
+  Portafolio: '#858b92',
+  Personal: '#686e76',
 }
 const calendarZoomStorageKey = 'faro:calendar-slot-height'
 
@@ -97,6 +97,8 @@ export function CalendarPage() {
   const [creatingAt, setCreatingAt] = useState<string>()
   const [creatingDuration, setCreatingDuration] = useState<number>()
   const [creatingWorkspace, setCreatingWorkspace] = useState<string>()
+  const [creatingKind, setCreatingKind] = useState<'event' | 'task'>('task')
+  const quickEventPending = useRef(new URLSearchParams(window.location.search).get('quick') === 'event')
   const [selected, setSelected] = useState<CalendarItem | null>(null)
   const [editing, setEditing] = useState<Task | null>(null)
   const [finishedTask, setFinishedTask] = useState<Task | null>(null)
@@ -132,6 +134,21 @@ export function CalendarPage() {
   const initialView = window.innerWidth < 700 ? 'listWeek' : window.innerWidth < 1020 ? 'timeGridDay' : 'rollingWeek'
 
   useEffect(() => { slotHeightRef.current = slotHeight }, [slotHeight])
+
+  useEffect(() => {
+    if (!quickEventPending.current || loading || !activeWorkspaces.length) return
+    quickEventPending.current = false
+    const url = new URL(window.location.href)
+    url.searchParams.delete('quick')
+    window.history.replaceState(window.history.state, '', url)
+    const start = new Date()
+    start.setSeconds(0, 0)
+    start.setMinutes(Math.ceil(start.getMinutes() / 30) * 30)
+    setCreatingKind('event')
+    setCreatingAt(start.toISOString())
+    setCreatingDuration(30)
+    setCreatingWorkspace(activeWorkspaces.find((workspace) => workspace.name === 'Personal')?.id ?? activeWorkspaces[0]?.id)
+  }, [activeWorkspaces, loading])
 
   useEffect(() => {
     const surface = calendarSurfaceRef.current
@@ -213,7 +230,7 @@ export function CalendarPage() {
     const workspaceName = workspace
       ? calendarWorkspaceLabel(workspace.name)
       : item.source === 'google' ? (item.calendarName ?? 'Google') : 'Sin workspace'
-    const eventColor = workspace ? (calendarWorkspaceColors[workspace.name] ?? workspace.color ?? '#2868ff') : '#4285f4'
+    const eventColor = workspace ? (calendarWorkspaceColors[workspace.name] ?? '#9ba0a7') : '#c7c9cc'
     return {
       id: item.id, title: item.title,
       start: item.allDay ? item.start : timestampToWallTime(item.start),
@@ -286,6 +303,7 @@ export function CalendarPage() {
       setFeedback('La fecha seleccionada no es válida.')
       return
     }
+    setCreatingKind('task')
     setCreatingAt(timestamp)
     setCreatingDuration(selection.allDay ? 30 : Math.max(15, differenceInMinutes(selection.end, selection.start)))
     const selectedWorkspace = workspaceIds.length === 1 ? workspaceIds[0] : activeWorkspaces.find((workspace) => workspace.name === 'Personal')?.id ?? activeWorkspaces[0]?.id
@@ -364,7 +382,7 @@ export function CalendarPage() {
         <FullCalendar ref={calendarRef} plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, listPlugin]} views={{ rollingWeek: { type: 'timeGrid', duration: { days: 7 }, dateIncrement: { days: 7 }, dateAlignment: 'day', visibleRange: rollingWeekRange } }} initialView={initialView} initialDate={new Date()} locale="es" timeZone="local" firstDay={1} height="100%" stickyHeaderDates expandRows={false} nowIndicator selectable selectMirror editable events={events} select={selectSlot} eventClick={clickEvent} eventDrop={drop} eventResize={resize} eventContent={calendarEventContent} datesSet={(dateInfo) => { const nextDate = calendarRef.current?.getApi().getDate() ?? new Date(); setFocusedDate(nextDate); setMiniMonth(nextDate); setVisibleRange({ start: dateInfo.start.toISOString(), end: dateInfo.end.toISOString() }) }} customButtons={{ faroToday: { text: 'Hoy', click: () => calendarRef.current?.getApi().gotoDate(new Date()) } }} headerToolbar={{ left: 'prev,next faroToday', center: 'title', right: 'rollingWeek,timeGridWeek,timeGridDay,listWeek' }} buttonText={{ rollingWeek: '7 días', month: 'Mes', week: 'Semana', day: 'Día', list: 'Agenda' }} titleFormat={calendarTitleFormat} dayHeaderContent={calendarDayHeader} dayMaxEvents={2} dayMaxEventRows={2} moreLinkClick="popover" slotMinTime="00:00:00" slotMaxTime="24:00:00" slotDuration="00:30:00" snapDuration="00:30:00" slotLabelInterval="01:00:00" scrollTime="00:00:00" scrollTimeReset allDaySlot={false} eventTimeFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }} />
       </section>
     </div>
-    {creatingAt && <CalendarEntryDialog open startsAt={creatingAt} estimatedMinutes={creatingDuration} workspaceId={creatingWorkspace} onClose={(saved, message) => { setCreatingAt(undefined); setCreatingDuration(undefined); setCreatingWorkspace(undefined); if (message) setFeedback(message); if (saved) { setLocalItems(null); queueMicrotask(() => void forceRefresh()) } }} />}
+    {creatingAt && <CalendarEntryDialog open startsAt={creatingAt} estimatedMinutes={creatingDuration} workspaceId={creatingWorkspace} initialKind={creatingKind} onClose={(saved, message) => { setCreatingAt(undefined); setCreatingDuration(undefined); setCreatingWorkspace(undefined); setCreatingKind('task'); if (message) setFeedback(message); if (saved) { setLocalItems(null); queueMicrotask(() => void forceRefresh()) } }} />}
     {editing && <TaskFormDialog open initial={editing} onClose={() => { setEditing(null); setSelected(null); setLocalItems(null); queueMicrotask(() => void forceRefresh()) }} />}
     {finishedTask && <Modal open title="¿Terminaste esta tarea?" onClose={() => setFinishedTask(null)}><div className="calendar-task-finish"><p>Terminó el bloque de <strong>{finishedTask.title}</strong>.</p><p>Si ya quedó, la marco como completada en Backlog. Si no, abrimos la tarea para moverla a otro horario.</p><div className="modal-actions"><Button variant="ghost" onClick={() => setFinishedTask(null)}>Después</Button><Button variant="secondary" onClick={() => { setEditing(finishedTask); setFinishedTask(null) }}>Reprogramar</Button><Button onClick={() => { updateTask(finishedTask.id, { status: 'done' }); setFinishedTask(null); setLocalItems(null) }}>Sí, completar</Button></div></div></Modal>}
     {readyFocus && <Modal open title="¿Listo para concentrarte?" onClose={() => setReadyFocus(null)}><div className="calendar-task-finish"><p>En breve comienza <strong>{readyFocus.title}</strong>.</p><p>Al iniciar, FARO activa el modo concentración durante la duración de este bloque.</p><div className="modal-actions"><Button variant="ghost" onClick={() => setReadyFocus(null)}>Ahora no</Button><Button onClick={() => { const task = tasks.find((item) => item.id === readyFocus.linkedTaskId); void startCalendarConcentration({ title: readyFocus.title, workspace: activeWorkspaces.find((workspace) => workspace.id === readyFocus.workspaceId)?.name ?? 'Concentración', taskId: task?.id, durationMinutes: Math.max(15, differenceInMinutes(new Date(readyFocus.end ?? readyFocus.start), new Date(readyFocus.start))) }); setReadyFocus(null) }}>Iniciar concentración</Button></div></div></Modal>}
