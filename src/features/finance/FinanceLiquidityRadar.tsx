@@ -100,12 +100,12 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
     return [...options.values()].sort((left, right) => Number(right.isPersonal) - Number(left.isPersonal)
       || left.label.localeCompare(right.label, 'es'))
   }, [data, month])
-  const includedBudgetCategoryIds = useMemo(() => budgetToggleOptions
-    .flatMap((option) => option.categoryId && !excludedBudgetCategoryIds.has(option.categoryId) ? [option.categoryId] : []),
-  [budgetToggleOptions, excludedBudgetCategoryIds])
   const canonicalBudgetCategoryIds = useMemo(() => [...new Set(canonicalFinanceBudgetGroups(data)
     .filter((group) => !group.isPersonal)
     .map((group) => group.budget.categoryId))], [data])
+  const includedBudgetCategoryIds = useMemo(() => canonicalBudgetCategoryIds
+    .filter((categoryId) => !excludedBudgetCategoryIds.has(categoryId)),
+  [canonicalBudgetCategoryIds, excludedBudgetCategoryIds])
   const hasActiveBudgetReservations = budgetToggleOptions.some((option) => option.isPersonal
     ? includePersonalBudgetReservations
     : Boolean(option.categoryId && !excludedBudgetCategoryIds.has(option.categoryId)))
@@ -117,7 +117,9 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
     simulation,
     includePersonalBudgetReservations,
     includedBudgetCategoryIds,
-  }), [availableTodayCents, data, includePersonalBudgetReservations, includedBudgetCategoryIds, month, simulation])
+    carryIncludePersonalBudgetReservations: true,
+    carryIncludedBudgetCategoryIds: canonicalBudgetCategoryIds,
+  }), [availableTodayCents, canonicalBudgetCategoryIds, data, includePersonalBudgetReservations, includedBudgetCategoryIds, month, simulation])
   const projection = useMemo(() => financeLiquidityProjection({
     data,
     month,
@@ -127,7 +129,9 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
     personalBudgetScenario,
     includePersonalBudgetReservations,
     includedBudgetCategoryIds,
-  }), [availableTodayCents, data, includePersonalBudgetReservations, includedBudgetCategoryIds, month, personalBudgetScenario, simulation])
+    carryIncludePersonalBudgetReservations: true,
+    carryIncludedBudgetCategoryIds: canonicalBudgetCategoryIds,
+  }), [availableTodayCents, canonicalBudgetCategoryIds, data, includePersonalBudgetReservations, includedBudgetCategoryIds, month, personalBudgetScenario, simulation])
   const comparisonProjection = useMemo(() => financeLiquidityProjection({
     data,
     month,
@@ -135,6 +139,8 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
     minimumOperatingBufferCents: data.liquidityPreference.minimumOperatingBufferCents,
     includePersonalBudgetReservations: true,
     includedBudgetCategoryIds: canonicalBudgetCategoryIds,
+    carryIncludePersonalBudgetReservations: true,
+    carryIncludedBudgetCategoryIds: canonicalBudgetCategoryIds,
   }), [availableTodayCents, canonicalBudgetCategoryIds, data, month])
   useEffect(() => {
     window.localStorage.setItem(reservationPreferenceKey, String(includePersonalBudgetReservations))
@@ -357,6 +363,7 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
       availableTodayCents={availableTodayCents}
       includePersonalBudgetReservations={includePersonalBudgetReservations}
       includedBudgetCategoryIds={includedBudgetCategoryIds}
+      carryIncludedBudgetCategoryIds={canonicalBudgetCategoryIds}
       onApply={(next) => { setSimulation(next); setShowSimulator(false) }}
     />
     {showBudgetScenario && <PersonalBudgetScenarioModal
@@ -368,6 +375,7 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
       availableTodayCents={availableTodayCents}
       includePersonalBudgetReservations
       includedBudgetCategoryIds={includedBudgetCategoryIds}
+      carryIncludedBudgetCategoryIds={canonicalBudgetCategoryIds}
       periodStart={q2Period.periodStart}
       periodEnd={q2Period.periodEnd}
       carryOverCents={q2CarryOverCents}
@@ -447,7 +455,7 @@ function LiquidityTooltip({ active, payload, periodStart, openingBalanceCents, o
   return <div className="liquidity-radar__tooltip"><strong>{dateLabel(row.date, "EEEE d 'de' MMM")}</strong><small>Saldo después</small><b>{formatMxn(Math.round(row.balance * 100))}</b>{(showOpening || row.events.length > 0) && <ul>{showOpening && <li><span>Disponible operativo inicial</span><em className="positive">{formatMxn(openingBalanceCents)}</em></li>}{row.events.map((event) => <li key={`${event.label}-${event.amountCents}`}><span>{event.label}{event.isOverdue ? ' · vencido' : ''}</span><em className={event.amountCents >= 0 ? 'positive' : 'negative'}>{event.amountCents >= 0 ? '+' : '−'}{formatMxn(Math.abs(event.amountCents))}</em></li>)}</ul>}</div>
 }
 
-function SimulationModal({ open, onClose, baseline, data, month, availableTodayCents, includePersonalBudgetReservations, includedBudgetCategoryIds, onApply }: {
+function SimulationModal({ open, onClose, baseline, data, month, availableTodayCents, includePersonalBudgetReservations, includedBudgetCategoryIds, carryIncludedBudgetCategoryIds, onApply }: {
   open: boolean
   onClose: () => void
   baseline: FinanceLiquidityProjection
@@ -456,6 +464,7 @@ function SimulationModal({ open, onClose, baseline, data, month, availableTodayC
   availableTodayCents: number
   includePersonalBudgetReservations: boolean
   includedBudgetCategoryIds: string[]
+  carryIncludedBudgetCategoryIds: string[]
   onApply: (simulation: LiquiditySimulationInput) => void
 }) {
   const [type, setType] = useState<'expense' | 'income'>('expense')
@@ -464,7 +473,7 @@ function SimulationModal({ open, onClose, baseline, data, month, availableTodayC
   const [description, setDescription] = useState('')
   const amountCents = Math.round(Number(amount || 0) * 100)
   const candidate = amountCents > 0 ? { type, amountCents, date, description } satisfies LiquiditySimulationInput : undefined
-  const preview = useMemo(() => candidate ? financeLiquidityProjection({ data, month, currentAvailableBalanceCents: availableTodayCents, minimumOperatingBufferCents: data.liquidityPreference.minimumOperatingBufferCents, simulation: candidate, includePersonalBudgetReservations, includedBudgetCategoryIds }) : undefined, [availableTodayCents, candidate, data, includePersonalBudgetReservations, includedBudgetCategoryIds, month])
+  const preview = useMemo(() => candidate ? financeLiquidityProjection({ data, month, currentAvailableBalanceCents: availableTodayCents, minimumOperatingBufferCents: data.liquidityPreference.minimumOperatingBufferCents, simulation: candidate, includePersonalBudgetReservations, includedBudgetCategoryIds, carryIncludePersonalBudgetReservations: true, carryIncludedBudgetCategoryIds }) : undefined, [availableTodayCents, candidate, carryIncludedBudgetCategoryIds, data, includePersonalBudgetReservations, includedBudgetCategoryIds, month])
   const submit = (event: FormEvent) => {
     event.preventDefault()
     if (candidate) onApply(candidate)
@@ -484,7 +493,7 @@ function SimulationModal({ open, onClose, baseline, data, month, availableTodayC
   </Modal>
 }
 
-function PersonalBudgetScenarioModal({ open, onClose, baseline, data, month, availableTodayCents, includePersonalBudgetReservations, includedBudgetCategoryIds, periodStart, periodEnd, carryOverCents, defaultTargetCents, onApply }: {
+function PersonalBudgetScenarioModal({ open, onClose, baseline, data, month, availableTodayCents, includePersonalBudgetReservations, includedBudgetCategoryIds, carryIncludedBudgetCategoryIds, periodStart, periodEnd, carryOverCents, defaultTargetCents, onApply }: {
   open: boolean
   onClose: () => void
   baseline: FinanceLiquidityProjection
@@ -493,6 +502,7 @@ function PersonalBudgetScenarioModal({ open, onClose, baseline, data, month, ava
   availableTodayCents: number
   includePersonalBudgetReservations: boolean
   includedBudgetCategoryIds: string[]
+  carryIncludedBudgetCategoryIds: string[]
   periodStart: string
   periodEnd: string
   carryOverCents: number
@@ -517,8 +527,10 @@ function PersonalBudgetScenarioModal({ open, onClose, baseline, data, month, ava
       personalBudgetScenario: { periodStart, periodEnd, targetAmountCents: previewTargetCents },
       includePersonalBudgetReservations,
       includedBudgetCategoryIds,
+      carryIncludePersonalBudgetReservations: true,
+      carryIncludedBudgetCategoryIds,
     })
-  }, [amount, availableTodayCents, data, includePersonalBudgetReservations, includedBudgetCategoryIds, month, periodEnd, periodStart])
+  }, [amount, availableTodayCents, carryIncludedBudgetCategoryIds, data, includePersonalBudgetReservations, includedBudgetCategoryIds, month, periodEnd, periodStart])
   const submit = (event: FormEvent) => {
     event.preventDefault()
     if (candidate) onApply(candidate)

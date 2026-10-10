@@ -360,6 +360,30 @@ describe('financeLiquidityProjection', () => {
     expect(january.openingBalanceSourcePeriod).toBe('2026-12-01')
   })
 
+  it('conserva las reservas de meses anteriores aunque el mes destino ya no tenga presupuesto', () => {
+    const data = financeData()
+    data.categories = [{ id: 'food', name: 'Salidas / Comidas', type: 'expense', isDefault: false, isActive: true }]
+    data.budgets = [{
+      id: 'aug-food', categoryId: 'food', month: '2026-08-01', plannedAmountCents: 300_000,
+      name: 'Salidas / Comidas', periodStart: '2026-08-01', periodEnd: '2026-08-15',
+      createdAt, updatedAt: createdAt,
+    }]
+
+    const september = financeLiquidityProjection({
+      data,
+      month: new Date(2026, 8, 1),
+      currentAvailableBalanceCents: 1_000_000,
+      minimumOperatingBufferCents: 0,
+      referenceDate: new Date(2026, 6, 20),
+      includedBudgetCategoryIds: [],
+      carryIncludedBudgetCategoryIds: ['food'],
+    })
+
+    expect(september.events).toEqual([])
+    expect(september.openingBalanceCents).toBe(700_000)
+    expect(september.closingBalanceCents).toBe(700_000)
+  })
+
   it('se reancla al saldo real cuando el mes proyectado se vuelve actual', () => {
     const data = financeData([
       movement({ id: 'sep-income', transactionDate: '2026-09-30', type: 'income', amountCents: 300_000 }),

@@ -72,6 +72,13 @@ export interface FinanceLiquidityProjectionInput {
   includePersonalBudgetReservations?: boolean
   /** Non-personal budget categories whose uncommitted remainder is reserved. */
   includedBudgetCategoryIds?: string[]
+  /**
+   * Canonical reserve policy used only while carrying preceding months into a
+   * future target. This keeps target-month switches and simulations from
+   * rewriting the closing balances that feed the selected period.
+   */
+  carryIncludePersonalBudgetReservations?: boolean
+  carryIncludedBudgetCategoryIds?: string[]
 }
 
 export interface FinanceLiquidityProjection {
@@ -483,11 +490,18 @@ export function financeLiquidityProjection(input: FinanceLiquidityProjectionInpu
   const targetMonth = startOfMonth(input.month)
   if (!isAfter(targetMonth, reference)) return projectFinanceLiquidityMonth(input)
 
+  const carryIncludePersonalBudgetReservations = input.carryIncludePersonalBudgetReservations
+    ?? input.includePersonalBudgetReservations
+  const carryIncludedBudgetCategoryIds = input.carryIncludedBudgetCategoryIds
+    ?? input.includedBudgetCategoryIds
+
   let projection = projectFinanceLiquidityMonth({
     ...input,
     month: startOfMonth(reference),
     simulation: undefined,
     personalBudgetScenario: undefined,
+    includePersonalBudgetReservations: carryIncludePersonalBudgetReservations,
+    includedBudgetCategoryIds: carryIncludedBudgetCategoryIds,
   })
   for (let cursor = addMonths(startOfMonth(reference), 1); !isAfter(cursor, targetMonth); cursor = addMonths(cursor, 1)) {
     const isTargetMonth = isSameMonth(cursor, targetMonth)
@@ -496,6 +510,12 @@ export function financeLiquidityProjection(input: FinanceLiquidityProjectionInpu
       month: cursor,
       simulation: isTargetMonth ? input.simulation : undefined,
       personalBudgetScenario: isTargetMonth ? input.personalBudgetScenario : undefined,
+      includePersonalBudgetReservations: isTargetMonth
+        ? input.includePersonalBudgetReservations
+        : carryIncludePersonalBudgetReservations,
+      includedBudgetCategoryIds: isTargetMonth
+        ? input.includedBudgetCategoryIds
+        : carryIncludedBudgetCategoryIds,
     }, projection.closingBalanceCents)
   }
 
