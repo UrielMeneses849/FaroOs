@@ -410,6 +410,11 @@ export const financeBudgetRepository = {
     throwIfError(error)
     return budgetFromRow(data!)
   },
+  async remove(id: string, userId: string) {
+    await assertFinanceUser(userId)
+    const { error } = await supabase.from('finance_budgets').delete().match({ id, user_id: userId })
+    throwIfError(error)
+  },
 }
 
 export const financeGoalRepository = {

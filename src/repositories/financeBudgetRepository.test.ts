@@ -4,9 +4,11 @@ const mocks = vi.hoisted(() => {
   const single = vi.fn()
   const select = vi.fn(() => ({ single }))
   const upsert = vi.fn(() => ({ select }))
-  const from = vi.fn(() => ({ upsert }))
+  const match = vi.fn()
+  const remove = vi.fn(() => ({ match }))
+  const from = vi.fn(() => ({ upsert, delete: remove }))
   const getSession = vi.fn()
-  return { from, getSession, select, single, upsert }
+  return { from, getSession, match, remove, select, single, upsert }
 })
 
 vi.mock('../lib/supabase/client', () => ({
@@ -31,6 +33,7 @@ describe('financeBudgetRepository', () => {
     vi.clearAllMocks()
     mocks.getSession.mockResolvedValue({ data: { session: { user: { id: 'user-1' } } }, error: null })
     mocks.single.mockResolvedValue({ data: savedBudget, error: null })
+    mocks.match.mockResolvedValue({ error: null })
   })
 
   it('guarda ambas quincenas del mismo mes con la identidad del período', async () => {
@@ -70,5 +73,12 @@ describe('financeBudgetRepository', () => {
     expect(() => throwIfError({
       code: '23505', message: 'duplicate key value violates unique constraint',
     })).toThrow('Ya existe un registro para estos datos.')
+  })
+
+  it('elimina únicamente el presupuesto del usuario autenticado', async () => {
+    await financeBudgetRepository.remove('budget-1', 'user-1')
+
+    expect(mocks.remove).toHaveBeenCalledOnce()
+    expect(mocks.match).toHaveBeenCalledWith({ id: 'budget-1', user_id: 'user-1' })
   })
 })
