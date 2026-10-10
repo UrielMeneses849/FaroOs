@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fortnightPeriodForDate, fortnightPeriodForMonth, nextFortnightPeriod, planFortnightClosure } from './financeBudgetCycle'
+import { budgetNameForCategory, fortnightPeriodForDate, fortnightPeriodForMonth, nextFortnightPeriod, planFortnightClosure } from './financeBudgetCycle'
 
 describe('financeBudgetCycle', () => {
   it('distingue ambas quincenas del mismo mes con períodos inequívocos', () => {
@@ -56,5 +56,10 @@ describe('financeBudgetCycle', () => {
       currentPeriodEnd: '2026-08-31', currentPlannedAmountCents: 100_000,
       spentCents: 25_000, destination: 'goal',
     })).toMatchObject({ carryOverCents: 0, nextPlannedAmountCents: 100_000 })
+  })
+
+  it('nombra el sobre personal sin convertir otras categorías en presupuesto personal', () => {
+    expect(budgetNameForCategory('Personal')).toBe('Gastos Personales')
+    expect(budgetNameForCategory('Compras')).toBe('Compras')
   })
 })

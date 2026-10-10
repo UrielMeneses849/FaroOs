@@ -210,6 +210,11 @@ button { color: inherit; } a { color: inherit; }
 .backlog-list__head { display: flex; height: 38px; align-items: center; justify-content: space-between; padding: 0 17px; border-bottom: 1px solid var(--border); color: #5e5e66; background: #0d0d10; font-size: 8px; }
 .backlog-list__head label { display: flex; align-items: center; gap: 8px; }
 input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--accent); }
+.finance-budget-carry { display:flex !important; flex-direction:row !important; align-items:flex-start; gap:10px; padding:12px; border:1px solid var(--border); border-radius:10px; background:var(--surface-elevated); cursor:pointer; }
+.finance-budget-carry input { flex:0 0 auto; margin-top:3px; }
+.finance-budget-carry span { display:grid; gap:3px; }
+.finance-budget-carry strong { color:var(--text-primary); font-size:12px; }
+.finance-budget-carry small { color:var(--text-secondary); font-size:10px; line-height:1.45; }
 .backlog-row { display: grid; grid-template-columns: 22px 56px minmax(0,1fr) auto; align-items: start; gap: 13px; min-height: 93px; padding: 16px 17px; border-bottom: 1px solid #1c1c20; transition: background .15s; }
 .backlog-row:last-child { border-bottom: 0; }.backlog-row:hover, .backlog-row--selected { background: #0f0f12; }.row-checkbox { padding-top: 3px; }
 .backlog-row__kind { padding-top: 3px; }.backlog-row__kind span { display: block; width: max-content; min-width: 45px; padding: 4px 7px; border-radius: 5px; color: #7690ff; background: rgba(36,87,255,.09); font-size: 8px; text-align: center; }.backlog-row__kind[data-kind="idea"] span { color: #d3a952; background: rgba(244,183,64,.08); }.backlog-row__kind[data-kind="goal"] span { color: #b782f0; background: rgba(178,112,255,.08); }.backlog-row__kind[data-kind="project"] span { color: #5dc89d; background: rgba(53,199,138,.08); }

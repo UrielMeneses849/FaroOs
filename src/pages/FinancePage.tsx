@@ -28,7 +28,7 @@ import {
   accountBalance, annualFinanceTotals, budgetPerformance, calculateFinanceMetrics, canRegisterEventualIncome, eventualIncomeTransactions, financePeriodFlow, financeProjectionBreakdown, financeSummary, personalBudgetCarryOverIntoPeriod, personalBudgetForDate, personalBudgetReservations,
   financeGoalProjections, formatFinanceDate, formatMxn, goalAvailableCents, goalProgress, goalSpentCents, goalTargetCents, monthKey, recurringAppliesToMonth, recurringExpectedDate, savingsFundMetrics,
 } from '../services/financeService'
-import { fortnightPeriodForMonth } from '../services/financeBudgetCycle'
+import { budgetNameForCategory, fortnightPeriodForMonth } from '../services/financeBudgetCycle'
 import { FINANCE_LIQUIDITY_PROJECTION_VERSION, financeLiquidityProjection } from '../services/financeLiquidityProjection'
 
 type Panel = 'overview' | 'advisor' | 'transactions' | 'income' | 'accounts' | 'budgets' | 'recurring' | 'savings' | 'fund' | 'goals'
@@ -69,6 +69,7 @@ export function FinancePage() {
   const [recurringEditMode, setRecurringEditMode] = useState<'period' | 'template'>('period')
   const [editingGoal, setEditingGoal] = useState<FinanceGoal>()
   const [budgetHalfToEdit, setBudgetHalfToEdit] = useState<'q1' | 'q2'>()
+  const [budgetCategoryToEdit, setBudgetCategoryToEdit] = useState<string>()
   const [selectedGoal, setSelectedGoal] = useState<FinanceGoal>()
   const [selectedGoalItem, setSelectedGoalItem] = useState<FinanceGoalItem>()
   const [deletingGoalItem, setDeletingGoalItem] = useState<FinanceGoalItem>()
@@ -490,7 +491,7 @@ export function FinancePage() {
       </article>)}</div>
     </section>}
 
-    {panel === 'budgets' && <section className="finance-section finance-budgets"><SectionHead eyebrow="Control quincenal" title="Gastos Personales" action="Definir presupuesto" onClick={() => { setBudgetHalfToEdit(undefined); setDialog('budget') }} />{budgets.length ? <div className="finance-budget-list">{budgets.map((budget) => { const half = budget.periodStart?.slice(-2) === '01' ? 'q1' : 'q2'; return <article key={budget.id} className={budget.usedPercentage > 100 ? 'exceeded' : budget.usedPercentage >= 85 ? 'warning' : budget.usedPercentage >= 70 ? 'attention' : ''}><div><div><small>{half === 'q1' ? 'Q1 · 1 al 15' : 'Q2 · 16 al cierre'}</small><strong>{budget.name ?? 'Gastos Personales'}</strong></div><span>{budget.periodStart} — {budget.periodEnd}</span></div><div className="finance-budget-amounts"><span>Asignado<strong>{formatMxn(budget.plannedAmountCents)}</strong></span><span>Gastado<strong>{formatMxn(budget.actualCents)}</strong></span><span>Disponible<b>{formatMxn(budget.remainingCents)}</b></span></div><ProgressBar value={Math.min(100, budget.usedPercentage)} /><footer><span>{budget.usedPercentage.toFixed(0)}% utilizado · {budget.usedPercentage > 100 ? 'Excedido' : budget.usedPercentage >= 100 ? 'Límite alcanzado' : budget.usedPercentage >= 85 ? 'Alerta 85%' : budget.usedPercentage >= 70 ? 'Atención 70%' : 'En control'}</span><div className="finance-budget-actions"><b>{Math.max(0, 100 - budget.usedPercentage).toFixed(0)}% libre</b><Button variant="ghost" size="sm" icon={<Pencil size={12} />} onClick={() => { setBudgetHalfToEdit(half); setDialog('budget') }}>Editar {half.toUpperCase()}</Button></div></footer></article> })}</div> : <EmptyState title="Sin presupuesto quincenal" description="Define el límite de Gastos Personales para esta quincena." action={<Button onClick={() => { setBudgetHalfToEdit(undefined); setDialog('budget') }}>Crear presupuesto</Button>} />}</section>}
+    {panel === 'budgets' && <section className="finance-section finance-budgets"><SectionHead eyebrow="Control quincenal" title="Presupuestos por categoría" action="Definir presupuesto" onClick={() => { setBudgetHalfToEdit(undefined); setBudgetCategoryToEdit(undefined); setDialog('budget') }} />{budgets.length ? <div className="finance-budget-list">{budgets.map((budget) => { const half = budget.periodStart?.slice(-2) === '01' ? 'q1' : 'q2'; return <article key={budget.id} className={budget.usedPercentage > 100 ? 'exceeded' : budget.usedPercentage >= 85 ? 'warning' : budget.usedPercentage >= 70 ? 'attention' : ''}><div><div><small>{half === 'q1' ? 'Q1 · 1 al 15' : 'Q2 · 16 al cierre'}</small><strong>{budget.name ?? budget.category?.name ?? 'Presupuesto'}</strong></div><span>{budget.periodStart} — {budget.periodEnd}</span></div><div className="finance-budget-amounts"><span>Asignado<strong>{formatMxn(budget.plannedAmountCents)}</strong></span><span>Gastado<strong>{formatMxn(budget.actualCents)}</strong></span><span>Disponible<b>{formatMxn(budget.remainingCents)}</b></span></div><ProgressBar value={Math.min(100, budget.usedPercentage)} /><footer><span>{budget.usedPercentage.toFixed(0)}% utilizado · {budget.usedPercentage > 100 ? 'Excedido' : budget.usedPercentage >= 100 ? 'Límite alcanzado' : budget.usedPercentage >= 85 ? 'Alerta 85%' : budget.usedPercentage >= 70 ? 'Atención 70%' : 'En control'}</span><div className="finance-budget-actions"><b>{Math.max(0, 100 - budget.usedPercentage).toFixed(0)}% libre</b><Button variant="ghost" size="sm" icon={<Pencil size={12} />} onClick={() => { setBudgetHalfToEdit(half); setBudgetCategoryToEdit(budget.categoryId); setDialog('budget') }}>Editar {half.toUpperCase()}</Button></div></footer></article> })}</div> : <EmptyState title="Sin presupuesto quincenal" description="Define un límite por categoría para esta quincena." action={<Button onClick={() => { setBudgetHalfToEdit(undefined); setBudgetCategoryToEdit(undefined); setDialog('budget') }}>Crear presupuesto</Button>} />}</section>}
 
     {panel === 'income' && <div className="finance-expenses-grid">
       <ProjectionStrip items={projectionItems(incomeProjection)} />
@@ -547,7 +548,7 @@ export function FinancePage() {
     {sharedReceipt && <SharedReceiptDialog file={sharedReceipt} accounts={activeAccounts} categories={data.categories} budgets={data.budgets} onClose={() => setSharedReceipt(undefined)} onSave={async (item) => { if (!user) throw new Error('Inicia sesión para guardar el gasto.'); await financeTransactionRepository.save(item, user.id); setSharedReceipt(undefined); await finish('Gasto capturado desde el comprobante.') }} />}
     {dialog === 'transaction' && <TransactionDialog initial={editingTransaction} preset={movementPreset} accounts={data.accounts.filter((item) => item.isActive)} categories={data.categories.filter((item) => item.isActive)} budgets={data.budgets} onClose={() => { setDialog(null); setEditingTransaction(undefined); setMovementPreset(undefined) }} onCreateCategory={async (item) => { if (!user) throw new Error('Inicia sesión para crear una categoría.'); return financeCategoryRepository.save(item, user.id) }} onSave={async (item) => { if (!user) return; await financeTransactionRepository.save(item, user.id); setMovementPreset(undefined); await finish('Movimiento guardado.') }} />}
     {dialog === 'account' && <AccountDialog initial={editingAccount} onClose={() => { setDialog(null); setEditingAccount(undefined) }} onSave={async (item) => { if (!user) return; await financeAccountRepository.save(item, user.id); await finish('Cuenta guardada.') }} />}
-    {dialog === 'budget' && <BudgetDialog data={data} month={monthKey(month)} initialHalf={budgetHalfToEdit} budgets={data.budgets} categories={data.categories.filter((item) => item.type === 'expense' && item.isActive)} onClose={() => { setDialog(null); setBudgetHalfToEdit(undefined) }} onSave={async (item) => { if (!user) return; await financeBudgetRepository.save(item, user.id); await finish('Presupuesto guardado.') }} />}
+    {dialog === 'budget' && <BudgetDialog data={data} month={monthKey(month)} initialHalf={budgetHalfToEdit} initialCategoryId={budgetCategoryToEdit} budgets={data.budgets} categories={data.categories.filter((item) => item.type === 'expense' && item.isActive)} onClose={() => { setDialog(null); setBudgetHalfToEdit(undefined); setBudgetCategoryToEdit(undefined) }} onSave={async (item) => { if (!user) return; await financeBudgetRepository.save(item, user.id); await finish('Presupuesto guardado.') }} />}
     {dialog==='budgetClose'&&closingBudget&&<BudgetCloseDialog budget={closingBudget} performance={budgetPerformance(data,parseISO(closingBudget.periodEnd??closingBudget.month)).find(item=>item.id===closingBudget.id)} goals={data.goals.filter(goal=>goal.status==='active')} onClose={()=>{setDismissedBudgetIds(current=>[...current,closingBudget.id]);setDialog(null);setClosingBudget(undefined)}} onSave={async(destination,goalId)=>{if(!user)return;await financePlanningRepository.closeBudget(closingBudget.id,destination,goalId,user.id);setClosingBudget(undefined);await finish('Cierre de quincena guardado.')}}/>}
     {dialog === 'recurring' && <RecurringDialog
       key={recurringEditMode}
@@ -916,25 +917,30 @@ function AccountDialog({ initial, onClose, onSave }: { initial?: FinanceAccount;
   return <Modal open title={initial ? 'Editar cuenta' : 'Nueva cuenta'} onClose={onClose}><form className="finance-form" onSubmit={submit}><label>Nombre<input autoFocus required value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. BBVA Débito" /></label><div className="finance-form-grid"><label>Tipo<select value={type} onChange={(event) => setType(event.target.value as FinanceAccount['type'])}><option value="cash">Efectivo</option><option value="checking">Débito</option><option value="savings">Ahorro</option><option value="credit">Crédito</option><option value="investment">Inversión</option><option value="loan">Préstamo</option></select></label><label>Saldo inicial MXN<input type="number" step=".01" value={balance} onChange={(event) => setBalance(event.target.value)} /></label></div>{type === 'credit' && <><label>Límite de crédito<input type="number" min="0" step=".01" value={limit} onChange={(event) => setLimit(event.target.value)} /></label><div className="finance-form-grid"><label>Día de corte<input type="number" min="1" max="31" value={closingDay} onChange={(event) => setClosingDay(event.target.value)} /></label><label>Día de pago<input type="number" min="1" max="31" value={paymentDay} onChange={(event) => setPaymentDay(event.target.value)} /></label></div></>}<ErrorText value={error} /><div className="modal-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit" disabled={saving}>Guardar</Button></div></form></Modal>
 }
 
-function BudgetDialog({ data, month, initialHalf, budgets, categories, onClose, onSave }: { data: FinanceData; month: string; initialHalf?: 'q1' | 'q2'; budgets: FinanceBudget[]; categories: { id: string; name: string }[]; onClose: () => void; onSave: (item: { categoryId: string; month: string; plannedAmountCents: number;name:string;periodStart:string;periodEnd:string;carryOverEnabled:boolean }) => Promise<void> }) {
+function BudgetDialog({ data, month, initialHalf, initialCategoryId, budgets, categories, onClose, onSave }: { data: FinanceData; month: string; initialHalf?: 'q1' | 'q2'; initialCategoryId?: string; budgets: FinanceBudget[]; categories: { id: string; name: string }[]; onClose: () => void; onSave: (item: { categoryId: string; month: string; plannedAmountCents: number;name:string;periodStart:string;periodEnd:string;carryOverEnabled:boolean }) => Promise<void> }) {
   const current = new Date()
   const currentMonth = format(current, 'yyyy-MM') === month.slice(0, 7)
   const [half, setHalf] = useState<'q1' | 'q2'>(initialHalf ?? (currentMonth && current.getDate() > 15 ? 'q2' : 'q1'))
   const period = fortnightPeriodForMonth(month, half)
   const personalCategory = categories.find((item) => item.name.trim().toLocaleLowerCase('es-MX') === 'personal')
-  const existingBudget = useMemo(() => personalBudgetForDate(budgets, period.periodStart), [budgets, period.periodStart])
-  const carryOverCents = useMemo(() => half === 'q2'
-    ? personalBudgetCarryOverIntoPeriod(data, period.periodStart)
-    : 0, [data, half, period.periodStart])
-  const [categoryId, setCategoryId] = useState(existingBudget?.categoryId ?? personalCategory?.id ?? categories[0]?.id ?? '')
-  const [amount, setAmount] = useState(existingBudget ? String(existingBudget.plannedAmountCents / 100) : '')
+  const initialCategory = initialCategoryId ?? personalCategory?.id ?? categories[0]?.id ?? ''
+  const initialBudget = budgets.find((budget) => budget.categoryId === initialCategory
+    && budget.periodStart === period.periodStart && budget.periodEnd === period.periodEnd)
+  const [categoryId, setCategoryId] = useState(initialCategory)
+  const existingBudget = useMemo(() => budgets.find((budget) => budget.categoryId === categoryId
+    && budget.periodStart === period.periodStart && budget.periodEnd === period.periodEnd), [budgets, categoryId, period.periodEnd, period.periodStart])
+  const carryOverCents = useMemo(() => personalBudgetCarryOverIntoPeriod(data, period.periodStart), [data, period.periodStart])
+  const [amount, setAmount] = useState(initialBudget ? String(initialBudget.plannedAmountCents / 100) : '')
+  const [carryOverEnabled, setCarryOverEnabled] = useState(initialBudget?.carryOverEnabled ?? false)
   const [error, setError] = useState('')
-  const selectHalf = (nextHalf: 'q1' | 'q2') => {
+  const loadBudget = (nextHalf: 'q1' | 'q2', nextCategoryId: string) => {
     const nextPeriod = fortnightPeriodForMonth(month, nextHalf)
-    const nextBudget = personalBudgetForDate(budgets, nextPeriod.periodStart)
+    const nextBudget = budgets.find((budget) => budget.categoryId === nextCategoryId
+      && budget.periodStart === nextPeriod.periodStart && budget.periodEnd === nextPeriod.periodEnd)
     setHalf(nextHalf)
-    setCategoryId(nextBudget?.categoryId ?? personalCategory?.id ?? categories[0]?.id ?? '')
+    setCategoryId(nextCategoryId)
     setAmount(nextBudget ? String(nextBudget.plannedAmountCents / 100) : '')
+    setCarryOverEnabled(nextBudget?.carryOverEnabled ?? false)
     setError('')
   }
 
@@ -944,18 +950,18 @@ function BudgetDialog({ data, month, initialHalf, budgets, categories, onClose, 
     const result = financeBudgetSchema.safeParse({ categoryId, month: period.month, plannedAmountCents: moneyToCents(amount) })
     if (!result.success) return setError(result.error.issues[0]?.message ?? 'Revisa los campos.')
     try {
-      await onSave({ ...result.data, name: 'Gastos Personales', periodStart: period.periodStart, periodEnd: period.periodEnd, carryOverEnabled: true })
+      await onSave({ ...result.data, name: budgetNameForCategory(selectedCategory?.name ?? 'Presupuesto'), periodStart: period.periodStart, periodEnd: period.periodEnd, carryOverEnabled: selectedCategory?.id === personalCategory?.id && carryOverEnabled })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'No se pudo guardar.')
     }
   }
 
-  return <Modal open title="Presupuesto personal" onClose={onClose}><form className="finance-form" onSubmit={submit}>
-    <label>Quincena<select value={half} onChange={(event) => selectHalf(event.target.value as 'q1' | 'q2')}><option value="q1">Q1 · del 1 al 15</option><option value="q2">Q2 · del 16 al cierre</option></select></label>
+  return <Modal open title="Presupuesto quincenal" onClose={onClose}><form className="finance-form" onSubmit={submit}>
+    <label>Quincena<select value={half} onChange={(event) => loadBudget(event.target.value as 'q1' | 'q2', categoryId)}><option value="q1">Q1 · del 1 al 15</option><option value="q2">Q2 · del 16 al cierre</option></select></label>
     <p className="finance-form-hint">{period.periodStart} — {period.periodEnd}. Se reserva en los balances proyectados de esta quincena; la línea temporal sólo muestra gastos y compromisos con fecha.</p>
-    <label>Categoría vinculada<input value={selectedCategory?.name ?? 'Personal'} readOnly aria-readonly="true" /></label>
-    <label>{half === 'q2' ? 'Presupuesto nuevo para Q2 MXN' : 'Presupuesto nuevo para Q1 MXN'}<input autoFocus type="number" min="0" step=".01" required value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
-    {half === 'q2' && <p className="finance-form-hint">Quedaron {formatMxn(carryOverCents)} de Q1. FARO los acumula para Q2; el monto que indiques se suma como presupuesto nuevo.</p>}
+    <label>Categoría vinculada<select value={categoryId} onChange={(event) => loadBudget(half, event.target.value)}>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+    <label>{half === 'q2' ? 'Monto para Q2 MXN' : 'Monto para Q1 MXN'}<input autoFocus type="number" min="0" step=".01" required value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
+    {selectedCategory?.id === personalCategory?.id && <label className="finance-budget-carry"><input type="checkbox" checked={carryOverEnabled} onChange={(event) => setCarryOverEnabled(event.target.checked)} /><span><strong>Acumular sobrante anterior</strong><small>{carryOverEnabled ? `Se agregarán ${formatMxn(carryOverCents)} disponibles del período anterior.` : 'Cada quincena conservará únicamente el monto que captures.'}</small></span></label>}
     {existingBudget && <p className="finance-form-hint">Ya hay un presupuesto para esta quincena: al guardar actualizarás su monto.</p>}
     <ErrorText value={error} /><div className="modal-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit">{existingBudget ? 'Actualizar presupuesto' : 'Guardar presupuesto'}</Button></div>
   </form></Modal>

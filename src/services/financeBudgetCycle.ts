@@ -8,6 +8,13 @@ export interface FortnightPeriod {
 
 export type FortnightHalf = 'q1' | 'q2'
 
+export function budgetNameForCategory(categoryName: string) {
+  const normalized = categoryName.trim()
+  return normalized.toLocaleLowerCase('es-MX') === 'personal'
+    ? 'Gastos Personales'
+    : normalized
+}
+
 export interface FortnightClosurePlan {
   carryOverCents: number
   leftoverCents: number
