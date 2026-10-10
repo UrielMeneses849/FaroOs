@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowDownRight, ArrowUpRight, CircleGauge, Landmark, Set
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Area, AreaChart, CartesianGrid, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Button, Modal } from '../../components/common'
+import { FinanceProjectionGuide } from './FinanceProjectionGuide'
 import type { FinanceData, FinanceLiquiditySnapshot } from './financeTypes'
 import {
   financeLiquidityDeviation,
@@ -318,6 +319,12 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
         <span><i className="liquidity-radar__legend-dot liquidity-radar__legend-dot--event" />{isHistorical ? 'Impacto realizado' : 'Impacto programado'}</span>
       </footer>
     </section>
+
+    {!isHistorical && <FinanceProjectionGuide
+      data={data}
+      selectedMonth={month}
+      availableTodayCents={availableTodayCents}
+    />}
 
     <div className="liquidity-radar__below-chart">
       <section className="liquidity-radar__comparison">

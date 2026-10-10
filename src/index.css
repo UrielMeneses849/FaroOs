@@ -1670,7 +1670,36 @@ input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--accent);
 .liquidity-radar__metric--negative strong { color:#ed8084; }
 .liquidity-radar__metric--negative i { color:#ee7a80; background:#321c24; }
 
-.liquidity-radar__chart-card,.liquidity-radar__comparison,.liquidity-radar__sensitive,.liquidity-radar__impacts,.liquidity-radar__buffer { min-width:0; overflow:hidden; border:1px solid #203243; border-radius:13px; background:#090f16; }
+.liquidity-radar__chart-card,.liquidity-radar__comparison,.liquidity-radar__sensitive,.liquidity-radar__impacts,.liquidity-radar__buffer,.liquidity-guide { min-width:0; overflow:hidden; border:1px solid #203243; border-radius:13px; background:#090f16; }
+.liquidity-guide__head { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:17px 20px 14px; border-bottom:1px solid #1e2d3b; background:linear-gradient(110deg,rgba(18,37,58,.62),rgba(9,15,22,.95)); }
+.liquidity-guide__head h3 { font-size:17px; }
+.liquidity-guide__head p { max-width:720px; margin:5px 0 0; color:#8fa0b2; font-size:9px; line-height:1.5; }
+.liquidity-guide__signal { display:flex; align-items:center; gap:7px; flex:0 0 auto; padding:8px 10px; border:1px solid #64353c; border-radius:999px; color:#f09aa0; background:rgba(54,22,27,.52); font-size:9px; font-weight:700; text-transform:capitalize; }
+.liquidity-guide__signal.is-covered { border-color:#275b49; color:#77d3ad; background:rgba(9,40,31,.52); }
+.liquidity-guide__summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); border-bottom:1px solid #1e2d3b; }
+.liquidity-guide__summary article { display:grid; grid-template-columns:auto 1fr; gap:3px 9px; min-width:0; padding:14px 17px; border-left:1px solid #1e2d3b; }
+.liquidity-guide__summary article:first-child { border-left:0; }
+.liquidity-guide__summary svg { grid-row:span 3; padding:6px; box-sizing:content-box; border-radius:50%; color:#8eb8ef; background:#142337; }
+.liquidity-guide__summary span { color:#8397ab; font-size:8px; font-weight:600; text-transform:uppercase; letter-spacing:.055em; }
+.liquidity-guide__summary strong { overflow:hidden; color:#f0f5fa; font-size:17px; text-overflow:ellipsis; text-transform:capitalize; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.liquidity-guide__summary small { overflow:hidden; color:#7e91a5; font-size:8px; line-height:1.35; text-overflow:ellipsis; }
+.liquidity-guide__months { padding:4px 0; }
+.liquidity-guide__month-head,.liquidity-guide__month { display:grid; grid-template-columns:120px 130px 150px minmax(0,1fr); align-items:center; gap:14px; padding:10px 17px; }
+.liquidity-guide__month-head { color:#6e839a; font-size:8px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; }
+.liquidity-guide__month { min-height:48px; border-top:1px solid #182633; }
+.liquidity-guide__month.is-priority { background:linear-gradient(90deg,rgba(87,29,35,.28),rgba(9,15,22,0)); box-shadow:inset 3px 0 #d9656d; }
+.liquidity-guide__month > div,.liquidity-guide__month > b { display:grid; gap:3px; min-width:0; }
+.liquidity-guide__month > div strong { color:#e9f0f7; font-size:10px; text-transform:capitalize; }
+.liquidity-guide__month small { color:#75899f; font-size:8px; font-weight:500; }
+.liquidity-guide__month--critical > div small { color:#ed858b; }
+.liquidity-guide__month--moderation > div small { color:#d6ae5c; }
+.liquidity-guide__month--stable > div small { color:#5ec79b; }
+.liquidity-guide__month > b { color:#e7eef5; font-size:11px; font-variant-numeric:tabular-nums; }
+.liquidity-guide__month > b small { text-transform:capitalize; }
+.liquidity-guide__month > b small.positive { color:#4cc999; }
+.liquidity-guide__month > b small.negative { color:#ee858a; }
+.liquidity-guide__month p { margin:0; color:#9cabb9; font-size:9px; line-height:1.45; }
+.liquidity-guide > footer { padding:10px 17px 12px; border-top:1px solid #1e2d3b; color:#6f8295; font-size:8px; line-height:1.45; }
 .liquidity-radar__chart-card > header { display:grid; grid-template-columns:minmax(0,1fr) minmax(184px,230px) auto; align-items:center; gap:18px; padding:17px 20px 13px; border-bottom:1px solid #1e2d3b; }
 .liquidity-radar__chart-copy { min-width:0; }
 .liquidity-radar__chart-controls { display:grid; align-content:center; gap:5px; min-width:184px; }
@@ -1768,6 +1797,7 @@ input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--accent);
   .liquidity-radar__metric:nth-child(3) { border-left:0; border-top:1px solid #203243; }
   .liquidity-radar__metric:nth-child(4) { border-top:1px solid #203243; }
   .liquidity-radar__below-chart { grid-template-columns:1fr; }
+  .liquidity-guide__month-head,.liquidity-guide__month { grid-template-columns:100px 120px 140px minmax(0,1fr); }
 }
 @media (max-width:620px) {
   .liquidity-radar__head { grid-template-columns:1fr; padding:16px; }
@@ -1775,6 +1805,17 @@ input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--accent);
   .liquidity-radar__metrics { grid-template-columns:1fr; }
   .liquidity-radar__metric,.liquidity-radar__metric:nth-child(n) { border-top:1px solid #203243; border-left:0; }
   .liquidity-radar__metric:first-child { border-top:0; }
+  .liquidity-guide__head { display:grid; padding:15px; }
+  .liquidity-guide__signal { justify-self:start; }
+  .liquidity-guide__summary { grid-template-columns:1fr; }
+  .liquidity-guide__summary article,.liquidity-guide__summary article:first-child { border-top:1px solid #1e2d3b; border-left:0; }
+  .liquidity-guide__summary article:first-child { border-top:0; }
+  .liquidity-guide__months { display:grid; grid-auto-flow:column; grid-auto-columns:minmax(245px,82vw); gap:9px; padding:12px; overflow-x:auto; scroll-snap-type:x proximity; }
+  .liquidity-guide__month-head { display:none; }
+  .liquidity-guide__month { display:grid; grid-template-columns:1fr 1fr; gap:10px; align-content:start; padding:13px; border:1px solid #233548; border-radius:10px; scroll-snap-align:start; }
+  .liquidity-guide__month.is-priority { box-shadow:inset 3px 0 #d9656d; }
+  .liquidity-guide__month > div { grid-column:1 / -1; }
+  .liquidity-guide__month p { grid-column:1 / -1; min-height:39px; }
   .liquidity-radar__chart-card > header { grid-template-columns:minmax(0,1fr) auto; align-items:start; gap:12px; padding:15px; }
   .liquidity-radar__chart-copy { grid-column:1 / -1; }
   .liquidity-radar__chart-controls { min-width:0; }
