@@ -414,6 +414,8 @@ export interface CanonicalFinanceBudget {
 export interface FinanceBudgetReservation {
   id: string
   budgetId: string
+  categoryId: string
+  isPersonal: boolean
   date: string
   periodStart: string
   periodEnd: string
@@ -465,17 +467,21 @@ export function canonicalFinanceBudgetGroups(data: Pick<FinanceData, 'budgets' |
     || left.budget.id.localeCompare(right.budget.id))
 }
 
-function personalBudgetMovementCentsForPeriod(data: FinanceData, {
+function budgetMovementCentsForPeriod(data: FinanceData, {
+  budget,
   periodStart,
   periodEnd,
+  isPersonal,
   sourceBudgetIds = [],
-}: Pick<CanonicalFinanceBudget, 'periodStart' | 'periodEnd' | 'sourceBudgetIds'>) {
-  const personalCategoryIds = new Set(data.categories
-    .filter((category) => category.type === 'expense' && isPersonalName(category.name))
-    .map((category) => category.id))
+}: Pick<CanonicalFinanceBudget, 'budget' | 'periodStart' | 'periodEnd' | 'isPersonal' | 'sourceBudgetIds'>) {
+  const categoryIds = new Set(isPersonal
+    ? data.categories
+      .filter((category) => category.type === 'expense' && isPersonalName(category.name))
+      .map((category) => category.id)
+    : [budget.categoryId])
   const budgetIds = new Set(sourceBudgetIds)
   const belongsToBudget = (categoryId?: string, budgetId?: string) => Boolean(budgetId && budgetIds.has(budgetId))
-    || (!budgetId && Boolean(categoryId && personalCategoryIds.has(categoryId)))
+    || (!budgetId && Boolean(categoryId && categoryIds.has(categoryId)))
   const transactionCents = data.transactions
     .filter((transaction) => transaction.status !== 'cancelled'
       && (transaction.type === 'expense' || transaction.type === 'debt_payment')
@@ -497,13 +503,30 @@ function personalBudgetMovementCentsForPeriod(data: FinanceData, {
   return transactionCents + recurringCents
 }
 
-function personalBudgetMovementCents(data: FinanceData, budget: CanonicalFinanceBudget) {
-  return personalBudgetMovementCentsForPeriod(data, budget)
+function budgetMovementCents(data: FinanceData, budget: CanonicalFinanceBudget) {
+  return budgetMovementCentsForPeriod(data, budget)
 }
 
 /** Planned and completed personal spending already dated inside a fortnight. */
 export function personalBudgetUsageCents(data: FinanceData, periodStart: string, periodEnd: string, sourceBudgetIds: string[] = []) {
-  return personalBudgetMovementCentsForPeriod(data, { periodStart, periodEnd, sourceBudgetIds })
+  const personalBudget = canonicalFinanceBudgetGroups(data).find((budget) => budget.isPersonal
+    && budget.periodStart === periodStart && budget.periodEnd === periodEnd)
+  if (personalBudget) return budgetMovementCentsForPeriod(data, { ...personalBudget, sourceBudgetIds })
+  const category = data.categories.find((item) => item.type === 'expense' && isPersonalName(item.name))
+  return budgetMovementCentsForPeriod(data, {
+    budget: {
+      id: sourceBudgetIds[0] ?? 'personal',
+      categoryId: category?.id ?? 'personal',
+      month: periodStart,
+      plannedAmountCents: 0,
+      createdAt: periodStart,
+      updatedAt: periodStart,
+    },
+    periodStart,
+    periodEnd,
+    isPersonal: true,
+    sourceBudgetIds,
+  })
 }
 
 /**
@@ -516,7 +539,34 @@ export function personalBudgetCarryOverIntoPeriod(data: FinanceData, periodStart
   const previous = canonicalFinanceBudgetGroups(data)
     .find((budget) => budget.isPersonal && budget.periodEnd === previousPeriodEnd)
   if (!previous) return 0
-  return Math.max(0, previous.budget.plannedAmountCents - personalBudgetMovementCents(data, previous))
+  return Math.max(0, previous.budget.plannedAmountCents - budgetMovementCents(data, previous))
+}
+
+function reservationsForBudgets(data: FinanceData, budgets: CanonicalFinanceBudget[]): FinanceBudgetReservation[] {
+  return budgets
+    .map((budget) => {
+      const previousPeriodEnd = format(addDays(parseISO(budget.periodStart), -1), 'yyyy-MM-dd')
+      // Personal envelopes may explicitly carry their previous remainder. A
+      // previous period already present in this curve is already reserved.
+      const carryIsAlreadyReserved = budgets.some((candidate) =>
+        candidate.isPersonal && candidate.periodEnd === previousPeriodEnd)
+      const carryOverCents = budget.isPersonal && budget.budget.carryOverEnabled
+        ? carryIsAlreadyReserved ? 0 : personalBudgetCarryOverIntoPeriod(data, budget.periodStart)
+        : 0
+      return {
+        id: `budget:${budget.budget.id}`,
+        budgetId: budget.budget.id,
+        categoryId: budget.budget.categoryId,
+        isPersonal: budget.isPersonal,
+        date: budget.periodStart,
+        periodStart: budget.periodStart,
+        periodEnd: budget.periodEnd,
+        label: `Reserva · ${budget.budget.name ?? budget.category?.name ?? (budget.isPersonal ? 'Gastos Personales' : 'Presupuesto')} (${budget.periodStart.slice(-2) === '01' ? 'Q1' : 'Q2'})`,
+        amountCents: Math.max(0, budget.budget.plannedAmountCents + carryOverCents - budgetMovementCents(data, budget)),
+        sourceBudgetIds: budget.sourceBudgetIds,
+      }
+    })
+    .filter((budget) => budget.amountCents > 0)
 }
 
 /**
@@ -534,30 +584,27 @@ export function personalBudgetReservations(data: FinanceData, month: Date, refer
     .filter((budget) => budget.isPersonal
       && budget.periodStart <= selectedMonthEnd && budget.periodEnd >= selectedMonthStart
       && (!selectedIsCurrent || budget.periodEnd >= referenceKey))
-  return budgets
-    .map((budget) => {
-      const previousPeriodEnd = format(addDays(parseISO(budget.periodStart), -1), 'yyyy-MM-dd')
-      // Before Q2 begins, Q1's reservation is already represented in the
-      // same curve. After Q1 expires, carry it into the current envelope so
-      // the balance does not silently release money the user still reserved.
-      const carryIsAlreadyReserved = budgets.some((candidate) =>
-        candidate.isPersonal && candidate.periodEnd === previousPeriodEnd)
-      const carryOverCents = budget.budget.carryOverEnabled
-        ? carryIsAlreadyReserved ? 0 : personalBudgetCarryOverIntoPeriod(data, budget.periodStart)
-        : 0
-      const amountCents = Math.max(0, budget.budget.plannedAmountCents + carryOverCents - personalBudgetMovementCents(data, budget))
-      return {
-        id: `budget:${budget.budget.id}`,
-        budgetId: budget.budget.id,
-        date: budget.periodStart,
-        periodStart: budget.periodStart,
-        periodEnd: budget.periodEnd,
-        label: `Reserva · ${budget.budget.name ?? 'Gastos Personales'} (${budget.periodStart.slice(-2) === '01' ? 'Q1' : 'Q2'})`,
-        amountCents,
-        sourceBudgetIds: budget.sourceBudgetIds,
-      }
-    })
-    .filter((budget) => budget.amountCents > 0)
+  return reservationsForBudgets(data, budgets)
+}
+
+/** Remaining, not-yet-dated envelopes for the selected expense categories. */
+export function categoryBudgetReservations(
+  data: FinanceData,
+  month: Date,
+  categoryIds: string[],
+  reference = new Date(),
+): FinanceBudgetReservation[] {
+  const selectedMonthStart = monthKey(month)
+  const selectedMonthEnd = format(endOfMonth(month), 'yyyy-MM-dd')
+  const referenceKey = format(reference, 'yyyy-MM-dd')
+  const selectedIsCurrent = isSameMonth(month, reference)
+  const includedCategoryIds = new Set(categoryIds)
+  const budgets = canonicalFinanceBudgetGroups(data)
+    .filter((budget) => !budget.isPersonal
+      && includedCategoryIds.has(budget.budget.categoryId)
+      && budget.periodStart <= selectedMonthEnd && budget.periodEnd >= selectedMonthStart
+      && (!selectedIsCurrent || budget.periodEnd >= referenceKey))
+  return reservationsForBudgets(data, budgets)
 }
 
 /**
@@ -589,6 +636,8 @@ export function personalBudgetEnvelopeReservations(data: FinanceData, month: Dat
       return {
         id: `budget:${budget.budget.id}`,
         budgetId: budget.budget.id,
+        categoryId: budget.budget.categoryId,
+        isPersonal: true,
         date: budget.periodStart,
         periodStart: budget.periodStart,
         periodEnd: budget.periodEnd,

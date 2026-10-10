@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { FinanceData } from '../features/finance/financeTypes'
 import {
   accountBalance, advanceRecurringDate, annualFinanceTotals, budgetPerformance, calculateFinanceMetrics, canRegisterEventualIncome, eventualIncomeTransactions,
-  canonicalFinanceBudgetGroups, financeAvailableEvolution, financeDecision, financeFrequencyLabel, financeGoalProjections, financeLiquidityTimeline, financePeriodFlow, financeProjectionBreakdown, formatFinanceDate, goalProgress, monthKey, personalBudgetForDate, personalBudgetReservations, recurringAppliesToMonth, recurringExpectedDate, spentTodayCents,
+  canonicalFinanceBudgetGroups, categoryBudgetReservations, financeAvailableEvolution, financeDecision, financeFrequencyLabel, financeGoalProjections, financeLiquidityTimeline, financePeriodFlow, financeProjectionBreakdown, formatFinanceDate, goalProgress, monthKey, personalBudgetForDate, personalBudgetReservations, recurringAppliesToMonth, recurringExpectedDate, spentTodayCents,
 } from './financeService'
 import { financeLiquidityProjection } from './financeLiquidityProjection'
 
@@ -91,6 +91,24 @@ describe('financeService', () => {
     expect(personalBudgetReservations(fortnightData, new Date(2026, 8, 1), new Date(2026, 8, 16))).toMatchObject([
       { budgetId: 'q2', amountCents: 700_000 },
     ])
+  })
+
+  it('reserva sólo el remanente de una categoría presupuestada', () => {
+    const foodData: FinanceData = {
+      ...data,
+      transactions: [
+        { ...data.transactions[1], id: 'breakfast', categoryId: 'food', amountCents: 200_000, transactionDate: '2026-07-08', status: 'planned' },
+      ],
+      budgets: [{
+        id: 'food-q1', categoryId: 'food', month: '2026-07-01', plannedAmountCents: 300_000,
+        name: 'Comida', periodStart: '2026-07-01', periodEnd: '2026-07-15', createdAt: base, updatedAt: base,
+      }],
+    }
+
+    expect(categoryBudgetReservations(foodData, new Date(2026, 6, 1), ['food'], new Date(2026, 6, 1))).toMatchObject([
+      { budgetId: 'food-q1', categoryId: 'food', isPersonal: false, amountCents: 100_000 },
+    ])
+    expect(categoryBudgetReservations(foodData, new Date(2026, 6, 1), [], new Date(2026, 6, 1))).toEqual([])
   })
 
   it('separa el flujo del periodo de la evolución del disponible', () => {

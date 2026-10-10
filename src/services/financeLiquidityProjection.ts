@@ -1,11 +1,11 @@
 import { addDays, addMonths, endOfMonth, format, isAfter, isSameMonth, startOfDay, startOfMonth, subMonths } from 'date-fns'
 import type { FinanceData, FinanceTransaction, FinanceTransactionType } from '../features/finance/financeTypes'
-import { monthKey, personalBudgetCarryOverIntoPeriod, personalBudgetReservations, recurringAppliesToMonth } from './financeService'
+import { categoryBudgetReservations, monthKey, personalBudgetCarryOverIntoPeriod, personalBudgetReservations, recurringAppliesToMonth } from './financeService'
 
 /** Keeping the thresholds here makes the Radar auditable and keeps UI out of business rules. */
 export const LIQUIDITY_MODERATION_MULTIPLIER = 1.2
 /** Bump when a formula change makes stored comparison baselines incompatible. */
-export const FINANCE_LIQUIDITY_PROJECTION_VERSION = 3
+export const FINANCE_LIQUIDITY_PROJECTION_VERSION = 4
 
 export type FinanceLiquidityRadarStatus = 'stable' | 'moderation' | 'critical'
 export type LiquidityEventSource = 'movement' | 'recurring' | 'budget' | 'simulation'
@@ -70,6 +70,8 @@ export interface FinanceLiquidityProjectionInput {
    * start of each Q1/Q2 period for a conservative liquidity scenario.
    */
   includePersonalBudgetReservations?: boolean
+  /** Non-personal budget categories whose uncommitted remainder is reserved. */
+  includedBudgetCategoryIds?: string[]
 }
 
 export interface FinanceLiquidityProjection {
@@ -170,15 +172,27 @@ function recurringEventsForMonth(data: FinanceData, month: Date): LiquidityProje
   return events
 }
 
-interface PersonalBudgetReservationEvent extends LiquidityProjectionEvent {
+interface BudgetReservationEvent extends LiquidityProjectionEvent {
   sourceBudgetIds: string[]
+  categoryId?: string
+  isPersonal: boolean
 }
 
-function budgetReservationEventsForMonth(data: FinanceData, month: Date, reference: Date): PersonalBudgetReservationEvent[] {
-  // This is deliberately the *remaining* envelope. Personal expenses with a
-  // real/planned date stay as their own movements, so reserving the full budget
-  // here would make the curve charge those payments twice.
-  return personalBudgetReservations(data, month, reference).map((budget) => ({
+function budgetReservationEventsForMonth(
+  data: FinanceData,
+  month: Date,
+  reference: Date,
+  includePersonal: boolean,
+  categoryIds: string[],
+): BudgetReservationEvent[] {
+  // These are deliberately the *remaining* envelopes. Expenses with a real or
+  // planned date stay as movements, so the category budget is never charged
+  // twice in the liquidity curve.
+  const reservations = [
+    ...(includePersonal ? personalBudgetReservations(data, month, reference) : []),
+    ...categoryBudgetReservations(data, month, categoryIds, reference),
+  ]
+  return reservations.map((budget) => ({
     id: budget.id,
     date: budget.date,
     label: budget.label,
@@ -189,6 +203,8 @@ function budgetReservationEventsForMonth(data: FinanceData, month: Date, referen
     periodStart: budget.periodStart,
     periodEnd: budget.periodEnd,
     sourceBudgetIds: budget.sourceBudgetIds,
+    categoryId: budget.categoryId,
+    isPersonal: budget.isPersonal,
   }))
 }
 
@@ -212,7 +228,7 @@ function personalBudgetScenarioEvent(
   scenario: PersonalBudgetScenarioInput,
   sourceBudgetIds: string[],
   reference: Date,
-): PersonalBudgetReservationEvent | undefined {
+): BudgetReservationEvent | undefined {
   // A scenario represents new money the user wants to reserve. Dated personal
   // movements remain visible as independent commitments in the cash curve.
   const envelopeCents = personalBudgetScenarioReservationCents(data, scenario, reference)
@@ -227,6 +243,7 @@ function personalBudgetScenarioEvent(
     periodStart: scenario.periodStart,
     periodEnd: scenario.periodEnd,
     sourceBudgetIds,
+    isPersonal: true,
   }
 }
 
@@ -237,10 +254,10 @@ function personalBudgetScenarioEvent(
  * Q1's remaining envelope begins tomorrow, after today's reconciled balance.
  */
 function scheduleReservationAfterReference(
-  reservation: PersonalBudgetReservationEvent,
+  reservation: BudgetReservationEvent,
   referenceKey: string,
   isCurrentPeriod: boolean,
-): PersonalBudgetReservationEvent {
+): BudgetReservationEvent {
   if (!isCurrentPeriod || reservation.date > referenceKey) return reservation
   const nextDate = format(addDays(new Date(`${referenceKey}T12:00:00`), 1), 'yyyy-MM-dd')
   if (!reservation.periodEnd || nextDate > reservation.periodEnd) return reservation
@@ -290,7 +307,16 @@ function projectFinanceLiquidityMonth(
   carriedOpeningBalanceCents?: number,
 ): FinanceLiquidityProjection {
   const clock = typeof performance === 'undefined' ? undefined : performance.now()
-  const { data, month, currentAvailableBalanceCents, minimumOperatingBufferCents, simulation, personalBudgetScenario, includePersonalBudgetReservations = false } = input
+  const {
+    data,
+    month,
+    currentAvailableBalanceCents,
+    minimumOperatingBufferCents,
+    simulation,
+    personalBudgetScenario,
+    includePersonalBudgetReservations = false,
+    includedBudgetCategoryIds = [],
+  } = input
   const reference = startOfDay(input.referenceDate ?? new Date())
   const periodStartDate = startOfMonth(month)
   const periodEndDate = endOfMonth(month)
@@ -330,8 +356,9 @@ function projectFinanceLiquidityMonth(
   // mode the envelope contributes only its uncommitted remainder; dated personal
   // payments stay visible as ordinary cash movements and are never "released"
   // back into the line.
-  let budgetReservations: PersonalBudgetReservationEvent[] = includePersonalBudgetReservations && periodMode !== 'past'
-    ? budgetReservationEventsForMonth(data, month, reference)
+  let budgetReservations: BudgetReservationEvent[] = periodMode !== 'past'
+    && (includePersonalBudgetReservations || includedBudgetCategoryIds.length > 0)
+    ? budgetReservationEventsForMonth(data, month, reference, includePersonalBudgetReservations, includedBudgetCategoryIds)
     : []
   if (periodMode !== 'past'
     && includePersonalBudgetReservations
@@ -342,9 +369,9 @@ function projectFinanceLiquidityMonth(
     // When there is an actual Q2 budget, replace it for the scenario rather
     // than adding a second envelope on top of it. Keep its ids so movements
     // already linked to that envelope still release the simulated reserve.
-    const replacedReservations = budgetReservations.filter((event) => event.periodStart === personalBudgetScenario.periodStart)
+    const replacedReservations = budgetReservations.filter((event) => event.isPersonal && event.periodStart === personalBudgetScenario.periodStart)
     const scenarioSourceBudgetIds = replacedReservations.flatMap((event) => event.sourceBudgetIds)
-    budgetReservations = budgetReservations.filter((event) => event.periodStart !== personalBudgetScenario.periodStart)
+    budgetReservations = budgetReservations.filter((event) => !event.isPersonal || event.periodStart !== personalBudgetScenario.periodStart)
     const scenarioEvent = personalBudgetScenarioEvent(data, personalBudgetScenario, scenarioSourceBudgetIds, reference)
     if (scenarioEvent) budgetReservations.push(scenarioEvent)
   }

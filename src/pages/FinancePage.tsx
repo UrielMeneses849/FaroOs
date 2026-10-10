@@ -25,7 +25,7 @@ import {
   financeLiquidityRepository, financePlanningRepository, financeRecurringOccurrenceRepository, financeRecurringRepository, financeTransactionRepository,
 } from '../repositories/financeRepositories'
 import {
-  accountBalance, annualFinanceTotals, budgetPerformance, calculateFinanceMetrics, canRegisterEventualIncome, eventualIncomeTransactions, financePeriodFlow, financeProjectionBreakdown, financeSummary, personalBudgetCarryOverIntoPeriod, personalBudgetForDate, personalBudgetReservations,
+  accountBalance, annualFinanceTotals, budgetPerformance, calculateFinanceMetrics, canRegisterEventualIncome, canonicalFinanceBudgetGroups, eventualIncomeTransactions, financePeriodFlow, financeProjectionBreakdown, financeSummary, personalBudgetCarryOverIntoPeriod, personalBudgetForDate, personalBudgetReservations,
   financeGoalProjections, formatFinanceDate, formatMxn, goalAvailableCents, goalProgress, goalSpentCents, goalTargetCents, monthKey, recurringAppliesToMonth, recurringExpectedDate, savingsFundMetrics,
 } from '../services/financeService'
 import { budgetNameForCategory, fortnightPeriodForMonth } from '../services/financeBudgetCycle'
@@ -162,13 +162,17 @@ export function FinancePage() {
 
   const metrics = useMemo(() => calculateFinanceMetrics(data, month), [data, month])
   const projectionBreakdown = useMemo(() => financeProjectionBreakdown(data, month), [data, month])
+  const baselineBudgetCategoryIds = useMemo(() => [...new Set(canonicalFinanceBudgetGroups(data)
+    .filter((group) => !group.isPersonal)
+    .map((group) => group.budget.categoryId))], [data])
   const baselineLiquidityProjection = useMemo(() => financeLiquidityProjection({
     data,
     month,
     currentAvailableBalanceCents: metrics.availableBalanceCents,
     minimumOperatingBufferCents: data.liquidityPreference.minimumOperatingBufferCents,
     includePersonalBudgetReservations: true,
-  }), [data, metrics.availableBalanceCents, month])
+    includedBudgetCategoryIds: baselineBudgetCategoryIds,
+  }), [baselineBudgetCategoryIds, data, metrics.availableBalanceCents, month])
   const midMonthProjection = useMemo(() => {
     const midpointDate = format(new Date(month.getFullYear(), month.getMonth(), 15), 'yyyy-MM-dd')
     const datedBalanceCents = baselineLiquidityProjection.days.find((day) => day.date === midpointDate)?.balanceCents

@@ -103,6 +103,44 @@ describe('financeLiquidityProjection', () => {
     expect(withReservation.days.find((day) => day.date === '2026-07-16')?.balanceCents).toBe(100_000)
   })
 
+  it('incluye por switch el remanente de Comida sin duplicar el gasto fechado', () => {
+    const data = financeData([
+      movement({ id: 'breakfast', categoryId: 'food', transactionDate: '2026-07-15', amountCents: 200_000, description: 'Desayunos' }),
+    ])
+    data.categories = [{ id: 'food', name: 'Comida', type: 'expense', isDefault: true, isActive: true }]
+    data.budgets = [{
+      id: 'food-q1', categoryId: 'food', month: '2026-07-01', plannedAmountCents: 300_000,
+      name: 'Comida', periodStart: '2026-07-01', periodEnd: '2026-07-15', createdAt, updatedAt: createdAt,
+    }]
+
+    const projection = radar(data, { includedBudgetCategoryIds: ['food'] })
+    expect(projection.events.find((event) => event.id === 'budget:food-q1')).toMatchObject({
+      date: '2026-07-11', label: 'Reserva pendiente · Comida (Q1)', amountCents: -100_000,
+    })
+    expect(projection.events.find((event) => event.id === 'movement:breakfast')).toMatchObject({ amountCents: -200_000 })
+    expect(projection.closingBalanceCents).toBe(600_000)
+  })
+
+  it('conserva la reserva de Comida al simular el presupuesto personal Q2', () => {
+    const data = financeData()
+    data.categories = [
+      { id: 'personal', name: 'Personal', type: 'expense', isDefault: false, isActive: true },
+      { id: 'food', name: 'Comida', type: 'expense', isDefault: true, isActive: true },
+    ]
+    data.budgets = [
+      { id: 'personal-q2', categoryId: 'personal', month: '2026-07-01', plannedAmountCents: 300_000, name: 'Gastos Personales', periodStart: '2026-07-16', periodEnd: '2026-07-31', createdAt, updatedAt: createdAt },
+      { id: 'food-q2', categoryId: 'food', month: '2026-07-01', plannedAmountCents: 200_000, name: 'Comida', periodStart: '2026-07-16', periodEnd: '2026-07-31', createdAt, updatedAt: createdAt },
+    ]
+
+    const projection = radar(data, {
+      includePersonalBudgetReservations: true,
+      includedBudgetCategoryIds: ['food'],
+      personalBudgetScenario: { periodStart: '2026-07-16', periodEnd: '2026-07-31', targetAmountCents: 250_000 },
+    })
+    expect(projection.events.find((event) => event.id === 'budget-scenario:2026-07-16')).toMatchObject({ amountCents: -250_000 })
+    expect(projection.events.find((event) => event.id === 'budget:food-q2')).toMatchObject({ amountCents: -200_000 })
+  })
+
   it('mantiene el gasto personal realizado como saldo real y reserva sólo el remanente futuro', () => {
     const data = financeData([
       movement({ id: 'coffee', categoryId: 'personal', transactionDate: '2026-07-05', amountCents: 100_000, status: 'completed', description: 'Café' }),

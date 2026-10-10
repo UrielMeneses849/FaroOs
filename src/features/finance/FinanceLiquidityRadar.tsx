@@ -1,4 +1,4 @@
-import { format, parseISO } from 'date-fns'
+import { endOfMonth, format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, CircleGauge, Landmark, Settings2, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
@@ -15,7 +15,7 @@ import {
   type LiquiditySimulationInput,
   type PersonalBudgetScenarioInput,
 } from '../../services/financeLiquidityProjection'
-import { formatMxn, personalBudgetCarryOverIntoPeriod, personalBudgetForDate } from '../../services/financeService'
+import { canonicalFinanceBudgetGroups, formatMxn, personalBudgetCarryOverIntoPeriod, personalBudgetForDate } from '../../services/financeService'
 import { fortnightPeriodForMonth } from '../../services/financeBudgetCycle'
 
 interface FinanceLiquidityRadarProps {
@@ -48,6 +48,7 @@ function statusMessage(projection: FinanceLiquidityProjection) {
 }
 
 const reservationPreferenceKey = 'faro-finance-liquidity-reserve-personal'
+const excludedCategoryReservationsKey = 'faro-finance-liquidity-excluded-budget-categories:v1'
 const personalScenarioStorageKey = (userId: string | undefined, periodStart: string) =>
   `faro-finance-liquidity-q2-scenario:v1:${userId ?? 'local'}:${periodStart}`
 
@@ -62,6 +63,15 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
     const stored = window.localStorage.getItem(reservationPreferenceKey)
     return stored == null ? true : stored === 'true'
   })
+  const [excludedBudgetCategoryIds, setExcludedBudgetCategoryIds] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set()
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(excludedCategoryReservationsKey) ?? '[]')
+      return new Set(Array.isArray(stored) ? stored.filter((item): item is string => typeof item === 'string') : [])
+    } catch {
+      return new Set()
+    }
+  })
   const [bufferInput, setBufferInput] = useState(String(data.liquidityPreference.minimumOperatingBufferCents / 100))
   const [savingBuffer, setSavingBuffer] = useState(false)
   const [bufferError, setBufferError] = useState('')
@@ -72,6 +82,33 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
   const q2CarryOverCents = useMemo(() => personalBudgetCarryOverIntoPeriod(data, q2Period.periodStart), [data, q2Period.periodStart])
   const q2DefaultTargetCents = q2Budget?.plannedAmountCents ?? q1Budget?.plannedAmountCents ?? 0
   const q2ScenarioKey = useMemo(() => personalScenarioStorageKey(userId, q2Period.periodStart), [q2Period.periodStart, userId])
+  const budgetToggleOptions = useMemo(() => {
+    const periodStart = format(month, 'yyyy-MM-01')
+    const periodEnd = format(endOfMonth(month), 'yyyy-MM-dd')
+    const options = new Map<string, { key: string; categoryId?: string; label: string; isPersonal: boolean }>()
+    for (const group of canonicalFinanceBudgetGroups(data)) {
+      if (group.periodStart > periodEnd || group.periodEnd < periodStart) continue
+      const key = group.isPersonal ? 'personal' : group.budget.categoryId
+      if (options.has(key)) continue
+      options.set(key, {
+        key,
+        categoryId: group.isPersonal ? undefined : group.budget.categoryId,
+        label: group.isPersonal ? 'personal' : group.category?.name ?? group.budget.name ?? 'categoría',
+        isPersonal: group.isPersonal,
+      })
+    }
+    return [...options.values()].sort((left, right) => Number(right.isPersonal) - Number(left.isPersonal)
+      || left.label.localeCompare(right.label, 'es'))
+  }, [data, month])
+  const includedBudgetCategoryIds = useMemo(() => budgetToggleOptions
+    .flatMap((option) => option.categoryId && !excludedBudgetCategoryIds.has(option.categoryId) ? [option.categoryId] : []),
+  [budgetToggleOptions, excludedBudgetCategoryIds])
+  const canonicalBudgetCategoryIds = useMemo(() => [...new Set(canonicalFinanceBudgetGroups(data)
+    .filter((group) => !group.isPersonal)
+    .map((group) => group.budget.categoryId))], [data])
+  const hasActiveBudgetReservations = budgetToggleOptions.some((option) => option.isPersonal
+    ? includePersonalBudgetReservations
+    : Boolean(option.categoryId && !excludedBudgetCategoryIds.has(option.categoryId)))
   const baselineProjection = useMemo(() => financeLiquidityProjection({
     data,
     month,
@@ -79,7 +116,8 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
     minimumOperatingBufferCents: data.liquidityPreference.minimumOperatingBufferCents,
     simulation,
     includePersonalBudgetReservations,
-  }), [availableTodayCents, data, includePersonalBudgetReservations, month, simulation])
+    includedBudgetCategoryIds,
+  }), [availableTodayCents, data, includePersonalBudgetReservations, includedBudgetCategoryIds, month, simulation])
   const projection = useMemo(() => financeLiquidityProjection({
     data,
     month,
@@ -88,17 +126,22 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
     simulation,
     personalBudgetScenario,
     includePersonalBudgetReservations,
-  }), [availableTodayCents, data, includePersonalBudgetReservations, month, personalBudgetScenario, simulation])
+    includedBudgetCategoryIds,
+  }), [availableTodayCents, data, includePersonalBudgetReservations, includedBudgetCategoryIds, month, personalBudgetScenario, simulation])
   const comparisonProjection = useMemo(() => financeLiquidityProjection({
     data,
     month,
     currentAvailableBalanceCents: availableTodayCents,
     minimumOperatingBufferCents: data.liquidityPreference.minimumOperatingBufferCents,
     includePersonalBudgetReservations: true,
-  }), [availableTodayCents, data, month])
+    includedBudgetCategoryIds: canonicalBudgetCategoryIds,
+  }), [availableTodayCents, canonicalBudgetCategoryIds, data, month])
   useEffect(() => {
     window.localStorage.setItem(reservationPreferenceKey, String(includePersonalBudgetReservations))
   }, [includePersonalBudgetReservations])
+  useEffect(() => {
+    window.localStorage.setItem(excludedCategoryReservationsKey, JSON.stringify([...excludedBudgetCategoryIds]))
+  }, [excludedBudgetCategoryIds])
   useEffect(() => {
     if (typeof window === 'undefined') return
     let cancelled = false
@@ -160,9 +203,9 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
       : 'Reconstruye el periodo sólo con movimientos realizados; los planes vencidos no alteran la historia.'
   const reservationCopy = isHistorical
     ? ''
-    : includePersonalBudgetReservations
-      ? ' También reserva el remanente del presupuesto personal sin duplicar pagos.'
-      : ' No aparta presupuesto personal sin fecha.'
+    : hasActiveBudgetReservations
+      ? ' También reserva el remanente de los presupuestos activos sin duplicar gastos ya fechados.'
+      : ' No aparta presupuestos sin fecha.'
 
   const saveBuffer = async () => {
     const amount = Number(bufferInput.replace(/,/g, ''))
@@ -212,24 +255,42 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
       <header>
         <div className="liquidity-radar__chart-copy">
           <span className="eyebrow">Evolución temporal</span>
-          <h3>{isHistorical ? 'Saldo realizado día a día' : includePersonalBudgetReservations ? 'Saldo de caja con presupuesto personal' : 'Saldo de caja día a día'}</h3>
+          <h3>{isHistorical ? 'Saldo realizado día a día' : hasActiveBudgetReservations ? 'Saldo de caja con presupuestos' : 'Saldo de caja día a día'}</h3>
           <p>{projectionBasisCopy}{reservationCopy}</p>
         </div>
         <div className="liquidity-radar__chart-controls">
-          <button
-            type="button"
-            role="switch"
-            aria-checked={!isHistorical && includePersonalBudgetReservations}
-            aria-disabled={isHistorical}
-            disabled={isHistorical}
-            title={isHistorical ? 'Los periodos cerrados no incluyen reservas hipotéticas.' : undefined}
-            className={`liquidity-radar__budget-switch${!isHistorical && includePersonalBudgetReservations ? ' is-active' : ''}`}
-            onClick={() => setIncludePersonalBudgetReservations((current) => !current)}
-          >
-            <i aria-hidden="true"><span /></i>
-            <span>Presupuesto personal</span>
-            <small>{isHistorical ? 'Periodo cerrado · sólo realizado' : includePersonalBudgetReservations ? 'Reserva futura · sin duplicar pagos' : 'Sólo gastos con fecha'}</small>
-          </button>
+          {budgetToggleOptions.map((option) => {
+            const isActive = option.isPersonal
+              ? includePersonalBudgetReservations
+              : Boolean(option.categoryId && !excludedBudgetCategoryIds.has(option.categoryId))
+            return <button
+              key={option.key}
+              type="button"
+              role="switch"
+              aria-checked={!isHistorical && isActive}
+              aria-disabled={isHistorical}
+              disabled={isHistorical}
+              title={isHistorical ? 'Los periodos cerrados no incluyen reservas hipotéticas.' : undefined}
+              className={`liquidity-radar__budget-switch${!isHistorical && isActive ? ' is-active' : ''}`}
+              onClick={() => {
+                if (option.isPersonal) {
+                  setIncludePersonalBudgetReservations((current) => !current)
+                  return
+                }
+                if (!option.categoryId) return
+                setExcludedBudgetCategoryIds((current) => {
+                  const next = new Set(current)
+                  if (next.has(option.categoryId!)) next.delete(option.categoryId!)
+                  else next.add(option.categoryId!)
+                  return next
+                })
+              }}
+            >
+              <i aria-hidden="true"><span /></i>
+              <span>Presupuesto {option.label}</span>
+              <small>{isHistorical ? 'Periodo cerrado · sólo realizado' : isActive ? 'Reserva restante · sin duplicar gastos' : 'Sólo gastos con fecha'}</small>
+            </button>
+          })}
           <div className="liquidity-radar__scenario-slot">
             {!isHistorical && includePersonalBudgetReservations && personalBudgetScenario && <span className="liquidity-radar__saved-scenario">Q2 guardado · {formatMxn(personalBudgetScenario.targetAmountCents)}</span>}
           </div>
@@ -295,6 +356,7 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
       month={month}
       availableTodayCents={availableTodayCents}
       includePersonalBudgetReservations={includePersonalBudgetReservations}
+      includedBudgetCategoryIds={includedBudgetCategoryIds}
       onApply={(next) => { setSimulation(next); setShowSimulator(false) }}
     />
     {showBudgetScenario && <PersonalBudgetScenarioModal
@@ -305,6 +367,7 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
       month={month}
       availableTodayCents={availableTodayCents}
       includePersonalBudgetReservations
+      includedBudgetCategoryIds={includedBudgetCategoryIds}
       periodStart={q2Period.periodStart}
       periodEnd={q2Period.periodEnd}
       carryOverCents={q2CarryOverCents}
@@ -384,7 +447,7 @@ function LiquidityTooltip({ active, payload, periodStart, openingBalanceCents, o
   return <div className="liquidity-radar__tooltip"><strong>{dateLabel(row.date, "EEEE d 'de' MMM")}</strong><small>Saldo después</small><b>{formatMxn(Math.round(row.balance * 100))}</b>{(showOpening || row.events.length > 0) && <ul>{showOpening && <li><span>Disponible operativo inicial</span><em className="positive">{formatMxn(openingBalanceCents)}</em></li>}{row.events.map((event) => <li key={`${event.label}-${event.amountCents}`}><span>{event.label}{event.isOverdue ? ' · vencido' : ''}</span><em className={event.amountCents >= 0 ? 'positive' : 'negative'}>{event.amountCents >= 0 ? '+' : '−'}{formatMxn(Math.abs(event.amountCents))}</em></li>)}</ul>}</div>
 }
 
-function SimulationModal({ open, onClose, baseline, data, month, availableTodayCents, includePersonalBudgetReservations, onApply }: {
+function SimulationModal({ open, onClose, baseline, data, month, availableTodayCents, includePersonalBudgetReservations, includedBudgetCategoryIds, onApply }: {
   open: boolean
   onClose: () => void
   baseline: FinanceLiquidityProjection
@@ -392,6 +455,7 @@ function SimulationModal({ open, onClose, baseline, data, month, availableTodayC
   month: Date
   availableTodayCents: number
   includePersonalBudgetReservations: boolean
+  includedBudgetCategoryIds: string[]
   onApply: (simulation: LiquiditySimulationInput) => void
 }) {
   const [type, setType] = useState<'expense' | 'income'>('expense')
@@ -400,7 +464,7 @@ function SimulationModal({ open, onClose, baseline, data, month, availableTodayC
   const [description, setDescription] = useState('')
   const amountCents = Math.round(Number(amount || 0) * 100)
   const candidate = amountCents > 0 ? { type, amountCents, date, description } satisfies LiquiditySimulationInput : undefined
-  const preview = useMemo(() => candidate ? financeLiquidityProjection({ data, month, currentAvailableBalanceCents: availableTodayCents, minimumOperatingBufferCents: data.liquidityPreference.minimumOperatingBufferCents, simulation: candidate, includePersonalBudgetReservations }) : undefined, [availableTodayCents, candidate, data, includePersonalBudgetReservations, month])
+  const preview = useMemo(() => candidate ? financeLiquidityProjection({ data, month, currentAvailableBalanceCents: availableTodayCents, minimumOperatingBufferCents: data.liquidityPreference.minimumOperatingBufferCents, simulation: candidate, includePersonalBudgetReservations, includedBudgetCategoryIds }) : undefined, [availableTodayCents, candidate, data, includePersonalBudgetReservations, includedBudgetCategoryIds, month])
   const submit = (event: FormEvent) => {
     event.preventDefault()
     if (candidate) onApply(candidate)
@@ -420,7 +484,7 @@ function SimulationModal({ open, onClose, baseline, data, month, availableTodayC
   </Modal>
 }
 
-function PersonalBudgetScenarioModal({ open, onClose, baseline, data, month, availableTodayCents, includePersonalBudgetReservations, periodStart, periodEnd, carryOverCents, defaultTargetCents, onApply }: {
+function PersonalBudgetScenarioModal({ open, onClose, baseline, data, month, availableTodayCents, includePersonalBudgetReservations, includedBudgetCategoryIds, periodStart, periodEnd, carryOverCents, defaultTargetCents, onApply }: {
   open: boolean
   onClose: () => void
   baseline: FinanceLiquidityProjection
@@ -428,6 +492,7 @@ function PersonalBudgetScenarioModal({ open, onClose, baseline, data, month, ava
   month: Date
   availableTodayCents: number
   includePersonalBudgetReservations: boolean
+  includedBudgetCategoryIds: string[]
   periodStart: string
   periodEnd: string
   carryOverCents: number
@@ -451,8 +516,9 @@ function PersonalBudgetScenarioModal({ open, onClose, baseline, data, month, ava
       minimumOperatingBufferCents: data.liquidityPreference.minimumOperatingBufferCents,
       personalBudgetScenario: { periodStart, periodEnd, targetAmountCents: previewTargetCents },
       includePersonalBudgetReservations,
+      includedBudgetCategoryIds,
     })
-  }, [amount, availableTodayCents, data, includePersonalBudgetReservations, month, periodEnd, periodStart])
+  }, [amount, availableTodayCents, data, includePersonalBudgetReservations, includedBudgetCategoryIds, month, periodEnd, periodStart])
   const submit = (event: FormEvent) => {
     event.preventDefault()
     if (candidate) onApply(candidate)
