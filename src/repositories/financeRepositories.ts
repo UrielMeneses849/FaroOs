@@ -293,10 +293,15 @@ export const financeRecurringRepository = {
       .eq('id', id).eq('user_id', userId)
     throwIfError(error)
   },
-  async remove(id: string, userId: string) {
+  async endFromPeriod(id: string, period: string, userId: string) {
     await assertFinanceUser(userId)
-    const { error } = await supabase.from('finance_recurring_transactions').delete()
-      .eq('id', id).eq('user_id', userId)
+    // The database operation is atomic: it preserves every paid occurrence
+    // and movement, then removes only unregistered periods from this month on.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.rpc as any)('end_finance_recurring_schedule', {
+      target_recurring_id: id,
+      target_period: period,
+    })
     throwIfError(error)
   },
 }

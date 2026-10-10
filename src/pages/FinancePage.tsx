@@ -611,15 +611,15 @@ export function FinancePage() {
         setFeedback(reason instanceof Error ? reason.message : 'No se pudo eliminar la cuenta.')
       }
     }} />
-    <ConfirmDialog open={Boolean(deletingRecurring)} title="Eliminar recurrente" description="Esta acción eliminará la programación futura. Los movimientos ya registrados permanecerán en tu historial." confirmLabel="Eliminar" onClose={() => setDeletingRecurring(undefined)} onConfirm={async () => {
+    <ConfirmDialog open={Boolean(deletingRecurring)} title="Terminar recurrente" description={`Dejará de programarse desde ${format(month, 'MMMM yyyy', { locale: es })}. Los pagos y periodos anteriores permanecerán intactos.`} confirmLabel="Terminar desde este mes" onClose={() => setDeletingRecurring(undefined)} onConfirm={async () => {
       if (!user || !deletingRecurring) return
       try {
-        await financeRecurringRepository.remove(deletingRecurring.id, user.id)
+        await financeRecurringRepository.endFromPeriod(deletingRecurring.id, selectedPeriod, user.id)
         setDeletingRecurring(undefined)
-        await finish('Programación recurrente eliminada.')
+        await finish(`Programación terminada desde ${format(month, 'MMMM yyyy', { locale: es })}. El historial se conservó.`)
       } catch (reason) {
         setDeletingRecurring(undefined)
-        setFeedback(reason instanceof Error ? reason.message : 'No se pudo eliminar el recurrente.')
+        setFeedback(reason instanceof Error ? reason.message : 'No se pudo terminar el recurrente.')
       }
     }} />
     <ConfirmDialog open={Boolean(revertingOccurrence)} title={revertingOccurrence && data.recurring.find((item) => item.id === revertingOccurrence.recurringTransactionId)?.type === 'income' ? 'Deshacer cobro' : 'Deshacer pago'} description={revertingOccurrence && data.recurring.find((item) => item.id === revertingOccurrence.recurringTransactionId)?.type === 'income' ? 'Se eliminará el movimiento generado y el ingreso volverá a su estado anterior.' : 'Se eliminará el movimiento generado y el gasto volverá a su estado anterior.'} confirmLabel="Deshacer" onClose={() => setRevertingOccurrence(undefined)} onConfirm={() => void revertRecurringPayment()} />
