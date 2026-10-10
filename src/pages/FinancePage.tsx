@@ -66,6 +66,7 @@ export function FinancePage() {
   const [editingTransaction, setEditingTransaction] = useState<FinanceTransaction>()
   const [editingAccount, setEditingAccount] = useState<FinanceAccount>()
   const [editingRecurring, setEditingRecurring] = useState<FinanceRecurringTransaction>()
+  const [editingOccurrence, setEditingOccurrence] = useState<FinanceRecurringOccurrence>()
   const [recurringEditMode, setRecurringEditMode] = useState<'period' | 'template'>('period')
   const [editingGoal, setEditingGoal] = useState<FinanceGoal>()
   const [budgetHalfToEdit, setBudgetHalfToEdit] = useState<'q1' | 'q2'>()
@@ -232,10 +233,12 @@ export function FinancePage() {
   const selectedPeriod = monthKey(month)
   const recurringForMonth = data.recurring
     .filter((item) => recurringAppliesToMonth(item, month))
-    .map((item) => {
-      const occurrence = data.recurringOccurrences.find((candidate) =>
+    .flatMap<{ item: FinanceRecurringTransaction; occurrence?: FinanceRecurringOccurrence; expectedDate?: string }>((item) => {
+      const occurrences = data.recurringOccurrences.filter((candidate) =>
         candidate.recurringTransactionId === item.id && candidate.period === selectedPeriod)
-      return { item, occurrence, expectedDate: occurrence?.expectedDate }
+      return occurrences.length
+        ? occurrences.map((occurrence) => ({ item, occurrence, expectedDate: occurrence.expectedDate }))
+        : [{ item, occurrence: undefined, expectedDate: undefined }]
     })
     .sort((left, right) => {
       const rank = (status?: string) => status === 'paid' || status === 'skipped' ? 1 : 0
@@ -247,11 +250,13 @@ export function FinancePage() {
       ? type === 'income' || type === 'refund'
       : type === 'expense' || type === 'debt_payment'
     const pendingRecurring = data.recurring.filter((item) => item.isActive && matches(item.type) && recurringAppliesToMonth(item, month)).flatMap((item) => {
-      const occurrence = data.recurringOccurrences.find((candidate) => candidate.recurringTransactionId === item.id && candidate.period === selectedPeriod)
-      const generatedMovementExists = Boolean(occurrence?.transactionId && data.transactions.some((transaction) =>
-        transaction.id === occurrence.transactionId && transaction.status === 'completed'))
-      if (!occurrence?.amountCents || !occurrence.expectedDate.startsWith(format(month, 'yyyy-MM')) || occurrence.status === 'skipped' || (occurrence.status === 'paid' && generatedMovementExists)) return []
-      return [occurrence]
+      return data.recurringOccurrences.filter((occurrence) => {
+        if (occurrence.recurringTransactionId !== item.id || occurrence.period !== selectedPeriod || !occurrence.amountCents) return false
+        const generatedMovementExists = Boolean(occurrence.transactionId && data.transactions.some((transaction) =>
+          transaction.id === occurrence.transactionId && transaction.status === 'completed'))
+        return occurrence.expectedDate.startsWith(format(month, 'yyyy-MM'))
+          && occurrence.status !== 'skipped' && !(occurrence.status === 'paid' && generatedMovementExists)
+      })
     })
     const recurringCents = monthlyTransactions
       .filter((item) => Boolean(item.recurringTransactionId) && matches(item.type) && item.status === 'completed')
@@ -314,7 +319,7 @@ export function FinancePage() {
   }
   const finish = async (message: string) => {
     setDialog(null); setEditingTransaction(undefined); setEditingAccount(undefined)
-    setEditingRecurring(undefined); setEditingGoal(undefined); setSelectedGoal(undefined)
+    setEditingRecurring(undefined); setEditingOccurrence(undefined); setEditingGoal(undefined); setSelectedGoal(undefined)
     await refresh()
     window.dispatchEvent(new Event('faro:finance-updated'))
     setFeedback(message)
@@ -337,10 +342,9 @@ export function FinancePage() {
     setMovementPreset(preset)
     setDialog('transaction')
   }
-  const registerRecurringPayment = async (item: FinanceRecurringTransaction) => {
-    if (!user || paymentLocks.current.has(item.id)) return
-    const currentOccurrence = data.recurringOccurrences.find((occurrence) =>
-      occurrence.recurringTransactionId === item.id && occurrence.period === selectedPeriod)
+  const registerRecurringPayment = async (item: FinanceRecurringTransaction, currentOccurrence?: FinanceRecurringOccurrence) => {
+    const lockId = currentOccurrence?.id ?? item.id
+    if (!user || paymentLocks.current.has(lockId)) return
     if (!currentOccurrence?.amountCents) {
       setFeedback('Define el monto y la fecha de este periodo antes de registrarlo.')
       return
@@ -352,14 +356,14 @@ export function FinancePage() {
       setFeedback('Este periodo ya tiene un pago registrado.')
       return
     }
-    paymentLocks.current.add(item.id); setSavingPaymentId(item.id)
+    paymentLocks.current.add(lockId); setSavingPaymentId(lockId)
     try {
       await financeRecurringOccurrenceRepository.register(item.id, selectedPeriod, expectedDate, user.id)
       await finish(item.type === 'income' ? 'Cobro registrado.' : 'Pago registrado.')
     } catch (reason) {
       setFeedback(reason instanceof Error ? reason.message : 'No se pudo registrar la ocurrencia.')
     } finally {
-      paymentLocks.current.delete(item.id); setSavingPaymentId(undefined)
+      paymentLocks.current.delete(lockId); setSavingPaymentId(undefined)
     }
   }
   const revertRecurringPayment = async () => {
@@ -376,18 +380,18 @@ export function FinancePage() {
       paymentLocks.current.delete(recurringId); setSavingPaymentId(undefined)
     }
   }
-  const setRecurringMonthStatus = async (item: FinanceRecurringTransaction, next: 'skipped' | 'postponed') => {
-    if (!user || paymentLocks.current.has(item.id)) return
-    paymentLocks.current.add(item.id); setSavingPaymentId(item.id)
+  const setRecurringMonthStatus = async (item: FinanceRecurringTransaction, currentOccurrence: FinanceRecurringOccurrence | undefined, next: 'skipped' | 'postponed') => {
+    const lockId = currentOccurrence?.id ?? item.id
+    if (!user || paymentLocks.current.has(lockId)) return
+    paymentLocks.current.add(lockId); setSavingPaymentId(lockId)
     try {
       const expectedDate = recurringExpectedDate(item, month)
-      const occurrence = data.recurringOccurrences.find((candidate) =>
-        candidate.recurringTransactionId === item.id && candidate.period === selectedPeriod)
+      const occurrence = currentOccurrence
         ?? await financeRecurringOccurrenceRepository.ensure(item.id, selectedPeriod, expectedDate, user.id)
       await financeRecurringOccurrenceRepository.setStatus(occurrence.id, next, user.id)
       await finish(next === 'skipped' ? 'Periodo saltado.' : 'Pago pospuesto.')
     } finally {
-      paymentLocks.current.delete(item.id); setSavingPaymentId(undefined)
+      paymentLocks.current.delete(lockId); setSavingPaymentId(undefined)
     }
   }
   const registerEventualPayment = async (item: FinanceTransaction) => {
@@ -501,7 +505,7 @@ export function FinancePage() {
       <ProjectionStrip items={projectionItems(incomeProjection)} />
       <section className="finance-expense-panel">
         <SectionHead eyebrow="Entradas previsibles" title="Ingresos recurrentes" action="+" actionLabel="Registrar ingreso recurrente" onClick={() => { setMovementPreset({ type: 'income' }); setDialog('recurring') }} />
-        <div className="finance-expense-list">{recurringForMonth.filter(({ item }) => item.type === 'income').map(({ item, expectedDate, occurrence }) => <RecurringCard key={item.id} item={item} expectedDate={expectedDate} occurrence={occurrence} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={data.categories.find((category) => category.id === item.categoryId)?.name} busy={savingPaymentId === item.id} onRegister={() => void registerRecurringPayment(item)} onEdit={() => { setRecurringEditMode('period'); setEditingRecurring(item); setDialog('recurring') }} onDelete={() => setDeletingRecurring(item)} />)}</div>
+        <div className="finance-expense-list">{recurringForMonth.filter(({ item }) => item.type === 'income').map(({ item, expectedDate, occurrence }) => <RecurringCard key={occurrence?.id ?? item.id} item={item} expectedDate={expectedDate} occurrence={occurrence} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={data.categories.find((category) => category.id === item.categoryId)?.name} busy={savingPaymentId === (occurrence?.id ?? item.id)} onRegister={() => void registerRecurringPayment(item, occurrence)} onEdit={() => { setRecurringEditMode('period'); setEditingRecurring(item); setEditingOccurrence(occurrence); setDialog('recurring') }} onDelete={() => setDeletingRecurring(item)} />)}</div>
         {!recurringForMonth.some(({ item }) => item.type === 'income') && <EmptyState title="Sin ingresos recurrentes" description="Registra sueldo, honorarios o pagos periódicos esperados." />}
       </section>
       <section className="finance-expense-panel">
@@ -515,7 +519,7 @@ export function FinancePage() {
       <ProjectionStrip items={projectionItems(expenseProjection)} />
       <section className="finance-expense-panel">
         <SectionHead eyebrow="Calendario financiero" title="Gastos recurrentes" action="+" actionLabel="Registrar gasto recurrente" onClick={() => setDialog('recurring')} />
-        <div className="finance-expense-list">{recurringForMonth.filter(({ item }) => item.type !== 'income' && item.type !== 'refund').map(({ item, expectedDate, occurrence }) => <RecurringCard key={item.id} item={item} expectedDate={expectedDate} occurrence={occurrence} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={data.categories.find((category) => category.id === item.categoryId)?.name} busy={savingPaymentId === item.id} onRegister={() => void registerRecurringPayment(item)} onEdit={() => { setRecurringEditMode('period'); setEditingRecurring(item); setDialog('recurring') }} onDelete={() => setDeletingRecurring(item)} />)}</div>
+        <div className="finance-expense-list">{recurringForMonth.filter(({ item }) => item.type !== 'income' && item.type !== 'refund').map(({ item, expectedDate, occurrence }) => <RecurringCard key={occurrence?.id ?? item.id} item={item} expectedDate={expectedDate} occurrence={occurrence} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={data.categories.find((category) => category.id === item.categoryId)?.name} busy={savingPaymentId === (occurrence?.id ?? item.id)} onRegister={() => void registerRecurringPayment(item, occurrence)} onEdit={() => { setRecurringEditMode('period'); setEditingRecurring(item); setEditingOccurrence(occurrence); setDialog('recurring') }} onDelete={() => setDeletingRecurring(item)} />)}</div>
         {!recurringForMonth.some(({ item }) => item.type !== 'income' && item.type !== 'refund') && <EmptyState title="Sin gastos recurrentes" description="Registra renta, servicios o cualquier gasto periódico." />}
       </section>
       <section className="finance-expense-panel">
@@ -558,28 +562,29 @@ export function FinancePage() {
       key={recurringEditMode}
       initial={editingRecurring}
       editMode={recurringEditMode}
-      occurrence={editingRecurring ? data.recurringOccurrences.find((item) => item.recurringTransactionId === editingRecurring.id && item.period === selectedPeriod) : undefined}
+      occurrence={editingOccurrence}
       period={selectedPeriod}
-      suggestedDate={editingRecurring ? recurringExpectedDate(editingRecurring, month) : format(month, 'yyyy-MM-dd')}
+      suggestedDate={editingOccurrence?.expectedDate ?? (editingRecurring ? recurringExpectedDate(editingRecurring, month) : format(month, 'yyyy-MM-dd'))}
       presetType={movementPreset?.type}
       accounts={data.accounts.filter((item) => item.isActive)}
       categories={data.categories.filter((item) => item.isActive)}
-      onClose={() => { setDialog(null); setEditingRecurring(undefined); setMovementPreset(undefined) }}
+      onClose={() => { setDialog(null); setEditingRecurring(undefined); setEditingOccurrence(undefined); setMovementPreset(undefined) }}
       onOpenTemplate={editingRecurring && recurringEditMode === 'period' ? () => setRecurringEditMode('template') : undefined}
-      onPostpone={editingRecurring ? () => void setRecurringMonthStatus(editingRecurring, 'postponed') : undefined}
-      onSkip={editingRecurring ? () => void setRecurringMonthStatus(editingRecurring, 'skipped') : undefined}
+      onPostpone={editingRecurring ? () => void setRecurringMonthStatus(editingRecurring, editingOccurrence, 'postponed') : undefined}
+      onSkip={editingRecurring ? () => void setRecurringMonthStatus(editingRecurring, editingOccurrence, 'skipped') : undefined}
       onToggleActive={editingRecurring ? async () => {
         if (!user) return
         await financeRecurringRepository.setActive(editingRecurring.id, !editingRecurring.isActive, user.id)
         await finish(editingRecurring.isActive ? 'Recurrente pausado.' : 'Recurrente reanudado.')
       } : undefined}
       onRevert={editingRecurring ? () => {
-        const occurrence = data.recurringOccurrences.find((item) => item.recurringTransactionId === editingRecurring.id && item.period === selectedPeriod)
-        if (occurrence) setRevertingOccurrence(occurrence)
+        if (editingOccurrence) setRevertingOccurrence(editingOccurrence)
       } : undefined}
       onSave={async (item) => {
         if (!user) return
-        if (editingRecurring && recurringEditMode === 'period') {
+        if (editingRecurring && editingOccurrence && recurringEditMode === 'period') {
+          await financeRecurringOccurrenceRepository.saveOccurrence(editingOccurrence.id, item.nextOccurrence, item.amountCents, user.id, item.description)
+        } else if (editingRecurring && recurringEditMode === 'period') {
           await financeRecurringOccurrenceRepository.savePeriod(item.id, selectedPeriod, item.nextOccurrence, item.amountCents, user.id, item.description)
         } else if (editingRecurring) {
           await financeRecurringRepository.save(item, user.id)

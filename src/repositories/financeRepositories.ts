@@ -321,7 +321,7 @@ export const financeRecurringOccurrenceRepository = {
       period, expected_date: expectedDate,
       amount: amountCents == null ? undefined : centsToNumeric(amountCents),
     }, {
-      onConflict: 'user_id,recurring_transaction_id,period',
+      onConflict: 'user_id,recurring_transaction_id,expected_date',
       ignoreDuplicates: false,
     }).select().single()
     throwIfError(error)
@@ -334,6 +334,17 @@ export const financeRecurringOccurrenceRepository = {
     const { error } = await (supabase.rpc as any)('save_finance_recurring_period', {
       target_recurring_id: recurringTransactionId,
       target_period: period,
+      target_expected_date: expectedDate,
+      target_amount: centsToNumeric(amountCents),
+      target_description: description ?? null,
+    })
+    throwIfError(error)
+  },
+  async saveOccurrence(occurrenceId: string, expectedDate: string, amountCents: number, userId: string, description?: string) {
+    await assertFinanceUser(userId)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.rpc as any)('save_finance_recurring_occurrence', {
+      target_occurrence_id: occurrenceId,
       target_expected_date: expectedDate,
       target_amount: centsToNumeric(amountCents),
       target_description: description ?? null,

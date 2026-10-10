@@ -148,26 +148,28 @@ function recurringEventsForMonth(data: FinanceData, month: Date): LiquidityProje
   const events: LiquidityProjectionEvent[] = []
   for (const recurring of data.recurring) {
     if (!recurring.isActive || !isLiquidityType(recurring.type) || !recurringAppliesToMonth(recurring, month)) continue
-    const occurrence = data.recurringOccurrences.find((candidate) =>
+    const occurrences = data.recurringOccurrences.filter((candidate) =>
       candidate.recurringTransactionId === recurring.id && candidate.period === period)
-    if (!occurrence || !occurrence.amountCents || occurrence.status === 'skipped') continue
-    if (!occurrence.expectedDate.startsWith(format(month, 'yyyy-MM'))) continue
+    for (const occurrence of occurrences) {
+      if (!occurrence.amountCents || occurrence.status === 'skipped') continue
+      if (!occurrence.expectedDate.startsWith(format(month, 'yyyy-MM'))) continue
 
-    // A materialized movement is the source of truth — including one still planned.
-    const materialized = occurrence.transactionId && data.transactions.some((transaction) =>
-      transaction.id === occurrence.transactionId && transaction.status !== 'cancelled')
-    if (materialized) continue
+      // A materialized movement is the source of truth — including one still planned.
+      const materialized = occurrence.transactionId && data.transactions.some((transaction) =>
+        transaction.id === occurrence.transactionId && transaction.status !== 'cancelled')
+      if (materialized) continue
 
-    const amountCents = operationalImpactCents({ ...recurring, amountCents: occurrence.amountCents }, activeAccountIds)
-    if (!amountCents) continue
-    events.push({
-      id: `recurring:${occurrence.id}`,
-      date: occurrence.expectedDate,
-      label: occurrence.description || recurring.description,
-      amountCents,
-      kind: amountCents >= 0 ? 'income' : 'expense',
-      source: 'recurring',
-    })
+      const amountCents = operationalImpactCents({ ...recurring, amountCents: occurrence.amountCents }, activeAccountIds)
+      if (!amountCents) continue
+      events.push({
+        id: `recurring:${occurrence.id}`,
+        date: occurrence.expectedDate,
+        label: occurrence.description || recurring.description,
+        amountCents,
+        kind: amountCents >= 0 ? 'income' : 'expense',
+        source: 'recurring',
+      })
+    }
   }
   return events
 }

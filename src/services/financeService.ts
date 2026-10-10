@@ -211,20 +211,22 @@ export function financeLiquidityTimeline(data: FinanceData, month: Date, referen
   data.recurring
     .filter((item) => item.isActive && recurringAppliesToMonth(item, month) && isLiquidityType(item.type))
     .forEach((item) => {
-      const occurrence = data.recurringOccurrences.find((candidate) =>
-        candidate.recurringTransactionId === item.id && candidate.period === period)
-      const generatedMovementExists = Boolean(occurrence?.transactionId && data.transactions.some((transaction) =>
-        transaction.id === occurrence.transactionId && transaction.status === 'completed'))
-      if (!occurrence?.amountCents || occurrence.status === 'skipped' || (occurrence.status === 'paid' && generatedMovementExists)) return
-      if (!inMonth(occurrence.expectedDate, month)) return
-      addEvent({
-        id: `recurring:${occurrence.id}`,
-        date: occurrence.expectedDate,
-        label: occurrence.description || item.description,
-        amountCents: impactFor(item.type, occurrence.amountCents),
-        kind: kindFor(item.type),
-        source: 'recurring',
-      })
+      data.recurringOccurrences
+        .filter((candidate) => candidate.recurringTransactionId === item.id && candidate.period === period)
+        .forEach((occurrence) => {
+          const generatedMovementExists = Boolean(occurrence.transactionId && data.transactions.some((transaction) =>
+            transaction.id === occurrence.transactionId && transaction.status === 'completed'))
+          if (!occurrence.amountCents || occurrence.status === 'skipped' || (occurrence.status === 'paid' && generatedMovementExists)) return
+          if (!inMonth(occurrence.expectedDate, month)) return
+          addEvent({
+            id: `recurring:${occurrence.id}`,
+            date: occurrence.expectedDate,
+            label: occurrence.description || item.description,
+            amountCents: impactFor(item.type, occurrence.amountCents),
+            kind: kindFor(item.type),
+            source: 'recurring',
+          })
+        })
     })
 
   const days: FinanceLiquidityDay[] = []
@@ -270,14 +272,16 @@ function financeProjectionComponents(data: FinanceData, month: Date, reference: 
   const period = monthKey(month)
   for (const item of data.recurring) {
     if (!item.isActive || !recurringAppliesToMonth(item, month)) continue
-    const occurrence = data.recurringOccurrences.find((candidate) =>
+    const occurrences = data.recurringOccurrences.filter((candidate) =>
       candidate.recurringTransactionId === item.id && candidate.period === period)
-    const generatedMovementExists = Boolean(occurrence?.transactionId && data.transactions.some((transaction) =>
-      transaction.id === occurrence.transactionId && transaction.status === 'completed'))
-    if (occurrence?.status === 'skipped' || (occurrence?.status === 'paid' && generatedMovementExists)) continue
-    if (!occurrence?.amountCents || !inMonth(occurrence.expectedDate, month)) continue
-    if (item.type === 'income' || item.type === 'refund') ingresosPendientes += occurrence.amountCents
-    else if (item.type === 'expense' || item.type === 'debt_payment') gastosPendientes += occurrence.amountCents
+    for (const occurrence of occurrences) {
+      const generatedMovementExists = Boolean(occurrence.transactionId && data.transactions.some((transaction) =>
+        transaction.id === occurrence.transactionId && transaction.status === 'completed'))
+      if (occurrence.status === 'skipped' || (occurrence.status === 'paid' && generatedMovementExists)) continue
+      if (!occurrence.amountCents || !inMonth(occurrence.expectedDate, month)) continue
+      if (item.type === 'income' || item.type === 'refund') ingresosPendientes += occurrence.amountCents
+      else if (item.type === 'expense' || item.type === 'debt_payment') gastosPendientes += occurrence.amountCents
+    }
   }
   // A fortnightly personal budget is an envelope, not a second movement. Reserve
   // only what has not already been committed by real/planed personal expenses.
@@ -491,14 +495,16 @@ function budgetMovementCentsForPeriod(data: FinanceData, {
   const recurringCents = data.recurring.reduce((sum, recurring) => {
     if (!recurring.isActive || !belongsToBudget(recurring.categoryId)) return sum
     if (recurring.type !== 'expense' && recurring.type !== 'debt_payment') return sum
-    const occurrence = data.recurringOccurrences.find((candidate) =>
+    const occurrences = data.recurringOccurrences.filter((candidate) =>
       candidate.recurringTransactionId === recurring.id
       && candidate.expectedDate >= periodStart
       && candidate.expectedDate <= periodEnd)
-    if (!occurrence?.amountCents || occurrence.status === 'skipped' || occurrence.status === 'paid') return sum
-    const materialized = occurrence.transactionId && data.transactions.some((transaction) =>
-      transaction.id === occurrence.transactionId && transaction.status !== 'cancelled')
-    return materialized ? sum : sum + occurrence.amountCents
+    return sum + occurrences.reduce((occurrenceSum, occurrence) => {
+      if (!occurrence.amountCents || occurrence.status === 'skipped' || occurrence.status === 'paid') return occurrenceSum
+      const materialized = occurrence.transactionId && data.transactions.some((transaction) =>
+        transaction.id === occurrence.transactionId && transaction.status !== 'cancelled')
+      return materialized ? occurrenceSum : occurrenceSum + occurrence.amountCents
+    }, 0)
   }, 0)
   return transactionCents + recurringCents
 }

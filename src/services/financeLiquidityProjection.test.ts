@@ -270,6 +270,20 @@ describe('financeLiquidityProjection', () => {
     expect(projection.closingBalanceCents).toBe(800_000)
   })
 
+  it('proyecta todas las ocurrencias semanales del mismo mes', () => {
+    const data = financeData()
+    data.recurring = [{ id: 'moto', accountId: 'account', type: 'expense', amountCents: 90_600, description: 'Moto', frequency: 'weekly', startDate: '2026-07-01', nextOccurrence: '2026-07-11', isActive: true, createdAt, updatedAt: createdAt }]
+    data.recurringOccurrences = ['11', '18', '25'].map((day) => ({
+      id: `moto-${day}`, recurringTransactionId: 'moto', period: '2026-07-01',
+      expectedDate: `2026-07-${day}`, amountCents: 90_600, status: 'pending' as const,
+      createdAt, updatedAt: createdAt,
+    }))
+
+    const projection = radar(data)
+    expect(projection.events.filter((event) => event.id.startsWith('recurring:moto-'))).toHaveLength(3)
+    expect(projection.closingBalanceCents).toBe(628_200)
+  })
+
   it('excluye cancelados y usa la fecha pospuesta de una ocurrencia', () => {
     const data = financeData([
       movement({ id: 'cancelled', transactionDate: '2026-07-12', amountCents: 500_000, status: 'cancelled' }),
