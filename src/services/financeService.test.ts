@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { FinanceData } from '../features/finance/financeTypes'
 import {
   accountBalance, advanceRecurringDate, annualFinanceTotals, budgetPerformance, calculateFinanceMetrics, canRegisterEventualIncome, eventualIncomeTransactions,
-  canonicalFinanceBudgetGroups, categoryBudgetReservations, financeAvailableEvolution, financeDecision, financeFrequencyLabel, financeGoalProjections, financeLiquidityTimeline, financePeriodFlow, financeProjectionBreakdown, formatFinanceDate, goalProgress, monthKey, personalBudgetForDate, personalBudgetReservations, recurringAppliesToMonth, recurringExpectedDate, spentTodayCents,
+  canonicalFinanceBudgetGroups, categoryBudgetReservations, financeAvailableEvolution, financeBudgetReservations, financeDecision, financeFrequencyLabel, financeGoalProjections, financeLiquidityTimeline, financePeriodFlow, financeProjectionBreakdown, formatFinanceDate, goalProgress, monthKey, personalBudgetForDate, personalBudgetReservations, recurringAppliesToMonth, recurringExpectedDate, spentTodayCents,
 } from './financeService'
 import { financeLiquidityProjection } from './financeLiquidityProjection'
 
@@ -109,6 +109,13 @@ describe('financeService', () => {
       { budgetId: 'food-q1', categoryId: 'food', isPersonal: false, amountCents: 100_000 },
     ])
     expect(categoryBudgetReservations(foodData, new Date(2026, 6, 1), [], new Date(2026, 6, 1))).toEqual([])
+    expect(financeBudgetReservations(foodData, new Date(2026, 6, 1), new Date(2026, 6, 1))).toMatchObject([
+      { budgetId: 'food-q1', categoryId: 'food', isPersonal: false, amountCents: 100_000 },
+    ])
+    expect(financeProjectionBreakdown(foodData, new Date(2026, 6, 1), new Date(2026, 6, 1))).toMatchObject({
+      gastosPendientes: 300_000,
+      balanceProyectado: 700_000,
+    })
   })
 
   it('separa el flujo del periodo de la evolución del disponible', () => {
@@ -145,7 +152,7 @@ describe('financeService', () => {
     expect(before.monthlyExpensesCents).toBe(100_000)
     expect(after.monthlyExpensesCents).toBe(0)
     expect(after.actualBalanceCents).toBe(before.actualBalanceCents + 100_000)
-    expect(after.projectedBalanceCents).toBe(before.projectedBalanceCents + 100_000)
+    expect(after.projectedBalanceCents).toBe(before.projectedBalanceCents)
   })
 
   it('calcula Gastado hoy sólo con gastos y pagos de deuda completados locales', () => {
@@ -287,7 +294,7 @@ describe('financeService', () => {
       isActive: true, createdAt: base, updatedAt: base,
     } as const
     const projected = financeProjectionBreakdown({
-      ...data, accounts: [{ ...data.accounts[0], initialBalanceCents: 0 }],
+      ...data, accounts: [{ ...data.accounts[0], initialBalanceCents: 0 }], budgets: [],
       transactions: [{
         id: 'occ', accountId: 'a', categoryId: 'income', type: 'income',
         amountCents: 1_677_600, transactionDate: '2026-07-01', description: 'Sueldo',
@@ -341,7 +348,7 @@ describe('financeService', () => {
       isActive: true, createdAt: base, updatedAt: base,
     } as const
     const projected = financeProjectionBreakdown({
-      ...data, accounts: [{ ...data.accounts[0], initialBalanceCents: 0 }],
+      ...data, accounts: [{ ...data.accounts[0], initialBalanceCents: 0 }], budgets: [],
       transactions: [], recurring: [recurring],
       recurringOccurrences: [{
         id: 'occ', recurringTransactionId: 'salary', period: '2026-07-01',

@@ -25,7 +25,7 @@ import {
   financeLiquidityRepository, financePlanningRepository, financeRecurringOccurrenceRepository, financeRecurringRepository, financeTransactionRepository,
 } from '../repositories/financeRepositories'
 import {
-  accountBalance, annualFinanceTotals, budgetPerformance, calculateFinanceMetrics, canRegisterEventualIncome, canonicalFinanceBudgetGroups, eventualIncomeTransactions, financePeriodFlow, financeProjectionBreakdown, financeSummary, personalBudgetCarryOverIntoPeriod, personalBudgetForDate, personalBudgetReservations,
+  accountBalance, annualFinanceTotals, budgetPerformance, calculateFinanceMetrics, canRegisterEventualIncome, canonicalFinanceBudgetGroups, eventualIncomeTransactions, financeBudgetReservations, financePeriodFlow, financeProjectionBreakdown, financeSummary, personalBudgetCarryOverIntoPeriod, personalBudgetForDate,
   financeGoalProjections, formatFinanceDate, formatMxn, goalAvailableCents, goalProgress, goalSpentCents, goalTargetCents, monthKey, recurringAppliesToMonth, recurringExpectedDate, savingsFundMetrics,
 } from '../services/financeService'
 import { budgetNameForCategory, fortnightPeriodForMonth } from '../services/financeBudgetCycle'
@@ -271,7 +271,7 @@ export function FinancePage() {
       .reduce((sum, item) => sum + item.amountCents, 0)
     const pendingCents = kind === 'income' ? projectionBreakdown.ingresosPendientes : projectionBreakdown.gastosPendientes
     const budgetReservationCents = kind === 'expense'
-      ? personalBudgetReservations(data, month).reduce((sum, reservation) => sum + reservation.amountCents, 0)
+      ? financeBudgetReservations(data, month).reduce((sum, reservation) => sum + reservation.amountCents, 0)
       : 0
     const pendingCount = pendingRecurring.length + monthlyTransactions.filter((item) => !item.recurringTransactionId && matches(item.type) && ['planned', 'pending'].includes(item.status)).length
     return { recurringCents, eventualCents, totalCents: realizedCents + pendingCents, realizedCents, pendingCents, pendingCount, budgetReservationCents }

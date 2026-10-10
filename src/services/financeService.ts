@@ -283,9 +283,9 @@ function financeProjectionComponents(data: FinanceData, month: Date, reference: 
       else if (item.type === 'expense' || item.type === 'debt_payment') gastosPendientes += occurrence.amountCents
     }
   }
-  // A fortnightly personal budget is an envelope, not a second movement. Reserve
-  // only what has not already been committed by real/planed personal expenses.
-  gastosPendientes += personalBudgetReservations(data, month, reference).reduce((sum, item) => sum + item.amountCents, 0)
+  // Budgets are envelopes, not second movements. Reserve only the portion that
+  // has not already been committed by real or planned expenses in each category.
+  gastosPendientes += financeBudgetReservations(data, month, reference).reduce((sum, item) => sum + item.amountCents, 0)
   return { ingresosPendientes, gastosPendientes, ingresosRealizados, gastosRealizados }
 }
 
@@ -611,6 +611,17 @@ export function categoryBudgetReservations(
       && budget.periodStart <= selectedMonthEnd && budget.periodEnd >= selectedMonthStart
       && (!selectedIsCurrent || budget.periodEnd >= referenceKey))
   return reservationsForBudgets(data, budgets)
+}
+
+/** Remaining envelopes for every budgeted expense category in the period. */
+export function financeBudgetReservations(data: FinanceData, month: Date, reference = new Date()): FinanceBudgetReservation[] {
+  const categoryIds = [...new Set(canonicalFinanceBudgetGroups(data)
+    .filter((budget) => !budget.isPersonal)
+    .map((budget) => budget.budget.categoryId))]
+  return [
+    ...personalBudgetReservations(data, month, reference),
+    ...categoryBudgetReservations(data, month, categoryIds, reference),
+  ]
 }
 
 /**
