@@ -1,11 +1,11 @@
 import { addDays, addMonths, endOfMonth, format, isAfter, isSameMonth, startOfDay, startOfMonth, subMonths } from 'date-fns'
 import type { FinanceData, FinanceTransaction, FinanceTransactionType } from '../features/finance/financeTypes'
-import { categoryBudgetReservations, monthKey, personalBudgetCarryOverIntoPeriod, personalBudgetReservations, recurringAppliesToMonth } from './financeService'
+import { categoryBudgetReservations, monthKey, personalBudgetBalanceIntoPeriod, personalBudgetReservations, recurringAppliesToMonth } from './financeService'
 
 /** Keeping the thresholds here makes the Radar auditable and keeps UI out of business rules. */
 export const LIQUIDITY_MODERATION_MULTIPLIER = 1.2
 /** Bump when a formula change makes stored comparison baselines incompatible. */
-export const FINANCE_LIQUIDITY_PROJECTION_VERSION = 4
+export const FINANCE_LIQUIDITY_PROJECTION_VERSION = 5
 
 export type FinanceLiquidityRadarStatus = 'stable' | 'moderation' | 'critical'
 export type LiquidityEventSource = 'movement' | 'recurring' | 'budget' | 'simulation'
@@ -218,18 +218,21 @@ function budgetReservationEventsForMonth(
 }
 
 export function personalBudgetScenarioReservationCents(data: FinanceData, scenario: PersonalBudgetScenarioInput, reference = new Date()) {
-  const carryOverCents = personalBudgetCarryOverIntoPeriod(data, scenario.periodStart)
+  const previousBalanceCents = personalBudgetBalanceIntoPeriod(data, scenario.periodStart)
   const previousPeriodEnd = format(addDays(new Date(`${scenario.periodStart}T00:00:00`), -1), 'yyyy-MM-dd')
   const priorEnvelopeIsStillReserved = personalBudgetReservations(
     data,
     new Date(`${scenario.periodStart}T00:00:00`),
     reference,
   ).some((budget) => budget.periodEnd === previousPeriodEnd)
-  // The amount typed in the Q2 simulator is an additional reservation, not a
-  // target that shrinks when dated expenses already exist. If Q1 is still
-  // visible in this projection, its remaining envelope is already reserved.
-  const carryToAddCents = priorEnvelopeIsStillReserved ? 0 : carryOverCents
-  return Math.max(0, scenario.targetAmountCents + carryToAddCents)
+  // A positive Q1 balance is added only when it is not already represented by
+  // a live reservation. A Q1 overrun never has a reservation of its own, so it
+  // always discounts Q2. This keeps the two fortnights inside one monthly cap.
+  const isSecondFortnight = scenario.periodStart.slice(-2) !== '01'
+  const adjustmentCents = previousBalanceCents < 0
+    ? isSecondFortnight ? previousBalanceCents : 0
+    : priorEnvelopeIsStillReserved ? 0 : previousBalanceCents
+  return Math.max(0, scenario.targetAmountCents + adjustmentCents)
 }
 
 function personalBudgetScenarioEvent(
@@ -245,7 +248,7 @@ function personalBudgetScenarioEvent(
   return {
     id: `budget-scenario:${scenario.periodStart}`,
     date: scenario.periodStart,
-    label: `Escenario · Gastos Personales (${scenario.periodStart.slice(-2) === '01' ? 'Q1' : 'Q2'})`,
+    label: `Escenario · Gastos Personales (${scenario.periodStart.slice(-2) === '01' ? 'Q1' : 'Q2'})${personalBudgetBalanceIntoPeriod(data, scenario.periodStart) < 0 ? ' · exceso anterior descontado' : ''}`,
     amountCents: -envelopeCents,
     kind: 'expense',
     source: 'simulation',

@@ -16,7 +16,7 @@ import {
   type LiquiditySimulationInput,
   type PersonalBudgetScenarioInput,
 } from '../../services/financeLiquidityProjection'
-import { canonicalFinanceBudgetGroups, formatMxn, personalBudgetCarryOverIntoPeriod, personalBudgetForDate } from '../../services/financeService'
+import { canonicalFinanceBudgetGroups, formatMxn, personalBudgetBalanceIntoPeriod, personalBudgetForDate } from '../../services/financeService'
 import { fortnightPeriodForMonth } from '../../services/financeBudgetCycle'
 
 interface FinanceLiquidityRadarProps {
@@ -80,7 +80,7 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
   const q2Period = useMemo(() => fortnightPeriodForMonth(format(month, 'yyyy-MM-dd'), 'q2'), [month])
   const q1Budget = useMemo(() => personalBudgetForDate(data.budgets, q1Period.periodStart), [data.budgets, q1Period.periodStart])
   const q2Budget = useMemo(() => personalBudgetForDate(data.budgets, q2Period.periodStart), [data.budgets, q2Period.periodStart])
-  const q2CarryOverCents = useMemo(() => personalBudgetCarryOverIntoPeriod(data, q2Period.periodStart), [data, q2Period.periodStart])
+  const q2PreviousBalanceCents = useMemo(() => personalBudgetBalanceIntoPeriod(data, q2Period.periodStart), [data, q2Period.periodStart])
   const q2DefaultTargetCents = q2Budget?.plannedAmountCents ?? q1Budget?.plannedAmountCents ?? 0
   const q2ScenarioKey = useMemo(() => personalScenarioStorageKey(userId, q2Period.periodStart), [q2Period.periodStart, userId])
   const budgetToggleOptions = useMemo(() => {
@@ -143,6 +143,9 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
     carryIncludePersonalBudgetReservations: true,
     carryIncludedBudgetCategoryIds: canonicalBudgetCategoryIds,
   }), [availableTodayCents, canonicalBudgetCategoryIds, data, month])
+  const personalScenarioReservationCents = useMemo(() => personalBudgetScenario
+    ? personalBudgetScenarioReservationCents(data, personalBudgetScenario)
+    : 0, [data, personalBudgetScenario])
   useEffect(() => {
     window.localStorage.setItem(reservationPreferenceKey, String(includePersonalBudgetReservations))
   }, [includePersonalBudgetReservations])
@@ -299,7 +302,10 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
             </button>
           })}
           <div className="liquidity-radar__scenario-slot">
-            {!isHistorical && includePersonalBudgetReservations && personalBudgetScenario && <span className="liquidity-radar__saved-scenario">Q2 guardado · {formatMxn(personalBudgetScenario.targetAmountCents)}</span>}
+            {!isHistorical && includePersonalBudgetReservations && personalBudgetScenario && <span className="liquidity-radar__saved-scenario">
+              Q2 neto · {formatMxn(personalScenarioReservationCents)}
+              {q2PreviousBalanceCents < 0 && <small>Exceso Q1 {formatMxn(q2PreviousBalanceCents)}</small>}
+            </span>}
           </div>
         </div>
         <div className="liquidity-radar__minimum"><small>Punto mínimo</small><strong>{formatMxn(projection.minimumBalanceCents)}</strong><span>{dateLabel(projection.minimumDate, "EEE d 'de' MMM")}</span></div>
@@ -385,7 +391,7 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
       carryIncludedBudgetCategoryIds={canonicalBudgetCategoryIds}
       periodStart={q2Period.periodStart}
       periodEnd={q2Period.periodEnd}
-      carryOverCents={q2CarryOverCents}
+      previousBalanceCents={q2PreviousBalanceCents}
       defaultTargetCents={personalBudgetScenario?.targetAmountCents ?? q2DefaultTargetCents}
       onApply={(next) => { setPersonalBudgetScenario(next); setIncludePersonalBudgetReservations(true); setShowBudgetScenario(false) }}
     />}
@@ -500,7 +506,7 @@ function SimulationModal({ open, onClose, baseline, data, month, availableTodayC
   </Modal>
 }
 
-function PersonalBudgetScenarioModal({ open, onClose, baseline, data, month, availableTodayCents, includePersonalBudgetReservations, includedBudgetCategoryIds, carryIncludedBudgetCategoryIds, periodStart, periodEnd, carryOverCents, defaultTargetCents, onApply }: {
+function PersonalBudgetScenarioModal({ open, onClose, baseline, data, month, availableTodayCents, includePersonalBudgetReservations, includedBudgetCategoryIds, carryIncludedBudgetCategoryIds, periodStart, periodEnd, previousBalanceCents, defaultTargetCents, onApply }: {
   open: boolean
   onClose: () => void
   baseline: FinanceLiquidityProjection
@@ -512,7 +518,7 @@ function PersonalBudgetScenarioModal({ open, onClose, baseline, data, month, ava
   carryIncludedBudgetCategoryIds: string[]
   periodStart: string
   periodEnd: string
-  carryOverCents: number
+  previousBalanceCents: number
   defaultTargetCents: number
   onApply: (scenario: PersonalBudgetScenarioInput) => void
 }) {
@@ -547,10 +553,10 @@ function PersonalBudgetScenarioModal({ open, onClose, baseline, data, month, ava
       <p>Este cálculo sólo vive en el Radar. No crea ni modifica tu presupuesto real.</p>
       <div className="liquidity-budget-simulator__context">
         <span>Se libera el {dateLabel(periodStart, "d 'de' MMMM")}</span>
-        <strong>Arrastre disponible de Q1 <b>{formatMxn(carryOverCents)}</b></strong>
+        <strong className={previousBalanceCents < 0 ? 'is-negative' : ''}>{previousBalanceCents < 0 ? 'Exceso heredado de Q1' : 'Arrastre disponible de Q1'} <b>{formatMxn(previousBalanceCents)}</b></strong>
       </div>
       <label>Presupuesto nuevo para Q2 (MXN)<input autoFocus required min="0" step=".01" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="Ej. 5000" /></label>
-      {candidate && <p className="liquidity-budget-simulator__formula">Nuevo Q2 {formatMxn(candidate.targetAmountCents)} se aparta completo. El arrastre de Q1 se conserva aparte y los gastos ya fechados permanecen visibles como movimientos independientes. Reserva aplicada en este punto: <b>{formatMxn(reservationCents)}</b>.</p>}
+      {candidate && <p className="liquidity-budget-simulator__formula">Q2 base {formatMxn(candidate.targetAmountCents)}{previousBalanceCents < 0 ? ` menos el exceso de Q1 ${formatMxn(Math.abs(previousBalanceCents))}` : previousBalanceCents > 0 ? `. El remanente Q1 de ${formatMxn(previousBalanceCents)} se conserva en la curva y se acumula cuando corresponde` : ''}. Los gastos ya fechados permanecen visibles como movimientos independientes. Reserva neta aplicada: <b>{formatMxn(reservationCents)}</b>.</p>}
       <SimulationComparison before={baseline} after={preview} />
       <footer><Button variant="ghost" type="button" onClick={onClose}>Cancelar</Button><Button type="submit" disabled={!candidate}>Ver en la curva</Button></footer>
     </form>

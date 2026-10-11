@@ -402,6 +402,9 @@ export interface BudgetPerformance extends FinanceBudget {
   /** Legacy duplicated records represented by this single logical budget. */
   sourceBudgetIds?: string[]
   actualCents: number
+  /** Signed Q1 balance applied to this Q2 envelope. */
+  previousPeriodAdjustmentCents: number
+  effectivePlannedAmountCents: number
   remainingCents: number
   usedPercentage: number
 }
@@ -541,11 +544,20 @@ export function personalBudgetUsageCents(data: FinanceData, periodStart: string,
  * needs another $3k reserved.
  */
 export function personalBudgetCarryOverIntoPeriod(data: FinanceData, periodStart: string) {
+  return Math.max(0, personalBudgetBalanceIntoPeriod(data, periodStart))
+}
+
+/**
+ * Signed balance from the immediately preceding personal fortnight.
+ * A positive value is money that can roll forward; a negative value is an
+ * overrun that must reduce the next envelope so the monthly cap stays honest.
+ */
+export function personalBudgetBalanceIntoPeriod(data: FinanceData, periodStart: string) {
   const previousPeriodEnd = format(addDays(parseISO(periodStart), -1), 'yyyy-MM-dd')
   const previous = canonicalFinanceBudgetGroups(data)
     .find((budget) => budget.isPersonal && budget.periodEnd === previousPeriodEnd)
   if (!previous) return 0
-  return Math.max(0, previous.budget.plannedAmountCents - budgetMovementCents(data, previous))
+  return previous.budget.plannedAmountCents - budgetMovementCents(data, previous)
 }
 
 function reservationsForBudgets(data: FinanceData, budgets: CanonicalFinanceBudget[]): FinanceBudgetReservation[] {
@@ -553,12 +565,20 @@ function reservationsForBudgets(data: FinanceData, budgets: CanonicalFinanceBudg
     .map((budget) => {
       const previousPeriodEnd = format(addDays(parseISO(budget.periodStart), -1), 'yyyy-MM-dd')
       // Personal envelopes may explicitly carry their previous remainder. A
-      // previous period already present in this curve is already reserved.
-      const carryIsAlreadyReserved = budgets.some((candidate) =>
+      // positive previous period already present in this curve is already
+      // reserved. A negative balance has no reservation of its own, so it
+      // always reduces the next fortnight.
+      const previousPeriodIsPresent = budgets.some((candidate) =>
         candidate.isPersonal && candidate.periodEnd === previousPeriodEnd)
-      const carryOverCents = budget.isPersonal && budget.budget.carryOverEnabled
-        ? carryIsAlreadyReserved ? 0 : personalBudgetCarryOverIntoPeriod(data, budget.periodStart)
+      const previousBalanceCents = budget.isPersonal
+        ? personalBudgetBalanceIntoPeriod(data, budget.periodStart)
         : 0
+      const isSecondFortnight = budget.periodStart.slice(-2) !== '01'
+      const adjustmentCents = previousBalanceCents < 0
+        ? isSecondFortnight ? previousBalanceCents : 0
+        : budget.budget.carryOverEnabled && !previousPeriodIsPresent
+          ? previousBalanceCents
+          : 0
       return {
         id: `budget:${budget.budget.id}`,
         budgetId: budget.budget.id,
@@ -568,7 +588,7 @@ function reservationsForBudgets(data: FinanceData, budgets: CanonicalFinanceBudg
         periodStart: budget.periodStart,
         periodEnd: budget.periodEnd,
         label: `Reserva · ${budget.budget.name ?? budget.category?.name ?? (budget.isPersonal ? 'Gastos Personales' : 'Presupuesto')} (${budget.periodStart.slice(-2) === '01' ? 'Q1' : 'Q2'})`,
-        amountCents: Math.max(0, budget.budget.plannedAmountCents + carryOverCents - budgetMovementCents(data, budget)),
+        amountCents: Math.max(0, budget.budget.plannedAmountCents + adjustmentCents - budgetMovementCents(data, budget)),
         sourceBudgetIds: budget.sourceBudgetIds,
       }
     })
@@ -645,11 +665,15 @@ export function personalBudgetEnvelopeReservations(data: FinanceData, month: Dat
   return budgets
     .map((budget) => {
       const previousPeriodEnd = format(addDays(parseISO(budget.periodStart), -1), 'yyyy-MM-dd')
-      const carryIsAlreadyReserved = budgets.some((candidate) =>
+      const previousPeriodIsPresent = budgets.some((candidate) =>
         candidate.isPersonal && candidate.periodEnd === previousPeriodEnd)
-      const carryOverCents = budget.budget.carryOverEnabled && !carryIsAlreadyReserved
-        ? personalBudgetCarryOverIntoPeriod(data, budget.periodStart)
-        : 0
+      const previousBalanceCents = personalBudgetBalanceIntoPeriod(data, budget.periodStart)
+      const isSecondFortnight = budget.periodStart.slice(-2) !== '01'
+      const adjustmentCents = previousBalanceCents < 0
+        ? isSecondFortnight ? previousBalanceCents : 0
+        : budget.budget.carryOverEnabled && !previousPeriodIsPresent
+          ? previousBalanceCents
+          : 0
       return {
         id: `budget:${budget.budget.id}`,
         budgetId: budget.budget.id,
@@ -659,7 +683,7 @@ export function personalBudgetEnvelopeReservations(data: FinanceData, month: Dat
         periodStart: budget.periodStart,
         periodEnd: budget.periodEnd,
         label: `Reserva · ${budget.budget.name ?? 'Gastos Personales'} (${budget.periodStart.slice(-2) === '01' ? 'Q1' : 'Q2'})`,
-        amountCents: Math.max(0, budget.budget.plannedAmountCents + carryOverCents),
+        amountCents: Math.max(0, budget.budget.plannedAmountCents + adjustmentCents),
         sourceBudgetIds: budget.sourceBudgetIds,
       }
     })
@@ -699,6 +723,10 @@ export function budgetPerformance(data: FinanceData, month: Date): BudgetPerform
       && item.transactionDate >= periodStart && item.transactionDate <= periodEnd
       && completed(item) && (item.type === 'expense' || item.type === 'debt_payment'))
       .reduce((sum, item) => sum + item.amountCents, 0)
+    const previousPeriodAdjustmentCents = isPersonal && periodStart.slice(-2) !== '01'
+      ? Math.min(0, personalBudgetBalanceIntoPeriod(data, periodStart))
+      : 0
+    const effectivePlannedAmountCents = Math.max(0, budget.plannedAmountCents + previousPeriodAdjustmentCents)
     return {
       ...budget,
       periodStart,
@@ -706,8 +734,10 @@ export function budgetPerformance(data: FinanceData, month: Date): BudgetPerform
       category: linkedCategory,
       sourceBudgetIds,
       actualCents,
-      remainingCents: budget.plannedAmountCents - actualCents,
-      usedPercentage: budget.plannedAmountCents ? actualCents / budget.plannedAmountCents * 100 : 0,
+      previousPeriodAdjustmentCents,
+      effectivePlannedAmountCents,
+      remainingCents: effectivePlannedAmountCents - actualCents,
+      usedPercentage: effectivePlannedAmountCents ? actualCents / effectivePlannedAmountCents * 100 : actualCents ? 100 : 0,
     }
   })
 }

@@ -4,6 +4,7 @@ import {
   financeLiquidityDeviation,
   financeLiquidityProjection,
   financeLiquidityStatus,
+  personalBudgetScenarioReservationCents,
 } from './financeLiquidityProjection'
 
 const createdAt = '2026-07-01T00:00:00.000Z'
@@ -523,6 +524,36 @@ describe('financeLiquidityProjection', () => {
       source: 'movement',
     })
     expect(data.budgets).toHaveLength(1)
+  })
+
+  it('resta del escenario Q2 el exceso de Q1 y nunca genera una reserva negativa', () => {
+    const data = financeData([
+      movement({ id: 'q1-overrun', categoryId: 'personal', transactionDate: '2026-10-11', amountCents: 727_000, status: 'completed' }),
+    ])
+    data.categories = [{ id: 'personal', name: 'Personal', type: 'expense', isDefault: false, isActive: true }]
+    data.budgets = [{
+      id: 'q1', categoryId: 'personal', month: '2026-10-01', plannedAmountCents: 500_000,
+      name: 'Gastos Personales', periodStart: '2026-10-01', periodEnd: '2026-10-15',
+      createdAt, updatedAt: createdAt,
+    }]
+    const scenario = { periodStart: '2026-10-16', periodEnd: '2026-10-31', targetAmountCents: 500_000 }
+
+    expect(personalBudgetScenarioReservationCents(data, scenario, new Date(2026, 9, 11))).toBe(273_000)
+    expect(personalBudgetScenarioReservationCents(data, { ...scenario, targetAmountCents: 200_000 }, new Date(2026, 9, 11))).toBe(0)
+
+    const projection = financeLiquidityProjection({
+      data,
+      month: new Date(2026, 9, 1),
+      currentAvailableBalanceCents: 1_000_000,
+      minimumOperatingBufferCents: 0,
+      referenceDate: new Date(2026, 9, 11),
+      includePersonalBudgetReservations: true,
+      personalBudgetScenario: scenario,
+    })
+    expect(projection.events.find((event) => event.id === 'budget-scenario:2026-10-16')).toMatchObject({
+      amountCents: -273_000,
+      label: 'Escenario · Gastos Personales (Q2) · exceso anterior descontado',
+    })
   })
 
   it('calcula la desviación contra el snapshot inicial sin persistirla', () => {

@@ -93,6 +93,48 @@ describe('financeService', () => {
     ])
   })
 
+  it('descuenta del presupuesto Q2 el exceso consumido en Q1', () => {
+    const fortnightData: FinanceData = {
+      ...data,
+      categories: [{ id: 'personal', name: 'Personal', type: 'expense', isDefault: false, isActive: true }],
+      transactions: [
+        { ...data.transactions[1], id: 'q1-overrun', categoryId: 'personal', amountCents: 727_000, transactionDate: '2026-10-11', status: 'completed' },
+      ],
+      budgets: [
+        { id: 'q1', categoryId: 'personal', month: '2026-10-01', plannedAmountCents: 500_000, name: 'Gastos Personales', periodStart: '2026-10-01', periodEnd: '2026-10-15', createdAt: base, updatedAt: base },
+        { id: 'q2', categoryId: 'personal', month: '2026-10-01', plannedAmountCents: 500_000, name: 'Gastos Personales', periodStart: '2026-10-16', periodEnd: '2026-10-31', createdAt: base, updatedAt: base },
+      ],
+    }
+
+    expect(personalBudgetReservations(fortnightData, new Date(2026, 9, 1), new Date(2026, 9, 11))).toMatchObject([
+      { budgetId: 'q2', amountCents: 273_000 },
+    ])
+    expect(budgetPerformance(fortnightData, new Date(2026, 9, 1)).find((budget) => budget.id === 'q2')).toMatchObject({
+      plannedAmountCents: 500_000,
+      previousPeriodAdjustmentCents: -227_000,
+      effectivePlannedAmountCents: 273_000,
+      remainingCents: 273_000,
+    })
+  })
+
+  it('no arrastra un exceso de Q2 al presupuesto Q1 del mes siguiente', () => {
+    const monthlyData: FinanceData = {
+      ...data,
+      categories: [{ id: 'personal', name: 'Personal', type: 'expense', isDefault: false, isActive: true }],
+      transactions: [
+        { ...data.transactions[1], id: 'september-overrun', categoryId: 'personal', amountCents: 727_000, transactionDate: '2026-09-28', status: 'completed' },
+      ],
+      budgets: [
+        { id: 'september-q2', categoryId: 'personal', month: '2026-09-01', plannedAmountCents: 500_000, name: 'Gastos Personales', periodStart: '2026-09-16', periodEnd: '2026-09-30', carryOverEnabled: true, createdAt: base, updatedAt: base },
+        { id: 'october-q1', categoryId: 'personal', month: '2026-10-01', plannedAmountCents: 500_000, name: 'Gastos Personales', periodStart: '2026-10-01', periodEnd: '2026-10-15', carryOverEnabled: true, createdAt: base, updatedAt: base },
+      ],
+    }
+
+    expect(personalBudgetReservations(monthlyData, new Date(2026, 9, 1), new Date(2026, 9, 1))).toMatchObject([
+      { budgetId: 'october-q1', amountCents: 500_000 },
+    ])
+  })
+
   it('reserva sólo el remanente de una categoría presupuestada', () => {
     const foodData: FinanceData = {
       ...data,
