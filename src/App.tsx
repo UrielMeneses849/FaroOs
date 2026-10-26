@@ -5,6 +5,7 @@ import { useAuth } from './hooks/auth'
 import { FaroVoiceProvider } from './features/voice/FaroVoiceProvider'
 import { DesktopProactivity } from './desktop/DesktopProactivity'
 import { PwaExperience } from './features/pwa/PwaExperience'
+import { NeedsWeekendReport } from './features/needs/NeedsWeekendReport'
 
 function FaroRuntime() {
   const { user } = useAuth()
@@ -30,6 +31,7 @@ export default function App() {
     <>
       <AuthProvider>
         <FaroRuntime />
+        <NeedsWeekendReport />
       </AuthProvider>
       <PwaExperience />
     </>

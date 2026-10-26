@@ -1,5 +1,5 @@
 import { Download, RefreshCw, WifiOff, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 import { isFaroTauriRuntime } from '../../core/platform/runtime'
 
@@ -20,12 +20,16 @@ export function PwaExperience() {
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent>()
   const [online, setOnline] = useState(() => navigator.onLine)
   const [installing, setInstalling] = useState(false)
+  const registrationRef = useRef<ServiceWorkerRegistration | undefined>(undefined)
   const {
     needRefresh: [needRefresh, setNeedRefresh],
     offlineReady: [offlineReady, setOfflineReady],
     updateServiceWorker,
   } = useRegisterSW({
     immediate: true,
+    onRegisteredSW(_url, registration) {
+      registrationRef.current = registration
+    },
     onRegisterError(error) {
       if (import.meta.env.DEV) console.debug('[FARO PWA] Service worker registration failed.', error)
     },
@@ -33,6 +37,13 @@ export function PwaExperience() {
 
   useEffect(() => {
     if (nativeRuntime) return
+    // Installed PWAs can stay open for days. Check when they return to the
+    // foreground, preserving the existing explicit update/reload prompt.
+    const checkUpdate = () => {
+      if (navigator.onLine && document.visibilityState === 'visible') {
+        void registrationRef.current?.update().catch(() => { /* Retry on the next foreground / online event. */ })
+      }
+    }
     const handleInstallPrompt = (event: Event) => {
       event.preventDefault()
       if (!isStandalone() && sessionStorage.getItem(installDismissedKey) !== 'true') {
@@ -40,18 +51,22 @@ export function PwaExperience() {
       }
     }
     const handleInstalled = () => setInstallPrompt(undefined)
-    const handleOnline = () => setOnline(true)
+    const handleOnline = () => { setOnline(true); checkUpdate() }
     const handleOffline = () => setOnline(false)
 
     window.addEventListener('beforeinstallprompt', handleInstallPrompt)
     window.addEventListener('appinstalled', handleInstalled)
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
+    document.addEventListener('visibilitychange', checkUpdate)
+    const updateTimer = window.setInterval(checkUpdate, 60 * 60 * 1000)
     return () => {
       window.removeEventListener('beforeinstallprompt', handleInstallPrompt)
       window.removeEventListener('appinstalled', handleInstalled)
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
+      document.removeEventListener('visibilitychange', checkUpdate)
+      window.clearInterval(updateTimer)
     }
   }, [nativeRuntime])
 
