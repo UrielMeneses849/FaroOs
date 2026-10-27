@@ -1,5 +1,6 @@
 import { addDays, addMonths, endOfMonth, format, isAfter, isBefore, isSameMonth, parseISO, startOfMonth } from 'date-fns'
 import { es } from 'date-fns/locale'
+import { debtPlanAvailableCents, debtPlanBalanceCents } from './debtPlanBalance'
 import type {
   FinanceAccount,
   FinanceBudget,
@@ -343,6 +344,7 @@ export function calculateFinanceMetrics(data: FinanceData, month: Date, referenc
   const reservedSavings = data.transactions.filter((item) => activeAccountIds.has(item.accountId) && completed(item) && item.type === 'saving')
     .reduce((sum, item) => sum + item.amountCents, 0)
   const availableBalanceCents = physicalAvailable - reservedSavings
+    - activeAccounts.reduce((sum, account) => sum + debtPlanBalanceCents(data, account.id), 0)
   const selectedMonthStart = monthKey(month)
   const selectedMonthEnd = format(endOfMonth(month), 'yyyy-MM-dd')
   const plannedBudget = canonicalFinanceBudgetGroups(data)
@@ -520,7 +522,9 @@ function budgetMovementCents(data: FinanceData, budget: CanonicalFinanceBudget) 
 export function personalBudgetUsageCents(data: FinanceData, periodStart: string, periodEnd: string, sourceBudgetIds: string[] = []) {
   const personalBudget = canonicalFinanceBudgetGroups(data).find((budget) => budget.isPersonal
     && budget.periodStart === periodStart && budget.periodEnd === periodEnd)
-  if (personalBudget) return budgetMovementCentsForPeriod(data, { ...personalBudget, sourceBudgetIds })
+  if (personalBudget) return budgetMovementCentsForPeriod(data, {
+    ...personalBudget, sourceBudgetIds: [...new Set([...personalBudget.sourceBudgetIds, ...sourceBudgetIds])],
+  })
   const category = data.categories.find((item) => item.type === 'expense' && isPersonalName(item.name))
   return budgetMovementCentsForPeriod(data, {
     budget: {
@@ -630,7 +634,16 @@ export function categoryBudgetReservations(
       && includedCategoryIds.has(budget.budget.categoryId)
       && budget.periodStart <= selectedMonthEnd && budget.periodEnd >= selectedMonthStart
       && (!selectedIsCurrent || budget.periodEnd >= referenceKey))
-  return reservationsForBudgets(data, budgets)
+  // Plan's allocated money already sits outside the operational balance.
+  let reservedPlanCents = debtPlanAvailableCents(data)
+  const planCategoryIds = new Set(data.categories.filter(category => category.type === 'expense' && category.name.trim().toLowerCase() === 'plan').map(category => category.id))
+  return reservationsForBudgets(data, budgets).map(reservation => {
+    const planBudget = budgets.find(budget => budget.budget.id === reservation.budgetId && planCategoryIds.has(budget.budget.categoryId))
+    if (!planBudget) return reservation
+    const alreadyReserved = Math.min(reservedPlanCents, reservation.amountCents)
+    reservedPlanCents -= alreadyReserved
+    return { ...reservation, amountCents: reservation.amountCents - alreadyReserved }
+  }).filter(reservation => reservation.amountCents > 0)
 }
 
 /** Remaining envelopes for every budgeted expense category in the period. */

@@ -1,0 +1,61 @@
+/* Shared mobile contract: FARO navigation surrounds every application. */
+@media (max-width: 760px) {
+  html:has(.app-shell--mobile-ready), body:has(.app-shell--mobile-ready), #root:has(.app-shell--mobile-ready) { min-width: 0; width: 100%; height: auto; min-height: 100dvh; }
+  #root .app-shell.app-shell--mobile-ready { display: block; width: 100%; min-width: 0; height: auto !important; min-height: 100dvh; overflow: visible !important; }
+  #root .app-shell.app-shell--mobile-ready .app-body { display: block; width: 100%; min-width: 0; height: auto !important; min-height: 100dvh; margin: 0; overflow: visible !important; }
+  #root .app-shell.app-shell--mobile-ready .main-content { width: 100%; min-width: 0; height: auto !important; min-height: calc(100dvh - 64px); margin: 0; padding: 0 0 calc(88px + env(safe-area-inset-bottom)); overflow: visible !important; }
+  #root .app-shell--mobile-ready .page { min-width: 0; max-width: 100%; padding-bottom: 28px; }
+  #root .app-shell--mobile-ready .mobile-topbar { position: sticky; inset: 0 0 auto; z-index: 65; display: flex; height: calc(64px + env(safe-area-inset-top)); min-height: 64px; align-items: center; justify-content: space-between; gap: 12px; padding: calc(10px + env(safe-area-inset-top)) 16px 10px; border-bottom: 1px solid var(--border); color: var(--text-primary); background: #111316; }
+  #root .mobile-topbar .brand--mobile { display: flex; min-width: 0; align-items: center; gap: 9px; color: inherit; text-decoration: none; }
+  #root .mobile-topbar .brand--mobile strong { font-size: 15px; font-weight: 600; letter-spacing: .06em; }
+  #root .mobile-topbar .brand--mobile img { width: 30px; height: 30px; flex-shrink: 0; filter: grayscale(1); }
+  #root .mobile-topbar__section { max-width: 122px; min-width: 0; padding-left: 10px; border-left: 1px solid var(--border); color: var(--text-secondary); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+  #root .mobile-topbar__actions { display: flex; flex: 0 0 auto; align-items: center; gap: 5px; }
+  #root .mobile-topbar .icon-button { display: grid; width: 44px; height: 44px; min-height: 44px; place-items: center; border: 1px solid var(--border); border-radius: 13px; color: var(--text-primary); background: var(--surface); }
+  #root .app-shell--mobile-ready > .mobile-nav--faro { position: fixed; z-index: 70; inset: auto 0 0; display: grid !important; grid-template-columns: repeat(5, minmax(0, 1fr)); width: 100%; height: calc(76px + env(safe-area-inset-bottom)); min-height: 76px; gap: 2px; padding: 8px 7px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); color: var(--text-secondary); background: #111316; box-shadow: none; }
+  #root .mobile-nav--faro .mobile-nav__link { display: flex; position: relative; min-width: 0; min-height: 54px; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 0; border: 0; border-radius: 10px; color: var(--text-secondary); background: transparent; font-size: 10px; text-decoration: none; }
+  #root .mobile-nav--faro .mobile-nav__link > span, #root .mobile-nav--faro .mobile-nav__link > small { font-size: 10px; line-height: 1.2; }
+  #root .mobile-nav--faro .mobile-nav__link--active { color: var(--text-primary); }
+  #root .mobile-nav--faro .mobile-nav__link--active::after { position: absolute; inset: auto auto 0; width: 18px; height: 2px; border-radius: 3px; background: currentColor; content: ''; }
+  #root .mobile-nav--faro .mobile-nav__create { gap: 4px; }
+  #root .mobile-nav--faro .mobile-nav__create > span { display: grid; width: 39px; height: 34px; place-items: center; border: 0; border-radius: 12px; color: #111316; background: #f5f5f2; box-shadow: none; }
+  #root .app-shell--mobile-ready :is(.button, .icon-button) { min-height: 44px; }
+  #root .app-shell--mobile-ready .button { font-size: 13px; }
+  #root .app-shell.app-shell--mobile-ready .button > span { color: inherit; font-size: inherit; font-weight: inherit; line-height: inherit; }
+  body:has(.app-shell--mobile-ready) .modal-panel .button > span { color: inherit; font-size: inherit; font-weight: inherit; line-height: inherit; }
+  #root .app-shell--mobile-ready :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]), select, textarea) { max-width: 100%; min-height: 46px; font-size: 16px; }
+  #root .app-shell--mobile-ready :is(input[type="checkbox"], input[type="radio"]) { min-height: 0; }
+  #root .app-shell--mobile-ready .empty-state { min-width: 0; padding: 32px 18px; }
+  #root .app-shell--mobile-ready .empty-state h2 { font-size: 18px; }
+  #root .app-shell--mobile-ready .empty-state p { max-width: 32ch; color: var(--text-secondary); font-size: 13px; line-height: 1.7; }
+  body:has(.app-shell--mobile-ready) .modal-backdrop { align-items: flex-end; padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom)); }
+  body:has(.app-shell--mobile-ready) .modal-panel { display: flex; width: 100%; max-width: 560px; max-height: calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); min-height: 0; flex-direction: column; padding: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 22px; background: var(--surface); }
+  body:has(.app-shell--mobile-ready) .modal-header { flex-shrink: 0; margin: 0; min-height: 66px; padding: 16px; border-bottom: 1px solid var(--border); }
+  body:has(.app-shell--mobile-ready) .modal-header h2 { color: var(--text-primary); font-size: 18px; line-height: 1.3; }
+  body:has(.app-shell--mobile-ready) .modal-header .icon-button { width: 44px; height: 44px; }
+  body:has(.app-shell--mobile-ready) .modal-body { min-height: 0; padding: 18px 16px 22px; overflow-x: clip; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  body:has(.app-shell--mobile-ready) .modal-body :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]), select, textarea) { max-width: 100%; min-height: 48px; font-size: 16px; }
+  body:has(.app-shell--mobile-ready) .modal-panel .modal-actions { position: static; bottom: auto; display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0 0; padding: 16px 0 0; }
+  body:has(.app-shell--mobile-ready) .modal-body :is(.form-field label, .field-hint, .field-error, .modal-description) { font-size: 13px; line-height: 1.6; }
+  body:has(.app-shell--mobile-ready) .modal-actions .button { min-width: 110px; min-height: 48px; flex: 1; font-size: 13px; }
+  body:has(.app-shell--mobile-ready) .mobile-apps-modal .modal-body { padding-top: 10px; }
+  body:has(.app-shell--mobile-ready) .mobile-menu { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; margin: 0; }
+  body:has(.app-shell--mobile-ready) .mobile-menu__intro { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+  body:has(.app-shell--mobile-ready) .mobile-app-group { min-width: 0; }
+  body:has(.app-shell--mobile-ready) .mobile-app-group h3 { margin: 0 0 10px; color: var(--text-secondary); font-size: 11px; font-weight: 500; letter-spacing: .08em; }
+  body:has(.app-shell--mobile-ready) .mobile-app-group > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  body:has(.app-shell--mobile-ready) .mobile-menu :is(a, button) { display: flex; min-width: 0; min-height: 54px; align-items: center; gap: 11px; padding: 13px; border: 1px solid var(--border); border-radius: 13px; color: var(--text-primary); background: var(--surface-elevated); font: inherit; font-size: 12px; text-align: left; text-decoration: none; }
+  body:has(.app-shell--mobile-ready) .mobile-menu :is(a, button) svg { flex-shrink: 0; }
+  body:has(.app-shell--mobile-ready) .mobile-menu a.active { border-color: var(--text-primary); background: #282c31; }
+  body:has(.app-shell--mobile-ready) .mobile-menu > button { color: var(--danger); }
+  body:has(.app-shell--mobile-ready) .mobile-quick-actions__list > button { min-height: 76px; padding: 16px 13px; border-radius: 15px; }
+  body:has(.app-shell--mobile-ready) .mobile-quick-actions__list strong { font-size: 15px; }
+  body:has(.app-shell--mobile-ready) .mobile-quick-actions__list small { font-size: 12px; line-height: 1.5; }
+  body:has(.app-shell--mobile-ready) .modal-panel :is(button, a, input, select, textarea):focus-visible { outline: 2px solid var(--text-primary); outline-offset: 3px; }
+  #root .app-shell--mobile-ready :is(button, a, input, select, textarea):focus-visible { outline: 2px solid var(--text-primary); outline-offset: 3px; }
+}
+@media (max-width: 360px) {
+  #root .mobile-topbar { padding-inline: 12px; }
+  #root .mobile-topbar__section { max-width: 78px; padding-left: 7px; font-size: 10px; }
+  #root .mobile-topbar .brand--mobile { gap: 6px; }
+}

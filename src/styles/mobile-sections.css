@@ -1,0 +1,326 @@
+/* Mobile companions to FARO's main workspaces. Keep desktop layouts intact. */
+.journal-entry__title-action { padding:0; border:0; color:inherit; background:transparent; font:inherit; text-align:left; cursor:pointer; }
+.finops-loading,.improvements-loading { margin:0; padding:16px; color:var(--text-secondary); font-size:13px; line-height:1.6; }
+.finops-alert > button { min-height:44px; margin-left:auto; padding:0 12px; border:1px solid currentColor; border-radius:10px; color:inherit; background:transparent; font:inherit; cursor:pointer; }
+
+@media (max-width:760px) {
+  #root :is(.household-page,.health-focus,.journal-page,.settings-page,.finops-page,.improvements-page) {
+    min-width:0;
+    max-width:100%;
+    height:auto;
+    min-height:0;
+    overflow:visible;
+    padding:20px 16px 28px;
+    color:var(--text-primary);
+  }
+  #root :is(.health-focus,.journal-page,.settings-page,.finops-page,.improvements-page) > .page-header { margin-bottom:22px; }
+  #root :is(.health-focus,.journal-page,.settings-page,.finops-page,.improvements-page) .page-header h1 { max-width:19ch; font-size:30px; line-height:1.14; }
+  #root :is(.household-page,.health-focus,.journal-page,.settings-page,.finops-page,.improvements-page) .button { min-height:48px; padding:11px 15px; border-radius:13px; font-size:14px; line-height:1.45; }
+  /* Button labels inherit their control's mobile type, instead of the dense
+     metadata rules used by metric cards and table cells. */
+  #root :is(.household-page,.health-focus,.journal-page,.settings-page,.finops-page,.improvements-page,.goals-page,.goal-detail-page) .button > span { color:inherit; font-size:inherit; font-weight:inherit; line-height:inherit; }
+  :is(.modal-panel.health-dialog,.journal-reader-modal,.journal-editor-modal,.modal-panel:has(.household-form),.modal-panel:has(.planning-form:not(.task-form)),.modal-panel:has(.reinforced-confirm)) .button > span { color:inherit; font-size:inherit; font-weight:inherit; line-height:inherit; }
+  #root :is(.household-page,.health-focus,.journal-page,.settings-page,.finops-page,.improvements-page) :is(h2,h3,p,strong,span,small,dt,dd,time) { overflow-wrap:anywhere; }
+  #root :is(.household-page,.health-focus,.journal-page,.settings-page,.finops-page,.improvements-page) .empty-state { min-height:230px; padding:28px 18px; }
+  #root :is(.household-page,.health-focus,.journal-page,.settings-page,.finops-page,.improvements-page) .empty-state h2 { font-size:18px; }
+  #root :is(.household-page,.health-focus,.journal-page,.settings-page,.finops-page,.improvements-page) .empty-state p { max-width:34ch; margin-inline:auto; color:var(--text-secondary); font-size:13px; line-height:1.65; }
+
+  /* Necesidades: budget first, shopping action immediately below it. */
+  #root .household-page { --house-blue:#f4f4f1; --house-text:#f4f4f1; --house-muted:#a0a5ad; --house-line:#30343a; }
+  #root .household-header { gap:12px; margin-bottom:22px; }
+  #root .household-header > div { min-width:0; }
+  #root .household-header h1 { margin-top:6px; font-size:32px; line-height:1.15; }
+  #root .household-eyebrow { font-size:10px; letter-spacing:.13em; }
+  #root .household-header > .button { min-width:100px; color:#e6e7e5; background:#202328; border:1px solid #363b42; }
+  #root .household-tabs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:4px; margin-bottom:24px; padding:5px; border:1px solid var(--house-line); border-radius:15px; background:#181b1f; }
+  #root .household-tabs button { min-width:0; min-height:48px; gap:7px; padding:8px 3px; border:0; border-radius:10px; font-size:12px; font-weight:500; }
+  #root .household-tabs button svg { width:17px; height:17px; }
+  #root .household-tabs button.active { color:#111316; background:#f4f4f1; }
+  #root .household-week { gap:24px; }
+  #root .household-heading h2 { margin:0 0 8px; font-size:25px; line-height:1.25; }
+  #root .household-heading p { font-size:13px; line-height:1.6; }
+  #root .household-budget { margin-top:20px; padding:22px 20px; border:1px solid #34383e; border-radius:22px; background:#1b1e23; }
+  #root .household-budget > strong { font-size:clamp(33px,10vw,43px); font-variant-numeric:tabular-nums; }
+  #root .household-budget > strong > span { display:block; margin-top:7px; font-size:12px; }
+  #root .household-budget p { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:9px 0; font-size:13px; line-height:1.6; }
+  #root .household-budget p > button { border:1px solid #3a3e45; border-radius:12px; color:#ededeb; background:#24282d; }
+  #root .household-budget progress { height:7px; margin:15px 0; background:#353940; }
+  #root .household-budget progress::-webkit-progress-bar { background:#353940; }
+  #root .household-budget :is(small,.household-warning) { display:block; margin-top:12px; font-size:12px; line-height:1.65; }
+  #root .household-primary { display:grid; grid-template-columns:minmax(0,1fr); gap:9px; margin:16px 0 26px; }
+  #root .household-primary .button--primary { min-height:52px; border-color:#f2f2ef; color:#111316; background:#f2f2ef; }
+  #root .household-page .button--secondary { border-color:#3a3e45; color:#e5e6e3; background:#202328; }
+  #root .household-summary h3 { margin:0 0 8px; font-size:19px; }
+  #root .household-summary h3 small { font-size:12px; }
+  #root .household-summary-row { gap:12px; padding:16px 0; }
+  #root .household-summary-row > span:nth-child(2) { min-width:0; }
+  #root .household-summary-row b { font-size:15px; }
+  #root .household-summary-row small { font-size:12px; line-height:1.55; }
+  #root .household-icon { color:#c6c9cf; background:#272c33; }
+  #root .household-week-aside { padding:20px; border:1px solid var(--house-line); border-radius:20px; background:#181b1f; }
+  #root .household-week-aside h3 { margin:0; font-size:19px; }
+  #root .household-week-aside > .button { width:100%; margin:10px 0; border:1px solid #353a42; }
+  #root .household-tip { gap:12px; margin-top:18px; }
+  #root .household-tip > svg { color:#c7ccc8; }
+  #root .household-week-aside :is(p,small),#root .household-tip p { font-size:13px; line-height:1.65; }
+  #root .household-filters { display:grid; grid-template-columns:minmax(0,1fr); gap:10px; margin:20px 0 16px; }
+  #root .household-filters :is(input,select) { min-height:48px; border-color:#393e45; border-radius:13px; color:#eee; background:#181b1f; font-size:16px; }
+  #root .household-stock-list { display:grid; gap:12px; }
+  #root .household-stock-row { position:static; display:grid; grid-template-columns:44px minmax(0,1fr); gap:12px; padding:17px 15px; border:1px solid #33373e; border-radius:18px; background:#181b1f; }
+  #root .household-stock-row .household-thumbnail,#root .household-stock-row > .household-icon { width:44px; height:44px; flex-basis:44px; border-radius:13px; }
+  #root .household-product-title { padding:0; gap:7px; }
+  #root .household-product h3 { font-size:16px; line-height:1.5; }
+  #root .household-product p { font-size:13px; line-height:1.6; }
+  #root .household-product :is(small,.household-low) { font-size:12px; }
+  #root .household-status { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px; margin-top:14px; }
+  #root .household-status button { min-width:0; min-height:46px; padding:6px 3px; border-radius:10px; color:#b5bac1; border-color:#41464e; font-size:11px; line-height:1.35; }
+  #root .household-status button.selected { color:#f4f4f2; border-color:#a0a5ad; background:#30353c; }
+  #root .household-row-actions { position:static; grid-column:2; display:flex; width:100%; flex-direction:row; justify-content:flex-end; gap:8px; margin:0; }
+  #root .household-row-actions > button:not(.button) { border:1px solid #3b4149; border-radius:12px; background:#22262c; }
+  #root .household-notice,#root .household-feedback,#root .household-loading { padding:16px; border-radius:16px; font-size:13px; line-height:1.65; }
+  #root .household-feedback { align-items:flex-start; gap:10px; }
+  #root .household-feedback button { flex:0 0 auto; }
+  #root .household-footnote { font-size:12px; line-height:1.7; }
+
+  /* Salud: readable cards and a full document, instead of desktop scroll panes. */
+  #root .health-focus .health-tabs { display:grid; grid-template-columns:1fr 1fr 1.35fr; gap:4px; margin:0 0 20px; padding:5px; border:1px solid #33373e; border-radius:14px; background:#181b1f; overflow:visible; }
+  #root .health-focus .health-tabs button { min-width:0; min-height:46px; padding:5px; border:0; border-radius:9px; color:#a3a8af; font-size:12px; }
+  #root .health-focus .health-tabs button.active { color:#111316; background:#f2f2ef; }
+  #root .health-focus :is(.health-tab-content,.health-tab-panel,.health-tab-panel--progress,.health-tab-panel--scroll) { display:block; height:auto; max-height:none; overflow:visible; }
+  #root .health-focus .health-focus__metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:0 0 20px; border:0; border-radius:0; background:transparent; overflow:visible; }
+  #root .health-focus .health-focus__metrics > article { position:relative; grid-column:auto; grid-row:auto; min-width:0; min-height:150px; margin:0; padding:18px 14px; border:1px solid #34383f; border-radius:18px; background:#1b1e23; }
+  #root .health-focus .health-focus__metrics > article.featured { background:#23272d; box-shadow:none; }
+  #root .health-focus .health-focus__metrics article > svg { position:static; width:28px; height:28px; margin-bottom:13px; padding:5px; border-radius:8px; color:#d1d4d9; background:#30353d; }
+  #root .health-focus .health-focus__metrics article > span { color:#aeb3bb; font-size:12px; line-height:1.5; }
+  #root .health-focus .health-focus__metrics article > strong { margin:9px 0 4px; font-size:27px; line-height:1.2; font-variant-numeric:tabular-nums; }
+  #root .health-focus .health-focus__metrics article > small { margin-top:8px; color:#9ca3ad; font-size:11px; line-height:1.5; }
+  #root .health-focus .health-focus__metrics article > button { min-height:44px; margin:0; color:#e2e4e7; font-size:12px; text-decoration:underline; text-underline-offset:4px; }
+  #root .health-focus .health-focus__metrics > .button { grid-column:1/-1; grid-row:auto; justify-self:stretch; width:100%; min-height:52px; margin:0; }
+  #root .health-focus .health-focus__grid { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; margin:0; }
+  #root .health-focus :is(.health-weight-chart,.health-forecast,.health-history) { min-width:0; min-height:0; border-color:#34383f; border-radius:20px; background:#181b1f; overflow:hidden; }
+  #root .health-focus .health-weight-chart { display:block; }
+  #root .health-focus .health-weight-chart > header { gap:12px; padding:20px 16px; }
+  #root .health-focus .health-weight-chart h2 { margin-top:5px; font-size:20px; }
+  #root .health-focus .health-weight-chart > header > strong { color:#c3c8ce; font-size:12px; text-align:right; }
+  #root .health-focus .health-weight-chart .chart-box--tall { height:280px; min-height:280px; padding:0 12px 15px 0; }
+  #root .health-focus .health-projection-empty { margin:0; padding:0 18px 18px; color:#a5abb3; font-size:12px; line-height:1.65; }
+  #root .health-focus .health-forecast { padding:21px 18px; }
+  #root .health-focus .health-forecast h2 { margin:10px 0 12px; font-size:25px; }
+  #root .health-focus .health-forecast > p { color:#b0b5bd; font-size:13px; line-height:1.7; }
+  #root .health-focus .health-progress-list > div { align-items:baseline; gap:12px; padding:12px 0; border-color:#30353c; }
+  #root .health-focus .health-progress-list :is(dt,dd) { min-width:0; font-size:12px; line-height:1.5; }
+  #root .health-focus .health-progress-list dd { flex:0 0 auto; max-width:48%; }
+  #root .health-focus .health-forecast em { margin-top:18px; color:#999fa8; font-size:11px; line-height:1.65; }
+  #root .health-focus .health-history > header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:18px 16px; }
+  #root .health-focus .health-history h2 { font-size:18px; }
+  #root .health-focus .health-history article { grid-template-columns:1fr 1fr; gap:10px; padding:17px 16px; border-color:#30343a; font-size:13px; }
+  #root .health-focus .health-history article > strong { text-align:right; font-size:17px; }
+  #root .health-focus .health-history article > span { font-size:12px; line-height:1.5; }
+  #root .health-focus .health-history nav { grid-column:1/-1; justify-content:flex-end; gap:9px; }
+  #root .health-focus .health-history nav button { width:44px; height:44px; border:1px solid #373d45; border-radius:12px; color:#c1c6cd; background:#23272d; }
+  #root .health-focus .health-sync-notice { align-items:stretch; flex-direction:column; font-size:13px; }
+  #root .health-focus .treatment-panel { padding:19px 16px; gap:20px; border-color:#34383f; border-radius:20px; background:#181b1f; }
+  #root .health-focus .treatment-panel__copy { min-width:0; gap:12px; }
+  #root .health-focus .treatment-panel__copy > svg { flex:0 0 24px; color:#c6b893; }
+  #root .health-focus .treatment-panel h2 { margin-top:5px; font-size:22px; }
+  #root .health-focus .treatment-panel p { color:#aaa9a2; font-size:13px; line-height:1.65; }
+  #root .health-focus .treatment-panel > .button { width:100%; }
+  #root .health-focus .treatment-calendar { padding-top:20px; border-color:#3a3a35; }
+  #root .health-focus .treatment-calendar header { align-items:flex-start; flex-wrap:wrap; gap:10px; }
+  #root .health-focus .treatment-calendar header div { display:grid; gap:6px; }
+  #root .health-focus .treatment-calendar header :is(span,small) { font-size:12px; line-height:1.5; }
+  #root .health-focus .treatment-calendar header button { min-height:44px; padding:7px 12px; border:1px solid #444843; border-radius:11px; color:#e3e2d8; font-size:12px; }
+  #root .health-focus .treatment-calendar__days { grid-template-columns:repeat(5,minmax(0,1fr)); gap:7px; }
+  #root .health-focus .treatment-calendar__days button { min-width:0; min-height:60px; padding:9px; }
+  #root .health-focus .treatment-calendar__days :is(small,span) { font-size:11px; }
+  #root .health-focus .treatment-calendar footer { flex-wrap:wrap; gap:12px; margin-top:16px; font-size:11px; }
+  #root .health-focus .treatment-history article { grid-template-columns:minmax(0,1fr); gap:7px; padding:15px 0; font-size:13px; }
+  #root .health-focus .treatment-history :is(span,small) { font-size:12px; line-height:1.6; }
+  #root .health-focus .treatment-history a { color:#d6d9dd; overflow-wrap:anywhere; }
+  #root .health-focus .treatment-labs { width:100%; min-width:0; margin-top:4px; }
+  #root .health-focus .treatment-labs h3 { margin:8px 0; font-size:19px; }
+
+  /* Diario: search, creation, and reading all fit the thumb and the page. */
+  #root .journal-page .journal-toolbar { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-bottom:20px; }
+  #root .journal-page .journal-toolbar > label { display:flex; grid-column:1/-1; gap:10px; min-width:0; min-height:50px; padding:0 14px; border:1px solid #3a3e45; border-radius:14px; background:#181b1f; }
+  #root .journal-page .journal-toolbar input { min-width:0; min-height:48px; font-size:16px; }
+  #root .journal-page .journal-toolbar > .button { min-width:0; padding-inline:9px; font-size:12px; }
+  #root .journal-page .journal-list { display:grid; gap:12px; height:auto; max-height:none; overflow:visible!important; flex:none!important; border:0; scrollbar-gutter:auto; }
+  #root .journal-page .journal-entry { grid-template-columns:42px minmax(0,1fr); gap:11px 13px; padding:19px 16px 12px; border:1px solid #34383f; border-radius:18px; background:#181b1f; }
+  #root .journal-page .journal-entry__date span { color:#e6e8eb; font-size:26px; }
+  #root .journal-page .journal-entry__date small { display:block; margin-top:3px; color:#a0a6af; font-size:10px; line-height:1.5; }
+  #root .journal-page .journal-entry h2 { font-size:17px; line-height:1.4; }
+  #root .journal-page .journal-entry__title-action { min-height:44px; }
+  #root .journal-page .journal-entry p { margin-top:7px; color:#a9afb7; font-size:13px; line-height:1.7; }
+  #root .journal-page .journal-entry nav { grid-column:2; justify-content:flex-end; gap:6px; width:100%; }
+  #root .journal-page .journal-entry nav button { width:44px; height:44px; border:1px solid #353a42; border-radius:11px; color:#b5bcc5; background:#22262c; }
+  #root .journal-page .journal-tags { gap:7px; margin-top:10px; }
+  #root .journal-page .journal-tags span { padding:4px 7px; border-radius:6px; color:#b9bec6; background:#282d34; font-size:11px; }
+  #root .journal-page .kanban-feedback { gap:12px; font-size:13px; line-height:1.6; }
+  #root .journal-page .kanban-feedback button { min-width:44px; min-height:44px; }
+  #root .journal-page .journal-biometric-gate { min-height:370px; gap:16px; margin-top:8px; padding:25px 21px; border-color:#3a3f46; border-radius:22px; background:#1b1e23; box-shadow:none; }
+  #root .journal-page .journal-biometric-gate__icon { width:64px; height:64px; border-color:#4b515a; border-radius:20px; color:#d7dbe0; background:#2b3037; box-shadow:none; }
+  #root .journal-page .journal-biometric-gate h2 { font-size:23px; line-height:1.25; }
+  #root .journal-page .journal-biometric-gate p { color:#aeb5be; font-size:13px; line-height:1.7; }
+  #root .journal-page .journal-biometric-gate .eyebrow { color:#a8afb8; font-size:10px; }
+  #root .journal-page .journal-biometric-gate .button { width:100%; }
+
+  /* Ajustes: full-width actions and explicit, readable data controls. */
+  #root .settings-page .settings-intro { gap:12px; padding:20px 17px; border-color:#393e46; border-radius:20px; background:#1b1e23; }
+  #root .settings-page :is(.settings-intro,.settings-group__head) > svg { flex:0 0 23px; color:#b9c0c9; }
+  #root .settings-page :is(.settings-intro,.settings-group) h2 { font-size:17px; line-height:1.4; }
+  #root .settings-page :is(.settings-intro,.settings-group) p { margin-top:7px; color:#a6adb6; font-size:13px; line-height:1.65; }
+  #root .settings-page .settings-group { margin-top:16px; border-color:#363b43; border-radius:20px; background:#181b1f; }
+  #root .settings-page .settings-group__head { padding:20px 17px; gap:12px; }
+  #root .settings-page .settings-actions { display:grid; grid-template-columns:minmax(0,1fr); }
+  #root .settings-page .settings-actions > div { display:grid; grid-template-columns:minmax(0,1fr); gap:9px; padding:20px 17px; }
+  #root .settings-page .settings-actions > div + div { border-left:0; border-top:1px solid #343940; }
+  #root .settings-page .settings-actions strong { font-size:15px; }
+  #root .settings-page :is(.settings-actions,.settings-single) span { color:#a4abb5; font-size:13px; line-height:1.65; }
+  #root .settings-page .settings-actions .button { grid-column:auto; grid-row:auto; width:100%; margin-top:6px; }
+  #root .settings-page .settings-single { align-items:stretch; flex-direction:column; gap:14px; padding:20px 17px; }
+  #root .settings-page .settings-single .button { width:100%; }
+  #root .settings-page .settings-danger { border-color:#693a3e; }
+  #root .settings-page .settings-danger .settings-group__head > svg { color:#e48d94; }
+  #root .settings-page .settings-feedback { gap:10px; padding:15px; border-radius:14px; font-size:13px; line-height:1.6; }
+  #root .settings-page .settings-feedback button { min-width:44px; min-height:44px; }
+
+  /* FinOps: compact metrics, complete operational detail within each card. */
+  #root .finops-page { display:grid; gap:16px; }
+  #root .finops-page .finops-hero { border-color:#363b42; border-radius:20px; background:#1b1e23; }
+  #root .finops-page .finops-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); padding-bottom:0; }
+  #root .finops-page .finops-metrics article { padding:18px 14px; }
+  #root .finops-page .finops-metrics article > div { align-items:flex-start; color:#a4adb9; font-size:12px; line-height:1.5; }
+  #root .finops-page .finops-metrics article > div svg { flex:0 0 15px; color:#b1bac7; }
+  #root .finops-page .finops-metrics strong { margin-top:10px; color:#f0f2f3; font-size:20px; white-space:normal; overflow-wrap:anywhere; }
+  #root .finops-page .finops-metrics small { display:block; margin-top:5px; color:#929ba8; font-size:11px; line-height:1.6; }
+  #root .finops-page .finops-refresh { position:static; display:flex; width:calc(100% - 28px); min-height:46px; justify-content:center; gap:8px; margin:8px 14px 14px; border-color:#424951; border-radius:12px; color:#d9dfe7; background:#272d35; font-size:13px; }
+  #root .finops-page .finops-grid { grid-template-columns:minmax(0,1fr); gap:16px; }
+  #root .finops-page .finops-panel { min-width:0; border-color:#363b42; border-radius:20px; background:#181b1f; }
+  #root .finops-page .finops-panel > header { flex-wrap:wrap; gap:10px; padding:20px 17px 16px; }
+  #root .finops-page .finops-panel > header h2 { margin-top:6px; font-size:19px; line-height:1.4; }
+  #root .finops-page .finops-panel > header > small { display:block; max-width:none; color:#929ba8; font-size:11px; line-height:1.6; text-align:left; }
+  #root .finops-page .finops-panel .eyebrow { display:block; color:#939ca8; font-size:10px; line-height:1.55; }
+  #root .finops-page .finops-budget__status { gap:12px; padding:18px 17px; }
+  #root .finops-page .finops-budget__status strong { font-size:13px; line-height:1.6; }
+  #root .finops-page .finops-share { height:6px; }
+  #root .finops-page .finops-budget__form { grid-template-columns:minmax(0,1fr); gap:12px; padding:0 17px 18px; }
+  #root .finops-page .finops-budget__form label { grid-template-columns:30px minmax(0,1fr); gap:9px; font-size:12px; }
+  #root .finops-page .finops-budget__form input { min-height:48px; border-radius:12px; font-size:16px; }
+  #root .finops-page .finops-budget__form button { min-height:48px; gap:8px; border-color:#424a55; border-radius:12px; color:#e0e5ed; background:#2a323e; font-size:14px; }
+  #root .finops-page :is(.finops-note,.finops-empty) { color:#a0a7b1; font-size:12px; line-height:1.65; }
+  #root .finops-page .finops-opportunity > p { padding:8px 17px 20px; color:#a7afb9; font-size:13px; line-height:1.7; }
+  #root .finops-page .finops-opportunity__facts { grid-template-columns:minmax(0,1fr); }
+  #root .finops-page .finops-opportunity__facts span { grid-template-columns:18px minmax(0,1fr) auto; gap:8px; padding:15px 17px; color:#a2acba; font-size:12px; }
+  #root .finops-page .finops-opportunity__facts b { font-size:14px; }
+  #root .finops-page .finops-tier-list > article { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; padding:19px 17px; }
+  #root .finops-page .finops-tier-list__name { grid-column:1/-1; gap:6px; }
+  #root .finops-page .finops-tier-list__bar { grid-column:1/-1; }
+  #root .finops-page .finops-tier-list strong { font-size:14px; }
+  #root .finops-page .finops-tier-list span { font-size:11px; line-height:1.5; }
+  #root .finops-page .finops-tier-list article > div:not(.finops-tier-list__name):not(.finops-tier-list__bar) > span { font-size:11px; }
+  #root .finops-page .finops-tier-list b { font-size:15px; }
+  #root .finops-page .finops-tier-list article > div:nth-last-child(2) { text-align:left; }
+  #root .finops-page .finops-row { align-items:flex-start; gap:12px; padding:17px; }
+  #root .finops-page .finops-row strong { color:#dbe0e7; font-size:13px; line-height:1.6; white-space:normal; }
+  #root .finops-page .finops-row :is(span,strong small) { font-size:11px; line-height:1.65; }
+  #root .finops-page .finops-row b { font-size:13px; white-space:normal; overflow-wrap:anywhere; text-align:right; }
+  #root .finops-page .finops-row > div:last-child { max-width:45%; flex:0 0 auto; }
+  #root .finops-page .finops-token-list { padding:10px 17px; }
+  #root .finops-page .finops-token-list > div { grid-template-columns:40px minmax(0,1fr) auto; gap:10px; padding:12px 0; }
+  #root .finops-page .finops-token-list :is(time,strong) { font-size:12px; }
+  #root .finops-page .finops-token-list small { display:block; grid-column:2/-1; color:#939daa; font-size:11px; text-align:left; }
+  #root .finops-page .finops-history__scroll { max-width:100%; overflow-x:auto; overscroll-behavior-inline:contain; scrollbar-width:thin; }
+  #root .finops-page .finops-history table { min-width:1250px; }
+  #root .finops-page .finops-history th { padding:15px; font-size:11px; }
+  #root .finops-page .finops-history td { padding:17px 15px; font-size:12px; }
+  #root .finops-page .finops-history td strong { font-size:12px; }
+  #root .finops-page .finops-history td small { font-size:11px; }
+  #root .finops-page .finops-tier-badge { padding:6px 9px; font-size:11px; }
+  #root .finops-page .finops-alert { flex-wrap:wrap; gap:12px; padding:16px; border-radius:15px; font-size:13px; line-height:1.65; }
+
+  /* Mejoras: one clear capture flow, then the complete inbox. */
+  #root .improvements-page .improvements-summary { grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-bottom:20px; }
+  #root .improvements-page .improvements-summary > div { display:grid; grid-template-columns:1fr auto; gap:8px; min-width:0; padding:15px 11px; border-color:#363b43; border-radius:16px; background:#1b1e23; }
+  #root .improvements-page .improvements-summary span { grid-column:1/-1; grid-row:2; font-size:11px; line-height:1.4; }
+  #root .improvements-page .improvements-summary strong { grid-column:2; grid-row:1; font-size:22px; line-height:1; }
+  #root .improvements-page .improvements-layout { grid-template-columns:minmax(0,1fr); gap:20px; min-height:0; }
+  #root .improvements-page :is(.improvements-capture,.improvements-list) { min-width:0; min-height:0; border-color:#363b43; border-radius:20px; background:#181b1f; }
+  #root .improvements-page .improvements-capture { gap:19px; padding:22px 17px; }
+  #root .improvements-page :is(.improvements-capture,.improvements-list) h2 { margin-top:6px; font-size:23px; }
+  #root .improvements-page .improvements-capture header p { color:#a2abb8; font-size:13px; line-height:1.65; }
+  #root .improvements-page .improvements-capture label { gap:9px; color:#bec5ce; font-size:13px; }
+  #root .improvements-page .improvements-capture label small { color:#929ba8; font-size:12px; }
+  #root .improvements-page .improvements-capture :is(input,select,textarea) { min-width:0; min-height:48px; padding:12px; border-color:#414751; border-radius:12px; color:#e8ecf1; background:#111316; font-size:16px; }
+  #root .improvements-page .improvements-kinds { grid-template-columns:minmax(0,1fr); gap:9px; }
+  #root .improvements-page .improvements-kinds button { grid-template-columns:22px minmax(0,1fr); align-items:center; gap:4px 9px; min-height:78px; padding:15px; border-color:#3c434d; border-radius:13px; background:#20252c; }
+  #root .improvements-page .improvements-kinds button svg { grid-row:1/3; }
+  #root .improvements-page .improvements-kinds button strong { font-size:14px; }
+  #root .improvements-page .improvements-kinds button span { grid-column:2; color:#9ca7b6; font-size:12px; line-height:1.5; }
+  #root .improvements-page .improvements-kinds button.active { border-color:#a8b2c2; background:#2c333d; box-shadow:inset 3px 0 #ccd3de; }
+  #root .improvements-page .improvements-capture > .button { min-height:52px; }
+  #root .improvements-page .improvements-list > header { align-items:baseline; flex-wrap:wrap; gap:8px; padding:21px 17px; }
+  #root .improvements-page .improvements-list > header > small { color:#a4afbd; font-size:12px; }
+  #root .improvements-page .improvements-list article { grid-template-columns:20px minmax(0,1fr); gap:10px; padding:20px 17px; }
+  #root .improvements-page .improvements-list article strong { font-size:15px; line-height:1.5; }
+  #root .improvements-page .improvements-list article span { color:#a2adbd; font-size:11px; line-height:1.5; }
+  #root .improvements-page .improvements-list article p { color:#aab4c1; font-size:13px; line-height:1.7; }
+  #root .improvements-page .improvements-list article time { display:block; grid-column:2; font-size:11px; }
+  #root .improvements-page .form-error { font-size:13px; line-height:1.65; }
+
+  /* Forms belonging to these modules, including portalled dialogs. */
+  .modal-panel.health-dialog .tracker-form,.health-focus .treatment-labs .tracker-form { gap:18px; }
+  .modal-panel.health-dialog .tracker-form label,.health-focus .treatment-labs .tracker-form label,.modal-panel .household-form label,.journal-editor-modal .journal-editor label { min-width:0; gap:9px; color:#b6bdc7; font-size:13px; }
+  .modal-panel.health-dialog .tracker-form label > span,.health-focus .treatment-labs .tracker-form label > span { font-size:12px; }
+  .modal-panel.health-dialog .tracker-form :is(input,select,textarea),.health-focus .treatment-labs .tracker-form :is(input,select,textarea),.modal-panel .household-form :is(input:not([type=checkbox]),select,textarea),.journal-editor-modal .journal-editor :is(input,textarea) { min-width:0; width:100%; min-height:48px; border-color:#424851; border-radius:12px; color:#f1f2ef; background:#111316; font-size:16px; }
+  .modal-panel.health-dialog .tracker-form input[type=checkbox] { width:22px; min-height:22px; height:22px; accent-color:#e6e7e5; }
+  .modal-panel.health-dialog .tracker-form :is(.medical-notice,legend),.health-focus .treatment-labs .tracker-form .form-error { font-size:12px; line-height:1.65; }
+  .modal-panel.health-dialog .health-choice button { min-height:48px; border-radius:11px; font-size:13px; }
+  .modal-panel.health-dialog .health-choice button.active { border-color:#aab1bc; color:#f7f7f4; background:#30363f; box-shadow:none; }
+  .modal-panel.health-dialog .health-trained { min-height:52px; gap:12px; }
+  .modal-panel.health-dialog .tracker-form__grid,.health-focus .treatment-labs .tracker-form__grid,.modal-panel .household-form-grid { grid-template-columns:minmax(0,1fr); gap:16px; }
+  .modal-panel .household-form { gap:20px; color:#eee; }
+  .modal-panel .household-form p { color:#aab2bf; font-size:13px; line-height:1.7; }
+  .modal-panel .household-form .button { min-height:48px; border-radius:13px; font-size:14px; }
+  .modal-panel .household-form .button--primary { border-color:#f2f2ef; color:#111316; background:#f2f2ef; }
+  .modal-panel .household-form .button--secondary { border-color:#414751; color:#dce1e8; background:#242930; }
+  .modal-panel .household-actions { display:grid; grid-template-columns:minmax(0,1fr); gap:9px; }
+  .modal-panel .household-cart-row { gap:12px; padding:18px 0; }
+  .modal-panel .household-cart-row :is(small,.household-line-total) { font-size:13px; line-height:1.6; }
+  .modal-panel .household-form .household-check { align-items:center; flex-wrap:wrap; min-height:44px; font-size:15px; }
+  .modal-panel .household-form .household-check input { width:22px; height:22px; }
+  .modal-panel .household-cart-footer > strong { font-size:18px; line-height:1.5; }
+  .modal-panel .household-history summary { display:flex; flex-wrap:wrap; gap:12px; min-height:48px; align-items:center; font-size:13px; }
+  .modal-panel .household-history summary strong { margin:0; }
+  .modal-panel .household-history p { font-size:13px; line-height:1.7; }
+  .modal-panel .reinforced-confirm p { color:#afb6c0; font-size:13px; line-height:1.7; }
+  .modal-panel .reinforced-confirm label { gap:10px; color:#c0c6ce; font-size:13px; }
+  .modal-panel .reinforced-confirm input { width:100%; min-width:0; min-height:50px; padding:12px; border-color:#4a4248; border-radius:12px; font-size:16px; }
+  .journal-editor-modal .journal-editor { gap:19px; }
+  .journal-editor-modal .journal-editor__meta { grid-template-columns:minmax(0,1fr); }
+  .journal-editor-modal .journal-editor label > span { align-items:center; flex-wrap:wrap; gap:9px; }
+  .journal-editor-modal .journal-editor__check-action { min-height:44px; padding:7px 11px; color:#d1d7df; border-color:#454c57; background:#272d35; font-size:12px; }
+  .journal-editor-modal .journal-editor__page { min-height:40dvh; height:45dvh; font-size:16px!important; line-height:1.75!important; }
+  .journal-reader-modal .journal-reader { width:100%; max-height:none; overflow:visible; padding:4px 0 0; }
+  .journal-reader-modal .journal-reader__content { max-height:none; margin:22px 0; overflow:visible; color:#dedfdd; font-size:16px; line-height:1.8; }
+  .journal-reader-modal .journal-reader header { font-size:12px; }
+  .journal-reader-modal .journal-reader > small { color:#a9b2bf; font-size:12px; line-height:1.7; }
+  .journal-reader-modal .journal-tags { gap:8px; margin-top:16px; }
+  .journal-reader-modal .journal-tags span { max-width:100%; padding:5px 8px; border-radius:7px; color:#c2c9d2; background:#282d34; font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
+  .journal-reader-modal .journal-check { min-height:44px; gap:12px; margin:10px 0; }
+  .journal-reader-modal .journal-check input { flex-basis:22px; width:22px; height:22px; }
+  .journal-reader-modal .journal-reader footer { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+  .journal-reader-modal .journal-reader footer .button { min-width:0; min-height:48px; font-size:12px; }
+  .journal-reader-modal .journal-reader footer .button:last-child { grid-column:1/-1; }
+}
+
+@media (max-width:360px) {
+  #root .household-header h1 { font-size:26px; }
+  #root .household-header > .button { gap:6px; min-width:96px; padding-inline:11px; }
+  #root .household-tabs button { flex-direction:column; gap:4px; font-size:11px; }
+  #root .household-status { grid-template-columns:minmax(0,1fr); }
+  #root .health-focus .health-focus__metrics { gap:8px; }
+  #root .health-focus .health-focus__metrics > article { padding:16px 11px; }
+  #root .health-focus .health-focus__metrics article > strong { font-size:24px; }
+  #root .improvements-page .improvements-summary span { font-size:10px; }
+}

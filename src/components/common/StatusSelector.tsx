@@ -5,7 +5,7 @@ import { AuthContext } from '../../providers/AuthContext'
 import { taskRepository } from '../../repositories/taskRepository'
 import type { Task, TaskStatus } from '../../types'
 
-const options: Array<[TaskStatus, string]> = [['todo', 'Por hacer'], ['doing', 'En progreso'], ['blocked', 'Bloqueada'], ['done', 'Completada']]
+const options: Array<[TaskStatus, string]> = [['todo', 'Por hacer'], ['doing', 'En progreso'], ['waiting', 'En espera'], ['blocked', 'En revisión'], ['done', 'Completada']]
 const taskStatusLabel = (status: TaskStatus) => options.find(([value]) => value === status)?.[1] ?? (status === 'inbox' || status === 'paused' ? 'Por hacer' : status)
 let activeMenu: string | null = null
 const subscribers = new Set<() => void>()
@@ -62,8 +62,12 @@ export function StatusSelector({ value, task, onChange, disabled = false }: { va
     const previous = value; setActiveMenu(null); setError(''); onChange(status)
     if (!task || !auth?.user) return
     setSaving(true)
-    try { await taskRepository.update({ ...task, status, updatedAt: new Date().toISOString() }, auth.user.id) }
-    catch (reason) { onChange(previous); setError(reason instanceof Error ? reason.message : 'No se guardó el estado.') }
+    try { await taskRepository.updateStatus(task.id, status, auth.user.id, task.sortOrder) }
+    catch (reason) {
+      onChange(previous)
+      const detail = reason && typeof reason === 'object' && 'message' in reason ? String(reason.message) : ''
+      setError(detail || 'No se guardó el estado.')
+    }
     finally { setSaving(false) }
   }
   const normalized = value === 'inbox' || value === 'paused' ? 'todo' : value

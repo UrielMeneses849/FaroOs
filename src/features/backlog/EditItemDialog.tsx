@@ -1,13 +1,13 @@
 import { useState, type FormEvent } from 'react'
 import { Button, Modal } from '../../components/common'
 import { useFaroStore } from '../../store'
-import type { LifeArea, Priority } from '../../types'
+import type { LifeArea, Priority, TaskStatus } from '../../types'
 import type { BacklogItem } from './backlogTypes'
 import { RelationshipPicker } from './RelationshipPicker'
 
 const statusOptions = {
   idea: [['inbox', 'Inbox'], ['archived', 'Archivado']],
-  task: [['inbox', 'Inbox'], ['todo', 'Por hacer'], ['doing', 'En curso'], ['done', 'Listo']],
+  task: [['inbox', 'Inbox'], ['todo', 'Por hacer'], ['doing', 'En curso'], ['waiting', 'En espera'], ['blocked', 'En revisión'], ['done', 'Listo']],
   project: [['idea', 'Idea'], ['planned', 'Planeado'], ['active', 'Activo'], ['paused', 'En pausa'], ['completed', 'Completado']],
   goal: [['active', 'Activo'], ['paused', 'En pausa'], ['completed', 'Completado']],
 }
@@ -26,7 +26,7 @@ export function EditItemDialog({ item, onClose }: { item: BacklogItem | null; on
     event.preventDefault()
     if (!draft.title.trim()) { setError('El título es obligatorio'); return }
     if (draft.kind === 'idea') updateIdea(draft.id, { title: draft.title.trim(), description: draft.description, area: draft.area, status: draft.status as 'inbox' | 'archived' | 'converted', date: draft.date, projectId: draft.projectId, goalId: draft.goalId })
-    if (draft.kind === 'task') updateTask(draft.id, { title: draft.title.trim(), notes: draft.description, area: draft.area, status: draft.status as 'inbox' | 'todo' | 'doing' | 'done', priority: draft.priority, dueDate: draft.date, projectId: draft.projectId, goalId: draft.goalId })
+    if (draft.kind === 'task') updateTask(draft.id, { title: draft.title.trim(), notes: draft.description, area: draft.area, status: draft.status as TaskStatus, priority: draft.priority, dueDate: draft.date, projectId: draft.projectId, goalId: draft.goalId })
     if (draft.kind === 'project') updateProject(draft.id, { title: draft.title.trim(), description: draft.description, area: draft.area, status: draft.status as 'idea' | 'planned' | 'active' | 'paused' | 'completed', goalId: draft.goalId })
     if (draft.kind === 'goal') updateGoal(draft.id, { title: draft.title.trim(), description: draft.description, area: draft.area, status: draft.status as 'active' | 'paused' | 'completed', targetDate: draft.date })
     onClose()

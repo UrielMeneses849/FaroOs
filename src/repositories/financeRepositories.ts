@@ -16,6 +16,7 @@ import type {
   FinanceTransaction,
 } from '../features/finance/financeTypes'
 import { assertFinanceUser, centsToNumeric, numericToCents, throwIfError } from './financeRepositoryUtils'
+import { financeDebtRepository } from './financeDebtRepository'
 
 type Tables = Database['public']['Tables']
 type AccountRow = Tables['finance_accounts']['Row']
@@ -53,9 +54,17 @@ const transactionFromRow = (row: TransactionRow): FinanceTransaction => ({
   recurringTransactionId: row.recurring_transaction_id ?? undefined,
   legacyTransactionId: row.legacy_transaction_id ?? undefined,
   budgetId: row.budget_id ?? undefined,
+  debtId: row.debt_id ?? undefined,
+  debtBalanceAdjustmentCents: row.debt_balance_adjustment == null ? undefined : numericToCents(row.debt_balance_adjustment),
+  debtQuoteCents: row.debt_quote == null ? undefined : numericToCents(row.debt_quote),
+  debtQuoteValidUntil: row.debt_quote_valid_until ?? undefined,
+  debtPrincipalCents: row.debt_principal_amount == null ? undefined : numericToCents(row.debt_principal_amount),
+  debtSettlement: row.debt_settlement,
+  planAmountCents: numericToCents(row.plan_amount ?? 0),
   createdAt: row.created_at, updatedAt: row.updated_at,
 })
 const recurringFromRow = (row: RecurringRow): FinanceRecurringTransaction => ({
+  debtId: row.debt_id ?? undefined,
   id: row.id, accountId: row.account_id,
   destinationAccountId: row.destination_account_id ?? undefined,
   categoryId: row.category_id ?? undefined, type: row.type,
@@ -244,6 +253,12 @@ export const financeTransactionRepository = {
       recurring_transaction_id: transaction.recurringTransactionId ?? null,
       legacy_transaction_id: transaction.legacyTransactionId ?? null,
       budget_id: transaction.budgetId ?? null,
+      debt_id: transaction.debtId ?? null,
+      ...(transaction.debtBalanceAdjustmentCents != null ? { debt_balance_adjustment: centsToNumeric(transaction.debtBalanceAdjustmentCents) } : {}),
+      ...(transaction.debtQuoteCents != null ? { debt_quote: centsToNumeric(transaction.debtQuoteCents), debt_quote_valid_until: transaction.debtQuoteValidUntil ?? null } : {}),
+      debt_principal_amount: transaction.debtPrincipalCents == null ? null : centsToNumeric(transaction.debtPrincipalCents),
+      debt_settlement: transaction.debtSettlement ?? false,
+      plan_amount: centsToNumeric(transaction.planAmountCents ?? 0),
     }, { onConflict: 'id' }).select().single()
     throwIfError(error)
     return transactionFromRow(data!)
@@ -283,6 +298,7 @@ export const financeRecurringRepository = {
       frequency: item.frequency, start_date: item.startDate,
       next_occurrence: item.nextOccurrence, end_date: item.endDate ?? null,
       day_of_month: item.dayOfMonth ?? null, is_active: item.isActive,
+      debt_id: item.debtId ?? null,
     }, { onConflict: 'id' }).select().single()
     throwIfError(error)
     return recurringFromRow(data!)
@@ -480,12 +496,13 @@ export const financePlanningRepository = {
 }
 
 export async function loadFinanceData(userId: string): Promise<FinanceData> {
-  const [accounts, categories, transactions, recurring, recurringOccurrences, budgets, goalData, planning, liquidity] = await Promise.allSettled([
+  const [accounts, categories, transactions, recurring, recurringOccurrences, budgets, goalData, planning, liquidity, debtPlan] = await Promise.allSettled([
     financeAccountRepository.list(userId), financeCategoryRepository.list(userId),
     financeTransactionRepository.list(userId), financeRecurringRepository.list(userId),
     financeRecurringOccurrenceRepository.list(userId), financeBudgetRepository.list(userId),
     financeGoalRepository.list(userId), financePlanningRepository.list(userId),
     financeLiquidityRepository.load(userId),
+    financeDebtRepository.load(userId),
   ])
   if (accounts.status === 'rejected') throw accounts.reason
   if (categories.status === 'rejected') throw categories.reason
@@ -501,6 +518,8 @@ export async function loadFinanceData(userId: string): Promise<FinanceData> {
   reportSecondaryFailure('metas', goalData)
   reportSecondaryFailure('radar de liquidez', liquidity)
   return {
+    debtPlan: debtPlan.status === 'fulfilled' ? debtPlan.value : undefined,
+    debtPlanError: debtPlan.status === 'rejected' ? 'No se pudo cargar Plan. Actualiza los datos o revisa la conexión.' : undefined,
     accounts: accounts.value,
     categories: categories.value,
     transactions: transactions.status === 'fulfilled' ? transactions.value : [],

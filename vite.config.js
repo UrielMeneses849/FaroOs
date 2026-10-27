@@ -45,6 +45,7 @@ export default defineConfig(({ command, mode }) => {
           ],
           shortcuts: [
             { name: 'Hoy', short_name: 'Hoy', url: `${webScope}today` },
+            { name: 'Lista del sábado', short_name: 'Compras', description: 'Tu lista, inventario y presupuesto de casa', url: `${webScope}needs` },
             { name: 'Registrar gasto', short_name: 'Gasto', description: 'Anota un gasto en pocos toques', url: `${webScope}finance?quick=expense` },
             { name: 'Nuevo evento', short_name: 'Evento', description: 'Añade algo a tu calendario', url: `${webScope}calendar?quick=event` },
           ],
@@ -64,7 +65,7 @@ export default defineConfig(({ command, mode }) => {
           clientsClaim: true,
           importScripts: ['share-target-sw.js'],
           navigateFallback: 'index.html',
-          globPatterns: ['**/*.{js,css,html,png,svg,ico,woff,woff2}'],
+          globPatterns: ['**/*.{js,css,html,png,jpg,jpeg,webp,svg,ico,woff,woff2}'],
           // FARO contains private, live Supabase data. Cache only the compiled
           // application shell; authenticated API responses must stay online.
           navigateFallbackDenylist: [/^\/auth\//, /^\/rest\//, /^\/functions\//, /^\/storage\//],

@@ -17,6 +17,12 @@ describe('respaldos FARO', () => {
     expect(() => parseBackup(JSON.stringify({ product: 'FARO OS', schemaVersion: 99, data: {} }))).toThrow('formato compatible')
   })
 
+  it('conserva las tareas en espera y su dependencia al exportar e importar', () => {
+    const data = { ...demoData, tasks: [{ ...demoData.tasks[0], status: 'waiting' as const, waitingFor: 'Validación de Ana' }] }
+    const imported = parseBackup(JSON.stringify(createBackup(data)))
+    expect(imported.data.tasks[0]).toMatchObject({ status: 'waiting', waitingFor: 'Validación de Ana' })
+  })
+
   it('reemplaza el estado sólo después de validarlo', () => {
     const backup = createBackup({ ...demoData, ideas: [] })
     useFaroStore.getState().replaceData(parseBackup(JSON.stringify(backup)).data)

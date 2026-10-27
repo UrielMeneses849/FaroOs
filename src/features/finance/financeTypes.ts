@@ -1,3 +1,5 @@
+import type { DebtPlanData } from './debtTypes'
+
 export type FinanceAccountType = 'cash' | 'checking' | 'savings' | 'credit' | 'investment' | 'loan'
 export type FinanceCategoryType = 'income' | 'expense' | 'saving' | 'debt' | 'transfer'
 export type FinanceTransactionType = 'income' | 'expense' | 'transfer' | 'saving' | 'debt_payment' | 'refund'
@@ -45,6 +47,13 @@ export interface FinanceTransaction {
   recurringTransactionId?: string
   legacyTransactionId?: string
   budgetId?: string
+  debtId?: string
+  debtBalanceAdjustmentCents?: number
+  debtQuoteCents?: number
+  debtQuoteValidUntil?: string
+  debtPrincipalCents?: number
+  debtSettlement?: boolean
+  planAmountCents?: number
   createdAt: string
   updatedAt: string
 }
@@ -63,6 +72,7 @@ export interface FinanceRecurringTransaction {
   endDate?: string
   dayOfMonth?: number
   isActive: boolean
+  debtId?: string
   createdAt: string
   updatedAt: string
 }
@@ -148,6 +158,8 @@ export interface FinanceLiquiditySnapshot {
 }
 
 export interface FinanceData {
+  debtPlan?: DebtPlanData
+  debtPlanError?: string
   accounts: FinanceAccount[]
   categories: FinanceCategory[]
   transactions: FinanceTransaction[]

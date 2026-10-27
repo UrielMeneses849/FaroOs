@@ -39,6 +39,24 @@ describe('controles compactos de tarea', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
+  it('permite poner una tarea en espera sin convertirla en bloqueada', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    render(<StatusSelector value="doing" onChange={onChange} />)
+    await user.click(screen.getByRole('button', { name: /en progreso/i }))
+    await user.click(screen.getByRole('menuitem', { name: 'En espera' }))
+    expect(onChange).toHaveBeenCalledWith('waiting')
+  })
+
+  it('muestra En revisión y conserva el valor blocked del backend', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    render(<StatusSelector value="doing" onChange={onChange} />)
+    await user.click(screen.getByRole('button', { name: /en progreso/i }))
+    await user.click(screen.getByRole('menuitem', { name: 'En revisión' }))
+    expect(onChange).toHaveBeenCalledWith('blocked')
+  })
+
   it('mantiene el menú en una capa global al hacer scroll', async () => {
     const user = userEvent.setup()
     render(<StatusSelector value="todo" onChange={vi.fn()} />)

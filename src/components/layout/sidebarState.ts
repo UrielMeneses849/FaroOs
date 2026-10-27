@@ -1,14 +1,16 @@
-import type { NavigationGroup } from '../../app/navigation'
+import { navigationGroups, type NavigationGroup } from '../../app/navigation'
 
 const STORAGE_KEY = 'faro.sidebar.v2'
 
 type BrowserStorage = Pick<Storage, 'getItem' | 'setItem'>
 
 export interface SidebarPreferences {
+  collapsed: boolean
   openGroups: Partial<Record<NavigationGroup['id'], boolean>>
 }
 
 export const defaultSidebarPreferences: SidebarPreferences = {
+  collapsed: false,
   openGroups: {},
 }
 
@@ -33,8 +35,8 @@ export function readSidebarPreferences(storage = storageForSidebar()): SidebarPr
     if (!isValidPreferences(parsed)) return defaultSidebarPreferences
     // V2 is an accordion: normalize old persisted state that allowed several
     // expanded groups before this rule existed.
-    const firstOpenGroup = Object.entries(parsed.openGroups).find(([, open]) => Boolean(open))?.[0] as NavigationGroup['id'] | undefined
-    return { openGroups: firstOpenGroup ? { [firstOpenGroup]: true } : {} }
+    const firstOpenGroup = navigationGroups.find((group) => parsed.openGroups[group.id] === true)?.id
+    return { collapsed: parsed.collapsed === true, openGroups: firstOpenGroup ? { [firstOpenGroup]: true } : {} }
   } catch {
     return defaultSidebarPreferences
   }

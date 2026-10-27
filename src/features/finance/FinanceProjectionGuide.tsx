@@ -96,8 +96,8 @@ export function FinanceProjectionGuide({ data, selectedMonth, availableTodayCent
       <div className="liquidity-guide__month-head"><span>Mes</span><span>Punto mínimo</span><span>Cierre</span><span>Recomendación</span></div>
       {guide.months.map((month) => <article key={month.periodStart} className={`liquidity-guide__month liquidity-guide__month--${month.status}${month.attentionRank === 1 ? ' is-priority' : ''}`}>
         <div><strong>{monthLabel(month.periodStart)}</strong><small>{month.attentionRank === 1 ? 'Mayor atención' : statusLabel(month.status)}</small></div>
-        <b>{formatMxn(month.minimumBalanceCents)}<small>{monthLabel(month.minimumDate, 'd MMM')}</small></b>
-        <b>{formatMxn(month.closingBalanceCents)}<small className={month.netChangeCents >= 0 ? 'positive' : 'negative'}>{month.netChangeCents >= 0 ? '+' : ''}{formatMxn(month.netChangeCents)} en el mes</small></b>
+        <b data-label="Punto mínimo">{formatMxn(month.minimumBalanceCents)}<small>{monthLabel(month.minimumDate, 'd MMM')}</small></b>
+        <b data-label="Cierre">{formatMxn(month.closingBalanceCents)}<small className={month.netChangeCents >= 0 ? 'positive' : 'negative'}>{month.netChangeCents >= 0 ? '+' : ''}{formatMxn(month.netChangeCents)} en el mes</small></b>
         <p>{recommendationForMonth(month, guide)}</p>
       </article>)}
     </div>

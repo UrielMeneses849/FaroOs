@@ -11,9 +11,10 @@ export type LifeArea =
 export type GoalStatus = 'active' | 'paused' | 'completed'
 export type ProjectStatus = 'idea' | 'planned' | 'active' | 'paused' | 'completed'
 export type EntityStatus = GoalStatus | ProjectStatus
-export type TaskStatus = 'inbox' | 'todo' | 'doing' | 'paused' | 'blocked' | 'done'
+export type TaskStatus = 'inbox' | 'todo' | 'doing' | 'waiting' | 'paused' | 'blocked' | 'done'
 export type IdeaStatus = 'inbox' | 'archived' | 'converted'
 export type Priority = 'low' | 'medium' | 'high' | 'critical'
+export type TaskType = 'bug' | 'feature' | 'ui' | 'tech' | 'research' | 'content'
 export type BacklogKind = 'idea' | 'task' | 'project' | 'goal'
 
 export interface BaseEntity {
@@ -75,6 +76,15 @@ export interface Task extends BaseEntity {
   waitingFor?: string
   blockerReason?: string
   pausedUntil?: string
+  sectionId?: string
+  taskType?: TaskType
+}
+
+export interface BacklogSection extends BaseEntity {
+  workspaceId: string
+  name: string
+  color: string
+  sortOrder: number
 }
 
 export type WorkspaceType = 'personal' | 'employment' | 'business' | 'client'

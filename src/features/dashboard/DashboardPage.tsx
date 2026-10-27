@@ -1,6 +1,6 @@
 import { differenceInMinutes, endOfMonth, format, parseISO, subMonths } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { ArrowUpRight, Cloud, Coffee, Database, Gift, HardDrive, Landmark, Plus, Scale, ShieldCheck, Utensils, WalletCards } from 'lucide-react'
+import { ArrowUpRight, CalendarDays, CheckSquare, Cloud, Coffee, Database, Gift, HardDrive, Landmark, Plus, Scale, ShieldCheck, Utensils, WalletCards } from 'lucide-react'
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, XAxis, YAxis } from 'recharts'
@@ -46,7 +46,7 @@ export function DashboardPage() {
   const { logs: healthLogs, save: saveHealth } = useHealthRecords()
   const tasks = useFaroStore((state) => state.tasks)
   const [weightOpen, setWeightOpen] = useState(false)
-  const [recentLimit, setRecentLimit] = useState(12)
+  const [recentLimit, setRecentLimit] = useState(() => window.innerWidth <= 760 ? 4 : 12)
   const [maintenanceOpen, setMaintenanceOpen] = useState(false)
   const [macCapacity, setMacCapacity] = useState<StorageCapacity>()
   const [macCapacityError, setMacCapacityError] = useState('')
@@ -98,6 +98,11 @@ export function DashboardPage() {
 
   return <div className="page dashboard-page dashboard-ops faro-monochrome-dashboard">
     <div className="dashboard-voice-heading"><PageHeader eyebrow={format(new Date(), "EEEE, d 'de' MMMM", { locale: es })} title="Dashboard" voiceSurface="dashboard" showVoice={false} /></div>
+    <nav className="dashboard-mobile-shortcuts" aria-label="Accesos rápidos">
+      <Link to="/finance"><WalletCards size={20} /><span>Finanzas</span><small>Saldo y proyecciones</small></Link>
+      <Link to="/backlog"><CheckSquare size={20} /><span>Pendientes</span><small>Tus workspaces</small></Link>
+      <Link to="/calendar"><CalendarDays size={20} /><span>Agenda</span><small>Organiza tu tiempo</small></Link>
+    </nav>
     <div className="dashboard-command">
       <main className="dashboard-command__main">
         <section className="ops-panel ops-calendar"><PanelHead eyebrow="Próximos compromisos" title="" to="/calendar" label="Abrir calendario" />{calendarError ? <EmptyState title="Calendario no disponible" description={calendarError} action={<Button onClick={refreshCalendar}>Reintentar</Button>} /> : <><div className="ops-timeline">{upcoming.map((item, index) => {
@@ -131,7 +136,7 @@ export function DashboardPage() {
       </main>
       <aside className="dashboard-finance-sidebar">
         <section className="finance-side-balance"><header><span>Resumen financiero</span><WalletCards size={18} /></header><small>Disponible operativo</small><strong>{formatMxn(metrics.availableBalanceCents)}</strong>{availableVariation != null && <em className={availableVariation >= 0 ? 'positive' : 'negative'}>{availableVariation >= 0 ? '+' : ''}{availableVariation.toFixed(1)}% respecto al periodo anterior</em>}<p>Dinero activo después de gastos y ahorro apartado.</p><div className="dashboard-spend-today"><span>Gastado hoy</span><b>{formatMxn(todayExpenses)}</b></div><dl><div><dt>Ingresos del periodo</dt><dd>{formatMxn(metrics.monthlyIncomeCents)}</dd></div><div><dt>Gastos del periodo</dt><dd>{formatMxn(metrics.monthlyExpensesCents)}</dd></div><div><dt>Balance real</dt><dd>{formatMxn(metrics.actualBalanceCents)}</dd></div></dl><Button size="sm" icon={<Plus size={14} />} onClick={openMovements}>Registrar movimiento</Button></section>
-        <section className="finance-side-recent"><header><span>Movimientos recientes</span><button onClick={openMovements}>Ver todos</button></header><div className="finance-side-recent__list" tabIndex={0} aria-label="Movimientos recientes">{recentTransactions.map((item) => { const category = finance.categories.find((candidate) => candidate.id === item.categoryId)?.name ?? item.type; return <article key={item.id} data-type={item.type}><MovementIcon category={category} /><div><strong title={item.description}>{item.description}</strong><span>{category} · {item.transactionDate}</span></div><b>{item.type === 'income' || item.type === 'refund' ? '+' : item.type === 'transfer' ? '' : '−'}{formatMxn(item.amountCents)}</b><small>{item.status}</small></article>})}{!recentTransactions.length && <p>Sin movimientos todavía.</p>}{recentLimit < finance.transactions.length && <Button size="sm" variant="ghost" onClick={() => setRecentLimit((limit) => limit + 12)}>Mostrar más movimientos</Button>}</div></section>
+        <section className="finance-side-recent"><header><span>Movimientos recientes</span><button onClick={openMovements}>Ver todos</button></header><div className="finance-side-recent__list" tabIndex={0} aria-label="Movimientos recientes">{recentTransactions.map((item) => { const category = finance.categories.find((candidate) => candidate.id === item.categoryId)?.name ?? item.type; return <article key={item.id} data-type={item.type}><MovementIcon category={category} /><div><strong title={item.description}>{item.description}</strong><span>{category} · {item.transactionDate}</span></div><b>{item.type === 'income' || item.type === 'refund' ? '+' : item.type === 'transfer' ? '' : '−'}{formatMxn(item.amountCents)}</b><small>{item.status === 'completed' ? 'Completado' : item.status === 'pending' ? 'Pendiente' : item.status === 'planned' ? 'Programado' : item.status}</small></article>})}{!recentTransactions.length && <p>Sin movimientos todavía.</p>}{recentLimit < finance.transactions.length && <Button size="sm" variant="ghost" onClick={() => setRecentLimit((limit) => limit + (window.innerWidth <= 760 ? 6 : 12))}>Mostrar más movimientos</Button>}</div></section>
       </aside>
     </div>
     {weightOpen && <QuickWeightDialog onClose={() => setWeightOpen(false)} onSave={saveHealth} />}

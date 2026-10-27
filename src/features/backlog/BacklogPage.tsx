@@ -1,12 +1,14 @@
-import { useCallback, useMemo, useState } from 'react'
+import { Plus } from 'lucide-react'
+import { useCallback, useContext, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Button, ConfirmDialog, EmptyState } from '../../components/common'
 import { PageHeader } from '../../components/layout'
 import { TaskFormDialog } from '../planning/PlanningDialogs'
+import { TaskSyncContext } from '../../providers/TaskSyncContext'
 import { useAuth } from '../../hooks/auth'
 import { useWorkspaces } from '../../hooks/useWorkspaces'
 import { useSprints } from '../../hooks/useSprints'
-import { taskRepository } from '../../repositories/taskRepository'
+import { useBacklogSections } from '../../hooks/useBacklogSections'
 import { sprintRepository } from '../../repositories/sprintRepository'
 import { useFaroStore } from '../../store'
 import type { BacklogKind, Priority, Task, TaskStatus } from '../../types'
@@ -15,12 +17,15 @@ import { buildBacklogItems } from './backlogUtils'
 import { EditItemDialog } from './EditItemDialog'
 import { WorkspaceOverviewGrid, type WorkspaceMetrics } from './WorkspaceOverviewGrid'
 import { TaskKanbanBoard } from './TaskKanbanBoard'
+import { BacklogOrganizer } from './BacklogOrganizer'
+import { BacklogSectionManager } from './BacklogSectionManager'
 
-type Bucket = 'todo' | 'doing' | 'blocked' | 'done'
+type Bucket = 'todo' | 'doing' | 'waiting' | 'blocked' | 'done'
 const bucketOf = (item: BacklogItem): Bucket => {
   if (item.status === 'done' || item.status === 'completed' || item.status === 'archived') return 'done'
   if (item.status === 'paused' || item.status === 'inbox') return 'todo'
   if (item.status === 'blocked') return 'blocked'
+  if (item.status === 'waiting') return 'waiting'
   if (item.status === 'doing' || item.status === 'active') return 'doing'
   if (item.status === 'todo' || item.status === 'planned') return 'todo'
   return 'todo'
@@ -28,6 +33,7 @@ const bucketOf = (item: BacklogItem): Bucket => {
 
 export function BacklogPage() {
   const { user } = useAuth()
+  const taskSync = useContext(TaskSyncContext)
   const { data: workspaces, loading, error, refresh } = useWorkspaces()
   const { data: sprintData, refresh: refreshSprints } = useSprints()
   const ideas = useFaroStore((state) => state.ideas)
@@ -39,18 +45,20 @@ export function BacklogPage() {
   const deleteProject = useFaroStore((state) => state.deleteProject)
   const deleteGoal = useFaroStore((state) => state.deleteGoal)
   const [params, setParams] = useSearchParams()
-  const [query] = useState('')
   const [kind] = useState<BacklogKind | 'all'>('all')
   const [priority] = useState<Priority | 'all'>('all')
   const [status] = useState('all')
   const [sort] = useState<SortKey>('created')
   const [dateFilter] = useState<'all' | 'overdue' | 'undated'>('all')
   const [projectFilter] = useState('all')
+  const [sectionFilter, setSectionFilter] = useState('all')
+  const [managingSections, setManagingSections] = useState(false)
   const [creatingStatus, setCreatingStatus] = useState<TaskStatus>()
   const [feedback, setFeedback] = useState('')
   const [editing, setEditing] = useState<BacklogItem | null>(null)
   const [deleting, setDeleting] = useState<BacklogItem | null>(null)
   const activeWorkspace = params.get('workspace') ?? sessionStorage.getItem('faro-backlog-workspace') ?? 'all'
+  const { data: sections, loading: sectionsLoading, error: sectionsError, refresh: refreshSections } = useBacklogSections(activeWorkspace)
   const activeWorkspaces = useMemo(
     () => workspaces.filter((workspace) => workspace.isActive),
     [workspaces],
@@ -64,10 +72,10 @@ export function BacklogPage() {
   [activeWorkspaces])
   const chooseWorkspace = (id: string) => {
     sessionStorage.setItem('faro-backlog-workspace', id)
+    setSectionFilter('all')
     setParams(id === 'all' ? {} : { workspace: id }, { replace: true })
   }
   const filtered = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase('es')
     const priorityWeight = { critical: 4, high: 3, medium: 2, low: 1 }
     return allItems.filter((item) => !item.archivedAt
       && (activeWorkspace === 'all' || workspaceFor(item) === activeWorkspace)
@@ -75,11 +83,11 @@ export function BacklogPage() {
       && (priority === 'all' || item.priority === priority)
       && (status === 'all' || bucketOf(item) === status)
       && (projectFilter === 'all' || item.projectId === projectFilter)
+      && (sectionFilter === 'all' || item.kind !== 'task' || (sectionFilter === 'unassigned' ? !tasks.find((task) => task.id === item.id)?.sectionId : tasks.find((task) => task.id === item.id)?.sectionId === sectionFilter))
       && (dateFilter !== 'overdue' || Boolean(item.date && item.date < new Date().toISOString().slice(0, 10)))
-      && (dateFilter !== 'undated' || !item.date)
-      && (!normalized || `${item.title} ${item.description ?? ''}`.toLocaleLowerCase('es').includes(normalized)))
+      && (dateFilter !== 'undated' || !item.date))
       .sort((left, right) => sort === 'due' ? (left.date ?? '9999').localeCompare(right.date ?? '9999') : sort === 'priority' ? priorityWeight[right.priority ?? 'low'] - priorityWeight[left.priority ?? 'low'] : right.createdAt.localeCompare(left.createdAt))
-  }, [activeWorkspace, allItems, dateFilter, kind, priority, projectFilter, query, sort, status, workspaceFor])
+  }, [activeWorkspace, allItems, dateFilter, kind, priority, projectFilter, sectionFilter, sort, status, tasks, workspaceFor])
   const metrics = useMemo(() => Object.fromEntries(activeWorkspaces.map((workspace) => {
     const items = allItems.filter((item) => workspaceFor(item) === workspace.id && !item.archivedAt)
     const complete = items.filter((item) => bucketOf(item) === 'done').length
@@ -94,6 +102,8 @@ export function BacklogPage() {
     setDeleting(null)
   }
   const taskWorkspaceName = (task: Task) => activeWorkspaces.find((workspace) => workspace.id === task.workspaceId)?.name ?? 'Personal'
+  const selectedWorkspace = activeWorkspaces.find((workspace) => workspace.id === activeWorkspace)
+  const workspaceTasks = tasks.filter((task) => task.workspaceId === activeWorkspace)
   const kanbanTasks = filtered.filter((item) => item.kind === 'task')
     .map((item) => tasks.find((task) => task.id === item.id)).filter((task): task is Task => Boolean(task))
   const changeStatus = (task: Task, nextStatus: TaskStatus) => useFaroStore.getState().updateTask(task.id, { status: nextStatus })
@@ -108,29 +118,22 @@ export function BacklogPage() {
     const previousOrder = beforeIndex > 0 ? targetTasks[beforeIndex - 1]?.sortOrder ?? 0 : beforeIndex === 0 ? 0 : targetTasks.at(-1)?.sortOrder ?? 0
     const nextOrder = beforeIndex >= 0 ? targetTasks[beforeIndex]?.sortOrder ?? previousOrder + 2000 : previousOrder + 2000
     const sortOrder = beforeIndex >= 0 ? (previousOrder + nextOrder) / 2 : nextOrder
-    const now = new Date().toISOString()
-    const optimistic = {
-      ...task,
-      status: targetStatus,
-      sortOrder,
-      completedAt: targetStatus === 'done' ? (task.status === 'done' ? task.completedAt : now) : undefined,
-      updatedAt: now,
-    }
-    useFaroStore.setState((state) => ({ tasks: state.tasks.map((item) => item.id === taskId ? optimistic : item) }))
-    try { await taskRepository.update(optimistic, user.id); setFeedback('Tarea movida.') }
-    catch (reason) {
-      useFaroStore.setState({ tasks: previous })
-      setFeedback(reason instanceof Error ? reason.message : 'No se pudo mover la tarea. Se restauró su posición.')
-    }
+    // TaskSyncProvider owns persistence and rollback for every local task edit.
+    useFaroStore.getState().updateTask(taskId, { status: targetStatus, sortOrder })
   }
   if (loading && !workspaces.length) return <div className="page"><div className="planning-skeleton" role="status">Preparando workspaces…</div></div>
   if (error && !workspaces.length) return <div className="page"><EmptyState title="No pudimos cargar los workspaces" description={error} action={<Button onClick={refresh}>Reintentar</Button>} /></div>
   return <div className="page workspace-backlog"><PageHeader eyebrow="Contextos de trabajo" title="Backlog" description="Organiza lo pendiente desde el lugar donde realmente ocurre." showVoice={false} />
     <WorkspaceOverviewGrid workspaces={activeWorkspaces} activeId={activeWorkspace} metrics={metrics} onSelect={chooseWorkspace} />
+    {selectedWorkspace && <BacklogOrganizer tasks={workspaceTasks} sections={sections} workspaceName={selectedWorkspace.name} sectionFilter={sectionFilter} onSectionFilter={setSectionFilter} onManageSections={() => setManagingSections(true)} />}
+    {selectedWorkspace && (sectionsLoading || sectionsError) && <div className="backlog-organizer__state" role={sectionsError ? 'alert' : 'status'}>{sectionsError || 'Cargando secciones…'}</div>}
+    {taskSync?.error && <div className="kanban-feedback" role="alert">{taskSync.error}</div>}
     {feedback && <div className="kanban-feedback" role="status">{feedback}<button onClick={() => setFeedback('')}>×</button></div>}
-    <TaskKanbanBoard tasks={kanbanTasks} projects={projects} showWorkspace={activeWorkspace === 'all'} workspaceName={taskWorkspaceName} onMove={moveTask} onStatus={changeStatus} onAdd={setCreatingStatus} onEdit={(task) => setEditing(allItems.find((item) => item.kind === 'task' && item.id === task.id) ?? null)} onDelete={(task) => setDeleting(allItems.find((item) => item.kind === 'task' && item.id === task.id) ?? null)} onAddToSprint={activeSprint && user ? async (task, commitment) => { await sprintRepository.addTask(activeSprint.id, task.id, commitment, user.id); await refreshSprints(); setFeedback('Tarea añadida al sprint.') } : undefined} />
+    <div className="backlog-mobile-heading"><div><span>Tareas del workspace</span><strong>{kanbanTasks.filter((task) => task.status !== 'done').length} pendientes</strong></div><Button icon={<Plus size={18} />} onClick={() => setCreatingStatus('todo')}>Nueva tarea</Button></div>
+    <TaskKanbanBoard tasks={kanbanTasks} projects={projects} sections={sections} showWorkspace={activeWorkspace === 'all'} workspaceName={taskWorkspaceName} onMove={moveTask} onStatus={changeStatus} onAdd={setCreatingStatus} onEdit={(task) => setEditing(allItems.find((item) => item.kind === 'task' && item.id === task.id) ?? null)} onDelete={(task) => setDeleting(allItems.find((item) => item.kind === 'task' && item.id === task.id) ?? null)} onAddToSprint={activeSprint && user ? async (task, commitment) => { await sprintRepository.addTask(activeSprint.id, task.id, commitment, user.id); await refreshSprints(); setFeedback('Tarea añadida al sprint.') } : undefined} />
     {creatingStatus && <TaskFormDialog open status={creatingStatus} workspaceId={activeWorkspace === 'all' ? activeWorkspaces.find((workspace) => workspace.name === 'Personal')?.id : activeWorkspace} onClose={() => setCreatingStatus(undefined)} />}
     {editing?.kind === 'task' ? <TaskFormDialog open initial={tasks.find((task) => task.id === editing.id)} onClose={() => setEditing(null)} /> : editing && <EditItemDialog item={editing} onClose={() => setEditing(null)} />}
+    {selectedWorkspace && <BacklogSectionManager open={managingSections} workspaceId={selectedWorkspace.id} workspaceName={selectedWorkspace.name} sections={sections} onChanged={refreshSections} onClose={() => setManagingSections(false)} />}
     <ConfirmDialog open={Boolean(deleting)} title={`Eliminar ${deleting?.title ?? 'elemento'}`} description="Esta acción no se puede deshacer." onClose={() => setDeleting(null)} onConfirm={remove} />
   </div>
 }

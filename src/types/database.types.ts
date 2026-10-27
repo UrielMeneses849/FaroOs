@@ -53,6 +53,50 @@ export type Database = {
         }
         Relationships: []
       }
+      backlog_sections: {
+        Row: {
+          archived_at: string | null
+          color: string
+          created_at: string
+          id: string
+          name: string
+          sort_order: number
+          updated_at: string
+          user_id: string
+          workspace_id: string
+        }
+        Insert: {
+          archived_at?: string | null
+          color?: string
+          created_at?: string
+          id?: string
+          name: string
+          sort_order?: number
+          updated_at?: string
+          user_id: string
+          workspace_id: string
+        }
+        Update: {
+          archived_at?: string | null
+          color?: string
+          created_at?: string
+          id?: string
+          name?: string
+          sort_order?: number
+          updated_at?: string
+          user_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "backlog_sections_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       calendar_entries: {
         Row: {
           all_day: boolean
@@ -461,6 +505,39 @@ export type Database = {
         }
         Relationships: []
       }
+      faro_improvements: {
+        Row: {
+          area: string
+          created_at: string
+          description: string | null
+          id: string
+          kind: string
+          status: string
+          title: string
+          user_id: string
+        }
+        Insert: {
+          area?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          kind: string
+          status?: string
+          title: string
+          user_id: string
+        }
+        Update: {
+          area?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          kind?: string
+          status?: string
+          title?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       faro_task_cleaner_runs: {
         Row: {
           cleaned: number
@@ -687,6 +764,149 @@ export type Database = {
           is_default?: boolean
           name?: string
           type?: Database["public"]["Enums"]["finance_category_type"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      finance_debt_plan_entries: {
+        Row: {
+          account_id: string
+          amount: number
+          created_at: string
+          entry_date: string
+          id: string
+          notes: string | null
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          amount: number
+          created_at?: string
+          entry_date: string
+          id?: string
+          notes?: string | null
+          user_id: string
+        }
+        Update: {
+          account_id?: string
+          amount?: number
+          created_at?: string
+          entry_date?: string
+          id?: string
+          notes?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_debt_plan_entries_account_id_user_id_fkey"
+            columns: ["account_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "finance_accounts"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
+      }
+      finance_debt_plan_preferences: {
+        Row: {
+          contribution_day: number
+          monthly_contribution: number
+          strategy: string
+          target_date: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          contribution_day?: number
+          monthly_contribution?: number
+          strategy?: string
+          target_date?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          contribution_day?: number
+          monthly_contribution?: number
+          strategy?: string
+          target_date?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      finance_debts: {
+        Row: {
+          agreement_amount: number | null
+          agreement_payments: number | null
+          agreement_start_date: string | null
+          agreement_status: string
+          balance: number
+          balance_date: string
+          created_at: string
+          creditor: string
+          deadline: string | null
+          frequency: Database["public"]["Enums"]["finance_frequency"]
+          id: string
+          kind: string
+          name: string
+          next_payment_date: string
+          notes: string | null
+          payment: number
+          priority: number
+          quote_date: string | null
+          quote_valid_until: string | null
+          settlement: number | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          agreement_amount?: number | null
+          agreement_payments?: number | null
+          agreement_start_date?: string | null
+          agreement_status?: string
+          balance: number
+          balance_date: string
+          created_at?: string
+          creditor?: string
+          deadline?: string | null
+          frequency?: Database["public"]["Enums"]["finance_frequency"]
+          id?: string
+          kind: string
+          name: string
+          next_payment_date: string
+          notes?: string | null
+          payment: number
+          priority?: number
+          quote_date?: string | null
+          quote_valid_until?: string | null
+          settlement?: number | null
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          agreement_amount?: number | null
+          agreement_payments?: number | null
+          agreement_start_date?: string | null
+          agreement_status?: string
+          balance?: number
+          balance_date?: string
+          created_at?: string
+          creditor?: string
+          deadline?: string | null
+          frequency?: Database["public"]["Enums"]["finance_frequency"]
+          id?: string
+          kind?: string
+          name?: string
+          next_payment_date?: string
+          notes?: string | null
+          payment?: number
+          priority?: number
+          quote_date?: string | null
+          quote_valid_until?: string | null
+          settlement?: number | null
+          status?: string
           updated_at?: string
           user_id?: string
         }
@@ -990,6 +1210,7 @@ export type Database = {
           category_id: string | null
           created_at: string
           day_of_month: number | null
+          debt_id: string | null
           description: string
           destination_account_id: string | null
           end_date: string | null
@@ -1008,6 +1229,7 @@ export type Database = {
           category_id?: string | null
           created_at?: string
           day_of_month?: number | null
+          debt_id?: string | null
           description: string
           destination_account_id?: string | null
           end_date?: string | null
@@ -1026,6 +1248,7 @@ export type Database = {
           category_id?: string | null
           created_at?: string
           day_of_month?: number | null
+          debt_id?: string | null
           description?: string
           destination_account_id?: string | null
           end_date?: string | null
@@ -1058,6 +1281,13 @@ export type Database = {
             columns: ["category_id", "user_id"]
             isOneToOne: false
             referencedRelation: "finance_categories"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "finance_recurring_transactions_debt_id_user_id_fkey"
+            columns: ["debt_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "finance_debts"
             referencedColumns: ["id", "user_id"]
           },
         ]
@@ -1131,11 +1361,18 @@ export type Database = {
           budget_id: string | null
           category_id: string | null
           created_at: string
+          debt_id: string | null
+          debt_balance_adjustment: number
+          debt_quote: number | null
+          debt_quote_valid_until: string | null
+          debt_principal_amount: number | null
+          debt_settlement: boolean
           description: string
           destination_account_id: string | null
           id: string
           legacy_transaction_id: string | null
           notes: string | null
+          plan_amount: number
           planned_amount: number | null
           recurring_transaction_id: string | null
           status: Database["public"]["Enums"]["finance_transaction_status"]
@@ -1150,11 +1387,18 @@ export type Database = {
           budget_id?: string | null
           category_id?: string | null
           created_at?: string
+          debt_id?: string | null
+          debt_balance_adjustment?: number
+          debt_quote?: number | null
+          debt_quote_valid_until?: string | null
+          debt_principal_amount?: number | null
+          debt_settlement?: boolean
           description: string
           destination_account_id?: string | null
           id?: string
           legacy_transaction_id?: string | null
           notes?: string | null
+          plan_amount?: number
           planned_amount?: number | null
           recurring_transaction_id?: string | null
           status?: Database["public"]["Enums"]["finance_transaction_status"]
@@ -1169,11 +1413,18 @@ export type Database = {
           budget_id?: string | null
           category_id?: string | null
           created_at?: string
+          debt_id?: string | null
+          debt_balance_adjustment?: number
+          debt_quote?: number | null
+          debt_quote_valid_until?: string | null
+          debt_principal_amount?: number | null
+          debt_settlement?: boolean
           description?: string
           destination_account_id?: string | null
           id?: string
           legacy_transaction_id?: string | null
           notes?: string | null
+          plan_amount?: number
           planned_amount?: number | null
           recurring_transaction_id?: string | null
           status?: Database["public"]["Enums"]["finance_transaction_status"]
@@ -1202,6 +1453,13 @@ export type Database = {
             columns: ["category_id", "user_id"]
             isOneToOne: false
             referencedRelation: "finance_categories"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "finance_transactions_debt_id_user_id_fkey"
+            columns: ["debt_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "finance_debts"
             referencedColumns: ["id", "user_id"]
           },
           {
@@ -1277,7 +1535,9 @@ export type Database = {
         Row: {
           calendar_access_role: string | null
           calendar_id: string | null
+          calendar_ids: string[]
           calendar_name: string | null
+          calendar_names: string[]
           connected_at: string
           encrypted_refresh_token: string
           google_account_email: string | null
@@ -1293,7 +1553,9 @@ export type Database = {
         Insert: {
           calendar_access_role?: string | null
           calendar_id?: string | null
+          calendar_ids?: string[]
           calendar_name?: string | null
+          calendar_names?: string[]
           connected_at?: string
           encrypted_refresh_token: string
           google_account_email?: string | null
@@ -1309,7 +1571,9 @@ export type Database = {
         Update: {
           calendar_access_role?: string | null
           calendar_id?: string | null
+          calendar_ids?: string[]
           calendar_name?: string | null
+          calendar_names?: string[]
           connected_at?: string
           encrypted_refresh_token?: string
           google_account_email?: string | null
@@ -1347,6 +1611,39 @@ export type Database = {
           id?: string
           state_hash?: string
           used_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      health_lab_documents: {
+        Row: {
+          created_at: string
+          file_name: string
+          id: string
+          notes: string | null
+          storage_path: string
+          study_date: string
+          study_kind: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          file_name: string
+          id?: string
+          notes?: string | null
+          storage_path: string
+          study_date: string
+          study_kind: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          file_name?: string
+          id?: string
+          notes?: string | null
+          storage_path?: string
+          study_date?: string
+          study_kind?: string
           user_id?: string
         }
         Relationships: []
@@ -2505,9 +2802,11 @@ export type Database = {
           paused_until: string | null
           priority: Database["public"]["Enums"]["task_priority"]
           project_id: string | null
+          section_id: string | null
           sort_order: number
           stakeholder: string | null
           status: Database["public"]["Enums"]["task_status"]
+          task_type: string | null
           title: string
           updated_at: string
           user_id: string
@@ -2529,9 +2828,11 @@ export type Database = {
           paused_until?: string | null
           priority?: Database["public"]["Enums"]["task_priority"]
           project_id?: string | null
+          section_id?: string | null
           sort_order?: number
           stakeholder?: string | null
           status?: Database["public"]["Enums"]["task_status"]
+          task_type?: string | null
           title: string
           updated_at?: string
           user_id: string
@@ -2553,9 +2854,11 @@ export type Database = {
           paused_until?: string | null
           priority?: Database["public"]["Enums"]["task_priority"]
           project_id?: string | null
+          section_id?: string | null
           sort_order?: number
           stakeholder?: string | null
           status?: Database["public"]["Enums"]["task_status"]
+          task_type?: string | null
           title?: string
           updated_at?: string
           user_id?: string
@@ -2575,6 +2878,13 @@ export type Database = {
             columns: ["project_id"]
             isOneToOne: false
             referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_section_id_fkey"
+            columns: ["section_id"]
+            isOneToOne: false
+            referencedRelation: "backlog_sections"
             referencedColumns: ["id"]
           },
           {
@@ -3305,6 +3615,16 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      allocate_finance_debt_plan: {
+        Args: {
+          target_account: string
+          target_amount: number
+          target_date: string
+          target_id: string
+          target_notes?: string
+        }
+        Returns: undefined
+      }
       capture_ai_test_baseline: { Args: never; Returns: Json }
       capture_finance_liquidity_snapshot: {
         Args: {
@@ -3364,6 +3684,10 @@ export type Database = {
         Args: { target_transaction_id: string }
         Returns: undefined
       }
+      end_finance_recurring_schedule: {
+        Args: { target_period: string; target_recurring_id: string }
+        Returns: undefined
+      }
       faro_benchmark_comparison: { Args: { p_start?: string }; Returns: Json }
       faro_cost_observatory: {
         Args: {
@@ -3387,6 +3711,40 @@ export type Database = {
         Args: {
           current_date_value: string
           frequency_value: Database["public"]["Enums"]["finance_frequency"]
+        }
+        Returns: string
+      }
+      link_finance_debt: {
+        Args: {
+          target_debt?: string
+          target_recurring?: string
+          target_transaction?: string
+        }
+        Returns: undefined
+      }
+      link_finance_debt_internal: {
+        Args: {
+          target_debt: string
+          target_recurring?: string
+          target_transaction?: string
+        }
+        Returns: undefined
+      }
+      pay_finance_debt: {
+        Args: {
+          target_account: string
+          target_amount: number
+          target_date: string
+          target_debt: string
+          target_id: string
+          target_notes?: string
+          target_occurrence?: string
+          target_plan_amount?: number
+          target_principal?: number
+          target_balance_adjustment?: number
+          target_quote?: number
+          target_quote_valid_until?: string
+          target_settlement?: boolean
         }
         Returns: string
       }
@@ -3429,6 +3787,15 @@ export type Database = {
       }
       revert_finance_recurring_occurrence: {
         Args: { target_occurrence_id: string }
+        Returns: undefined
+      }
+      save_finance_recurring_occurrence: {
+        Args: {
+          target_amount: number
+          target_description?: string
+          target_expected_date: string
+          target_occurrence_id: string
+        }
         Returns: undefined
       }
       save_finance_recurring_period: {
@@ -3488,7 +3855,14 @@ export type Database = {
       goal_status: "active" | "paused" | "completed"
       project_status: "idea" | "planned" | "active" | "paused" | "completed"
       task_priority: "low" | "medium" | "high" | "critical"
-      task_status: "inbox" | "todo" | "doing" | "paused" | "blocked" | "done"
+      task_status:
+        | "inbox"
+        | "todo"
+        | "doing"
+        | "paused"
+        | "waiting"
+        | "blocked"
+        | "done"
       workspace_type: "personal" | "employment" | "business" | "client"
     }
     CompositeTypes: {
@@ -3664,7 +4038,15 @@ export const Constants = {
       goal_status: ["active", "paused", "completed"],
       project_status: ["idea", "planned", "active", "paused", "completed"],
       task_priority: ["low", "medium", "high", "critical"],
-      task_status: ["inbox", "todo", "doing", "paused", "blocked", "done"],
+      task_status: [
+        "inbox",
+        "todo",
+        "doing",
+        "paused",
+        "waiting",
+        "blocked",
+        "done",
+      ],
       workspace_type: ["personal", "employment", "business", "client"],
     },
   },

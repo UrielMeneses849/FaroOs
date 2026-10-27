@@ -77,9 +77,10 @@ export function FinOpsPage() {
   const totalTierCost = tiers.reduce((sum, item) => sum + number(item.known_cost_usd), 0)
   const currentBudgetTone = budgetTone(month?.budget.percentageUsed ?? null)
 
-  return <div className="page finops-page">
+  return <div className="page finops-page" aria-busy={loading}>
     <PageHeader eyebrow="Control de inteligencia" title="FinOps" description="Visibilidad real de costo, routing y eficiencia de IA en FARO." />
-    {error && <div className="finops-alert" role="alert"><TriangleAlert size={16}/><span>{error}</span></div>}
+    {error && <div className="finops-alert" role="alert"><TriangleAlert size={16}/><span>{error}</span><button type="button" onClick={() => void load()} disabled={loading}>Reintentar</button></div>}
+    {loading && <p className="finops-loading" role="status">Actualizando consumo y costos…</p>}
 
     <section className="finops-hero" aria-label="Resumen FinOps">
       <div className="finops-metrics">
@@ -148,7 +149,7 @@ export function FinOpsPage() {
 
     <section className="finops-panel finops-history">
       <header><div><span className="eyebrow">Historial de inferencias</span><h2>Metadata operacional, nunca prompts ni argumentos</h2></div><small>Últimas 100 en el periodo</small></header>
-      {!month?.history.length ? <Empty text="Aún no hay historial de inferencias para mostrar." /> : <div className="finops-history__scroll"><table><thead><tr><th>Fecha</th><th>Módulo / feature</th><th>Intent</th><th>Tier</th><th>Provider / modelo</th><th>Tokens</th><th>Costo</th><th>Latencia</th><th>Estado</th></tr></thead><tbody>{month.history.map((item, index) => <tr key={`${item.created_at}:${index}`}><td>{dateTime.format(new Date(item.created_at))}</td><td><strong>{moduleLabel(item.module)}</strong><small>{item.feature}</small></td><td>{item.intent}</td><td><span className="finops-tier-badge">{tierLabels[item.tier_used] ?? item.tier_used}{item.escalated ? ' ↑' : ''}</span></td><td>{item.provider ? <><strong>{item.provider}</strong><small>{item.model}</small></> : '—'}</td><td>{item.input_tokens == null && item.output_tokens == null ? '—' : `${quantity(item.input_tokens)} / ${quantity(item.output_tokens)}`}</td><td>{item.cost_status === 'unknown' ? 'Desconocido' : item.cost_status === 'not_applicable' ? '—' : money(item.estimated_cost_usd)}</td><td>{latency(item.total_latency_ms)}</td><td className={item.success ? 'is-success' : 'is-error'}>{item.success ? 'OK' : item.error_type ?? 'Error'}</td></tr>)}</tbody></table></div>}
+      {!month?.history.length ? <Empty text="Aún no hay historial de inferencias para mostrar." /> : <div className="finops-history__scroll" role="region" aria-label="Historial de inferencias; desliza para ver las columnas" tabIndex={0}><table><thead><tr><th>Fecha</th><th>Módulo / feature</th><th>Intent</th><th>Tier</th><th>Provider / modelo</th><th>Tokens</th><th>Costo</th><th>Latencia</th><th>Estado</th></tr></thead><tbody>{month.history.map((item, index) => <tr key={`${item.created_at}:${index}`}><td>{dateTime.format(new Date(item.created_at))}</td><td><strong>{moduleLabel(item.module)}</strong><small>{item.feature}</small></td><td>{item.intent}</td><td><span className="finops-tier-badge">{tierLabels[item.tier_used] ?? item.tier_used}{item.escalated ? ' ↑' : ''}</span></td><td>{item.provider ? <><strong>{item.provider}</strong><small>{item.model}</small></> : '—'}</td><td>{item.input_tokens == null && item.output_tokens == null ? '—' : `${quantity(item.input_tokens)} / ${quantity(item.output_tokens)}`}</td><td>{item.cost_status === 'unknown' ? 'Desconocido' : item.cost_status === 'not_applicable' ? '—' : money(item.estimated_cost_usd)}</td><td>{latency(item.total_latency_ms)}</td><td className={item.success ? 'is-success' : 'is-error'}>{item.success ? 'OK' : item.error_type ?? 'Error'}</td></tr>)}</tbody></table></div>}
     </section>
   </div>
 }

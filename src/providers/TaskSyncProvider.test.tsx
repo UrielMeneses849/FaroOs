@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useTaskSync } from '../hooks/useTaskSync'
 import { useFaroStore } from '../store'
 import type { AuthService } from '../services'
+import type { Task } from '../types'
+import { TaskNotFoundError } from '../repositories/taskErrors'
 import { AuthProvider } from './AuthProvider'
 import { TaskSyncProvider } from './TaskSyncProvider'
 import { shouldUploadMissingLocalTask } from './taskSyncPolicy'
@@ -12,6 +14,8 @@ const repositoryMocks = vi.hoisted(() => ({
   list: vi.fn().mockResolvedValue([]),
   create: vi.fn(async (task) => task),
   update: vi.fn(async (task) => task),
+  updateStatus: vi.fn(async (): Promise<Task | undefined> => undefined),
+  restore: vi.fn(async (task) => task),
   remove: vi.fn().mockResolvedValue(undefined),
   runSmartCleaner: vi.fn().mockResolvedValue({ cleanedIds: [], scanned: 0, eligible: 0, cleaned: 0, skippedMissingCompletedAt: 0, errors: 0 }),
 }))
@@ -117,10 +121,7 @@ describe('TaskSyncProvider', () => {
 
     useFaroStore.getState().updateTask(id, { status: 'done' })
     await waitFor(() =>
-      expect(repositoryMocks.update).toHaveBeenCalledWith(
-        expect.objectContaining({ id, status: 'done' }),
-        'user-1',
-      ),
+      expect(repositoryMocks.updateStatus).toHaveBeenCalledWith(id, 'done', 'user-1', undefined),
     )
 
     useFaroStore.getState().deleteTask(id)
@@ -145,6 +146,126 @@ describe('TaskSyncProvider', () => {
 
     view.unmount()
     await waitFor(() => expect(realtimeMocks.removeChannel).toHaveBeenCalledWith(realtimeMocks.channel))
+  })
+
+  it('recupera una completada que solo queda en caché y persiste su reapertura al recargar', async () => {
+    const task: Task = {
+      id: '550e8400-e29b-41d4-a716-446655440000', title: 'Completada retirada por el limpiador',
+      area: 'personal', status: 'done', priority: 'medium', workspaceId: 'workspace-1',
+      completedAt: '2026-10-15T12:00:00.000Z',
+      createdAt: '2026-10-14T12:00:00.000Z', updatedAt: '2026-10-15T12:00:00.000Z',
+    }
+    useFaroStore.setState({ tasks: [task] })
+    repositoryMocks.list.mockResolvedValueOnce([])
+    repositoryMocks.updateStatus.mockRejectedValueOnce(new TaskNotFoundError())
+    const view = render(<AuthProvider service={authService}><TaskSyncProvider><SyncProbe /></TaskSyncProvider></AuthProvider>)
+    await screen.findByText('ready')
+    expect(repositoryMocks.create).not.toHaveBeenCalled()
+    act(() => useFaroStore.getState().updateTask(task.id, { status: 'blocked', sortOrder: 1000 }))
+    await waitFor(() => expect(repositoryMocks.restore).toHaveBeenCalledWith(expect.objectContaining({
+      id: task.id, title: task.title, workspaceId: task.workspaceId, status: 'blocked', completedAt: undefined, sortOrder: 1000,
+    }), 'user-1'))
+    await screen.findByText('ready')
+    const saved = useFaroStore.getState().tasks[0]
+    expect(saved.status).toBe('blocked')
+    expect(repositoryMocks.updateStatus).toHaveBeenCalledTimes(1)
+    view.unmount()
+    useFaroStore.setState({ tasks: [] })
+    repositoryMocks.list.mockResolvedValueOnce([saved])
+    render(<AuthProvider service={authService}><TaskSyncProvider><SyncProbe /></TaskSyncProvider></AuthProvider>)
+    await screen.findByText('ready')
+    expect(useFaroStore.getState().tasks[0]).toEqual(saved)
+    expect(repositoryMocks.restore).toHaveBeenCalledTimes(1)
+  })
+
+  it('no recupera tareas por errores de red ni recrea una tarea activa eliminada', async () => {
+    const task: Task = {
+      id: '550e8400-e29b-41d4-a716-446655440000', title: 'Tarea activa',
+      area: 'personal', status: 'doing', priority: 'medium',
+      createdAt: '2026-10-19T12:00:00.000Z', updatedAt: '2026-10-19T12:00:00.000Z',
+    }
+    repositoryMocks.list.mockResolvedValueOnce([task])
+    repositoryMocks.updateStatus.mockRejectedValueOnce(new TaskNotFoundError())
+    render(<AuthProvider service={authService}><TaskSyncProvider><SyncProbe /></TaskSyncProvider></AuthProvider>)
+    await screen.findByText('ready')
+    act(() => useFaroStore.getState().updateTask(task.id, { status: 'blocked' }))
+    await screen.findByText('error')
+    expect(repositoryMocks.restore).not.toHaveBeenCalled()
+    expect(useFaroStore.getState().tasks[0]).toEqual(task)
+  })
+
+  it('restaura una reapertura fallida una sola vez sin volver a guardarla', async () => {
+    const task = {
+      id: '550e8400-e29b-41d4-a716-446655440000', title: 'Reabrir tarea',
+      area: 'personal' as const, status: 'done' as const, priority: 'medium' as const,
+      completedAt: '2026-10-19T12:00:00.000Z',
+      createdAt: '2026-10-19T12:00:00.000Z', updatedAt: '2026-10-19T12:00:00.000Z',
+    }
+    repositoryMocks.list.mockResolvedValueOnce([task])
+    repositoryMocks.updateStatus.mockRejectedValueOnce(new Error('Cannot coerce the result to a single JSON object'))
+    render(<AuthProvider service={authService}><TaskSyncProvider><SyncProbe /></TaskSyncProvider></AuthProvider>)
+    await screen.findByText('ready')
+
+    act(() => useFaroStore.getState().updateTask(task.id, { status: 'blocked' }))
+    await screen.findByText('error')
+    // Drain queued work: rollback must not enqueue a second status request.
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) })
+    expect(repositoryMocks.updateStatus).toHaveBeenCalledTimes(1)
+    expect(repositoryMocks.restore).not.toHaveBeenCalled()
+    expect(useFaroStore.getState().tasks).toEqual([task])
+  })
+
+  it('ignora ecos antiguos mientras guarda y confirma la reapertura sin parpadear', async () => {
+    const task = {
+      id: '550e8400-e29b-41d4-a716-446655440000', title: 'Reabrir tarea',
+      area: 'personal' as const, status: 'done' as const, priority: 'medium' as const,
+      completedAt: '2026-10-19T12:00:00.000Z',
+      createdAt: '2026-10-19T12:00:00.000Z', updatedAt: '2026-10-19T12:00:00.000Z',
+    }
+    repositoryMocks.list.mockResolvedValueOnce([task])
+    let finish!: (value: Task | undefined) => void
+    repositoryMocks.updateStatus.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    render(<AuthProvider service={authService}><TaskSyncProvider><SyncProbe /></TaskSyncProvider></AuthProvider>)
+    await screen.findByText('ready')
+    act(() => useFaroStore.getState().updateTask(task.id, { status: 'blocked' }))
+    await waitFor(() => expect(repositoryMocks.updateStatus).toHaveBeenCalledTimes(1))
+    act(() => realtimeMocks.callbacks[0]({ eventType: 'UPDATE', new: {
+      ...task, created_at: task.createdAt, updated_at: task.updatedAt,
+    }, old: {} }))
+    expect(useFaroStore.getState().tasks[0].status).toBe('blocked')
+    const saved = { ...useFaroStore.getState().tasks[0], updatedAt: '2099-01-01T00:00:00.000Z' }
+    await act(async () => finish(saved))
+    await screen.findByText('ready')
+    act(() => realtimeMocks.callbacks[0]({ eventType: 'UPDATE', new: {
+      ...task, created_at: task.createdAt, updated_at: task.updatedAt,
+    }, old: {} }))
+    expect(useFaroStore.getState().tasks[0]).toEqual(saved)
+    expect(repositoryMocks.updateStatus).toHaveBeenCalledTimes(1)
+  })
+
+  it('un fallo anterior no deshace una edición posterior ni otra tarea', async () => {
+    const task = {
+      id: '550e8400-e29b-41d4-a716-446655440000', title: 'Reabrir tarea',
+      area: 'personal' as const, status: 'done' as const, priority: 'medium' as const,
+      createdAt: '2026-10-19T12:00:00.000Z', updatedAt: '2026-10-19T12:00:00.000Z',
+    }
+    const other = { ...task, id: '550e8400-e29b-41d4-a716-446655440001' }
+    repositoryMocks.list.mockResolvedValueOnce([task, other])
+    let fail!: (reason: Error) => void
+    repositoryMocks.updateStatus.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject }))
+    render(<AuthProvider service={authService}><TaskSyncProvider><SyncProbe /></TaskSyncProvider></AuthProvider>)
+    await screen.findByText('ready')
+    act(() => useFaroStore.getState().updateTask(task.id, { status: 'blocked' }))
+    await waitFor(() => expect(repositoryMocks.updateStatus).toHaveBeenCalledTimes(1))
+    act(() => {
+      useFaroStore.getState().updateTask(task.id, { status: 'doing' })
+      useFaroStore.getState().updateTask(other.id, { status: 'todo' })
+    })
+    await act(async () => fail(new Error('Fallo de red')))
+    await waitFor(() => expect(repositoryMocks.updateStatus).toHaveBeenCalledTimes(3))
+    await screen.findByText('ready')
+    expect(useFaroStore.getState().tasks.find(item => item.id === task.id)?.status).toBe('doing')
+    expect(useFaroStore.getState().tasks.find(item => item.id === other.id)?.status).toBe('todo')
   })
 
   it('carga el Backlog aunque el Smart Cleaner opcional no esté disponible', async () => {

@@ -1,6 +1,6 @@
 import { endOfMonth, format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { AlertTriangle, ArrowDownRight, ArrowUpRight, CircleGauge, Landmark, Settings2, Sparkles } from 'lucide-react'
+import { CalendarDays, AlertTriangle, ArrowDownRight, ArrowUpRight, CircleGauge, Landmark, Settings2, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Area, AreaChart, CartesianGrid, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Button, Modal } from '../../components/common'
@@ -20,6 +20,7 @@ import { canonicalFinanceBudgetGroups, formatMxn, personalBudgetBalanceIntoPerio
 import { fortnightPeriodForMonth } from '../../services/financeBudgetCycle'
 
 interface FinanceLiquidityRadarProps {
+  summary?: boolean
   data: FinanceData
   month: Date
   availableTodayCents: number
@@ -53,7 +54,7 @@ const excludedCategoryReservationsKey = 'faro-finance-liquidity-excluded-budget-
 const personalScenarioStorageKey = (userId: string | undefined, periodStart: string) =>
   `faro-finance-liquidity-q2-scenario:v1:${userId ?? 'local'}:${periodStart}`
 
-export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapshot, userId, onSaveMinimumBuffer }: FinanceLiquidityRadarProps) {
+export function FinanceLiquidityRadar({ summary = false, data, month, availableTodayCents, snapshot, userId, onSaveMinimumBuffer }: FinanceLiquidityRadarProps) {
   const [simulation, setSimulation] = useState<LiquiditySimulationInput>()
   const [personalBudgetScenario, setPersonalBudgetScenario] = useState<PersonalBudgetScenarioInput>()
   const [showSimulator, setShowSimulator] = useState(false)
@@ -234,38 +235,11 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
     }
   }
 
-  return <section className="liquidity-radar" aria-label="Radar de liquidez">
-    <header className="liquidity-radar__head">
-      <div>
-        <span className="eyebrow">FARO Finanzas</span>
-        <h2>Radar de liquidez</h2>
-        <p>{statusMessage(projection)}</p>
-      </div>
-      <div className={`liquidity-radar__status liquidity-radar__status--${projection.status}`}>
-        <CircleGauge size={16} />
-        <span>{statusLabel(projection.status)}</span>
-        <small>{isHistorical ? 'Resultado realizado frente a tu colchón configurado.' : financeLiquidityStatusCopy(projection.status)}</small>
-      </div>
-      <Button
-        icon={<Sparkles size={15} />}
-        disabled={isHistorical}
-        title={isHistorical ? 'Los periodos cerrados muestran sólo movimientos realizados.' : undefined}
-        onClick={() => setShowSimulator(true)}
-      >Simular movimiento</Button>
-    </header>
-
-    <div className="liquidity-radar__metrics">
-      <Metric label={openingMetric.label} value={openingMetric.value} meta={openingMetric.meta} icon={<Landmark size={17} />} />
-      <Metric label={isHistorical ? 'Punto mínimo realizado' : 'Punto mínimo previsto'} value={projection.minimumBalanceCents} meta={dateLabel(projection.minimumDate, 'd MMM')} icon={<ArrowDownRight size={17} />} tone={projection.status === 'critical' ? 'negative' : 'neutral'} />
-      <Metric label="Colchón mínimo" value={data.liquidityPreference.minimumOperatingBufferCents} icon={<Settings2 size={17} />} />
-      <Metric label={isHistorical ? 'Margen mínimo realizado' : 'Margen libre proyectado'} value={projection.freeMarginCents} meta={projection.freeMarginCents >= 0 ? 'Antes de tocar el colchón' : 'Déficit frente al colchón'} icon={projection.freeMarginCents >= 0 ? <ArrowUpRight size={17} /> : <AlertTriangle size={17} />} tone={projection.freeMarginCents >= 0 ? 'positive' : 'negative'} />
-    </div>
-
-    <section className="liquidity-radar__chart-card">
+  const chartCard = <section className="liquidity-radar__chart-card">
       <header>
         <div className="liquidity-radar__chart-copy">
           <span className="eyebrow">Evolución temporal</span>
-          <h3>{isHistorical ? 'Saldo realizado día a día' : hasActiveBudgetReservations ? 'Saldo de caja con presupuestos' : 'Saldo de caja día a día'}</h3>
+          <h3>{summary ? 'Tu disponible en el tiempo' : isHistorical ? 'Saldo realizado día a día' : hasActiveBudgetReservations ? 'Saldo de caja con presupuestos' : 'Saldo de caja día a día'}</h3>
           <p>{projectionBasisCopy}{reservationCopy}</p>
         </div>
         <div className="liquidity-radar__chart-controls">
@@ -303,7 +277,7 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
           })}
           <div className="liquidity-radar__scenario-slot">
             {!isHistorical && includePersonalBudgetReservations && personalBudgetScenario && <span className="liquidity-radar__saved-scenario">
-              Q2 neto · {formatMxn(personalScenarioReservationCents)}
+              Q2 pendiente · {formatMxn(personalScenarioReservationCents)}
               {q2PreviousBalanceCents < 0 && <small>Exceso Q1 {formatMxn(q2PreviousBalanceCents)}</small>}
             </span>}
           </div>
@@ -314,7 +288,7 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
         projection={projection}
         bufferCents={data.liquidityPreference.minimumOperatingBufferCents}
         q2ReleaseDate={q2Period.periodStart}
-        onQ2ReleaseClick={isHistorical ? undefined : () => {
+        onQ2ReleaseClick={isHistorical || summary ? undefined : () => {
           setIncludePersonalBudgetReservations(true)
           setShowBudgetScenario(true)
         }}
@@ -324,7 +298,43 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
         <span><i className="liquidity-radar__legend-dot liquidity-radar__legend-dot--buffer" />Colchón mínimo</span>
         <span><i className="liquidity-radar__legend-dot liquidity-radar__legend-dot--event" />{isHistorical ? 'Impacto realizado' : 'Impacto programado'}</span>
       </footer>
+      <div className="liquidity-radar__projection-cards" aria-label="Proyecciones del periodo">
+        <Metric label="Disponible al 15" value={projection.days.find((day) => day.date.endsWith('-15'))?.balanceCents ?? projection.closingBalanceCents} icon={<CalendarDays size={17} />} />
+        <Metric label={isHistorical ? 'Disponible al cierre' : 'Disponible previsto al cierre'} value={projection.closingBalanceCents} icon={<Landmark size={17} />} />
+        <Metric label={isHistorical ? 'Punto mínimo realizado' : 'Punto mínimo previsto'} value={projection.minimumBalanceCents} meta={dateLabel(projection.minimumDate, 'd MMM')} icon={<ArrowDownRight size={17} />} tone={projection.status === 'critical' ? 'negative' : 'neutral'} />
+      </div>
     </section>
+
+  if (summary) return <section className="liquidity-radar liquidity-radar--summary" aria-label="Tu disponible en el tiempo">{chartCard}</section>
+
+  return <section className="liquidity-radar" aria-label="Radar de liquidez">
+    <header className="liquidity-radar__head">
+      <div>
+        <span className="eyebrow">FARO Finanzas</span>
+        <h2>Radar de liquidez</h2>
+        <p>{statusMessage(projection)}</p>
+      </div>
+      <div className={`liquidity-radar__status liquidity-radar__status--${projection.status}`}>
+        <CircleGauge size={16} />
+        <span>{statusLabel(projection.status)}</span>
+        <small>{isHistorical ? 'Resultado realizado frente a tu colchón configurado.' : financeLiquidityStatusCopy(projection.status)}</small>
+      </div>
+      <Button
+        icon={<Sparkles size={15} />}
+        disabled={isHistorical}
+        title={isHistorical ? 'Los periodos cerrados muestran sólo movimientos realizados.' : undefined}
+        onClick={() => setShowSimulator(true)}
+      >Simular movimiento</Button>
+    </header>
+
+    <div className="liquidity-radar__metrics">
+      <Metric label={openingMetric.label} value={openingMetric.value} meta={openingMetric.meta} icon={<Landmark size={17} />} />
+      <Metric label={isHistorical ? 'Punto mínimo realizado' : 'Punto mínimo previsto'} value={projection.minimumBalanceCents} meta={dateLabel(projection.minimumDate, 'd MMM')} icon={<ArrowDownRight size={17} />} tone={projection.status === 'critical' ? 'negative' : 'neutral'} />
+      <Metric label="Colchón mínimo" value={data.liquidityPreference.minimumOperatingBufferCents} icon={<Settings2 size={17} />} />
+      <Metric label={isHistorical ? 'Margen mínimo realizado' : 'Margen libre proyectado'} value={projection.freeMarginCents} meta={projection.freeMarginCents >= 0 ? 'Antes de tocar el colchón' : 'Déficit frente al colchón'} icon={projection.freeMarginCents >= 0 ? <ArrowUpRight size={17} /> : <AlertTriangle size={17} />} tone={projection.freeMarginCents >= 0 ? 'positive' : 'negative'} />
+    </div>
+
+    {chartCard}
 
     {!isHistorical && <FinanceProjectionGuide
       data={data}
@@ -356,8 +366,8 @@ export function FinanceLiquidityRadar({ data, month, availableTodayCents, snapsh
         {eventsByDay.map((day) => <div key={day.date} className={day.balanceCents === projection.minimumBalanceCents ? 'is-minimum' : ''}>
           <time>{dateLabel(day.date, 'EEE d MMM')}</time>
           <span>{day.events.map((event) => event.label).join(' · ')}{day.events.some((event) => event.isOverdue) && <small>Vencido: se aplica hoy</small>}</span>
-          <strong className={day.incomeCents >= day.expenseCents ? 'positive' : 'negative'}>{day.incomeCents >= day.expenseCents ? '+' : '−'}{formatMxn(Math.abs(day.incomeCents - day.expenseCents))}</strong>
-          <b>{formatMxn(day.balanceCents)}{day.balanceCents === projection.minimumBalanceCents && <em>Punto mínimo</em>}</b>
+          <strong data-label="Impacto" className={day.incomeCents >= day.expenseCents ? 'positive' : 'negative'}>{day.incomeCents >= day.expenseCents ? '+' : '−'}{formatMxn(Math.abs(day.incomeCents - day.expenseCents))}</strong>
+          <b data-label="Saldo después">{formatMxn(day.balanceCents)}{day.balanceCents === projection.minimumBalanceCents && <em>Punto mínimo</em>}</b>
         </div>)}
       </div> : <p className="liquidity-radar__empty">No hay movimientos planeados o recurrentes con fecha en este periodo.</p>}
     </section>
@@ -444,8 +454,8 @@ function LiquidityChart({ projection, bufferCents, q2ReleaseDate, onQ2ReleaseCli
         <ReferenceArea y1={buffer * LIQUIDITY_MODERATION_MULTIPLIER} y2={domain[1]} fill="#f1f1ef" fillOpacity={.035} />
         <ReferenceArea y1={buffer} y2={buffer * LIQUIDITY_MODERATION_MULTIPLIER} fill="#a9adb2" fillOpacity={.035} />
         <ReferenceArea y1={domain[0]} y2={buffer} fill="#777c83" fillOpacity={.05} />
-        <XAxis dataKey="date" axisLine={false} tickLine={false} minTickGap={26} tick={{ fill: '#7e91a7', fontSize: 9 }} tickFormatter={(date: string) => dateLabel(date, 'd')} />
-        <YAxis domain={domain} axisLine={false} tickLine={false} width={56} tick={{ fill: '#7e91a7', fontSize: 9 }} tickFormatter={(value: number) => compactCurrency(Math.round(value * 100))} />
+        <XAxis dataKey="date" axisLine={false} tickLine={false} minTickGap={26} tick={{ fill: '#7e91a7', fontSize: 11 }} tickFormatter={(date: string) => dateLabel(date, 'd')} />
+        <YAxis domain={domain} axisLine={false} tickLine={false} width={56} tick={{ fill: '#7e91a7', fontSize: 11 }} tickFormatter={(value: number) => compactCurrency(Math.round(value * 100))} />
         <ReferenceLine y={buffer} stroke="#8796a7" strokeWidth={1.2} strokeDasharray="5 4" label={{ value: 'Colchón mínimo', fill: '#9ba8b7', fontSize: 9, position: 'insideTopLeft' }} />
         {onQ2ReleaseClick && <ReferenceLine x={q2ReleaseDate} stroke="#e1e1df" strokeDasharray="3 4" strokeOpacity={.62} label={{ value: 'Q2 · simular', fill: '#c7c9cc', fontSize: 8, position: 'insideTop' }} />}
         <Tooltip content={<LiquidityTooltip periodStart={projection.periodStart} openingBalanceCents={projection.openingBalanceCents} openingIsProjected={projection.openingBalanceSource === 'prior_projected_close'} />} cursor={{ stroke: '#7795b5', strokeDasharray: '3 4' }} />
@@ -556,7 +566,7 @@ function PersonalBudgetScenarioModal({ open, onClose, baseline, data, month, ava
         <strong className={previousBalanceCents < 0 ? 'is-negative' : ''}>{previousBalanceCents < 0 ? 'Exceso heredado de Q1' : 'Arrastre disponible de Q1'} <b>{formatMxn(previousBalanceCents)}</b></strong>
       </div>
       <label>Presupuesto nuevo para Q2 (MXN)<input autoFocus required min="0" step=".01" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="Ej. 5000" /></label>
-      {candidate && <p className="liquidity-budget-simulator__formula">Q2 base {formatMxn(candidate.targetAmountCents)}{previousBalanceCents < 0 ? ` menos el exceso de Q1 ${formatMxn(Math.abs(previousBalanceCents))}` : previousBalanceCents > 0 ? `. El remanente Q1 de ${formatMxn(previousBalanceCents)} se conserva en la curva y se acumula cuando corresponde` : ''}. Los gastos ya fechados permanecen visibles como movimientos independientes. Reserva neta aplicada: <b>{formatMxn(reservationCents)}</b>.</p>}
+      {candidate && <p className="liquidity-budget-simulator__formula">Q2 base {formatMxn(candidate.targetAmountCents)}{previousBalanceCents < 0 ? ` menos el exceso de Q1 ${formatMxn(Math.abs(previousBalanceCents))}` : previousBalanceCents > 0 ? `. El remanente Q1 de ${formatMxn(previousBalanceCents)} se conserva en la curva y se acumula cuando corresponde` : ''}. Los gastos ya fechados consumen este presupuesto y conservan su movimiento en la gráfica. Reserva pendiente aplicada: <b>{formatMxn(reservationCents)}</b>.</p>}
       <SimulationComparison before={baseline} after={preview} />
       <footer><Button variant="ghost" type="button" onClick={onClose}>Cancelar</Button><Button type="submit" disabled={!candidate}>Ver en la curva</Button></footer>
     </form>

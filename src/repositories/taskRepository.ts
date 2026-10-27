@@ -3,6 +3,7 @@ import { formatLocalDateOnly, normalizeDateOnly, normalizeTimestamp } from '../l
 import type { Database } from '../types/database.types'
 import type { Task } from '../types'
 import { isSupabaseProjectId } from './projectRepository'
+import { TaskNotFoundError } from './taskErrors'
 
 type TaskRow = Database['public']['Tables']['tasks']['Row']
 type TaskInsert = Database['public']['Tables']['tasks']['Insert']
@@ -35,6 +36,8 @@ export function taskFromRow(row: TaskRow): Task {
     waitingFor: row.waiting_for ?? undefined,
     blockerReason: row.blocker_reason ?? undefined,
     pausedUntil: row.paused_until ?? undefined,
+    sectionId: row.section_id ?? undefined,
+    taskType: row.task_type as Task['taskType'] ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -66,6 +69,8 @@ export function taskToInsert(task: Task, userId: string): TaskInsert {
     waiting_for: task.waitingFor ?? null,
     blocker_reason: task.blockerReason ?? null,
     paused_until: task.pausedUntil ?? null,
+    section_id: task.sectionId ?? null,
+    task_type: task.taskType ?? null,
   }
 }
 
@@ -92,6 +97,17 @@ export function taskToUpdate(task: Task): TaskUpdate {
     waiting_for: task.waitingFor ?? null,
     blocker_reason: task.blockerReason ?? null,
     paused_until: task.pausedUntil ?? null,
+    section_id: task.sectionId ?? null,
+    task_type: task.taskType ?? null,
+  }
+}
+
+export function taskStatusToUpdate(status: Task['status'], updatedAt: string, sortOrder?: number): TaskUpdate {
+  return {
+    status,
+    updated_at: updatedAt,
+    completed_at: status === 'done' ? updatedAt : null,
+    ...(sortOrder == null ? {} : { sort_order: sortOrder }),
   }
 }
 
@@ -150,8 +166,35 @@ export const taskRepository = {
       .eq('id', task.id)
       .eq('user_id', userId)
       .select()
-      .single()
+      .maybeSingle()
 
+    if (error) throw error
+    if (!data) throw new TaskNotFoundError()
+    return taskFromRow(data)
+  },
+
+  async updateStatus(id: string, status: Task['status'], userId: string, sortOrder?: number): Promise<Task> {
+    const updatedAt = new Date().toISOString()
+    const { data, error } = await supabase
+      .from('tasks')
+      .update(taskStatusToUpdate(status, updatedAt, sortOrder))
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select()
+      .maybeSingle()
+
+    if (error) throw error
+    if (!data) throw new TaskNotFoundError()
+    return taskFromRow(data)
+  },
+
+  // Only an explicit reopen may recover a cached completed task removed by
+  // the cleaner. INSERT preserves RLS and never overwrites an existing row.
+  async restore(task: Task, userId: string): Promise<Task> {
+    if (task.status === 'done') throw new Error('Solo se pueden recuperar tareas reabiertas.')
+    const safeTask = await validateTaskRelations(task, userId)
+    const { data, error } = await supabase.from('tasks')
+      .insert(taskToInsert(safeTask, userId)).select().single()
     if (error) throw error
     return taskFromRow(data)
   },

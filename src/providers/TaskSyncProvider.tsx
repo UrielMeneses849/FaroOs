@@ -14,6 +14,7 @@ import { GoalSyncContext } from './GoalSyncContext'
 import { ProjectSyncContext } from './ProjectSyncContext'
 import { TaskSyncContext, type TaskSyncState } from './TaskSyncContext'
 import { shouldUploadMissingLocalTask } from './taskSyncPolicy'
+import { TaskNotFoundError } from '../repositories/taskErrors'
 
 const taskChanged = (previous: Task, current: Task) =>
   previous.title !== current.title
@@ -34,7 +35,29 @@ const taskChanged = (previous: Task, current: Task) =>
   || previous.waitingFor !== current.waitingFor
   || previous.blockerReason !== current.blockerReason
   || previous.pausedUntil !== current.pausedUntil
+  || previous.sectionId !== current.sectionId
+  || previous.taskType !== current.taskType
   || previous.updatedAt !== current.updatedAt
+
+const taskNeedsFullUpdate = (previous: Task, current: Task) =>
+  previous.title !== current.title
+  || previous.description !== current.description
+  || previous.notes !== current.notes
+  || previous.area !== current.area
+  || previous.priority !== current.priority
+  || previous.projectId !== current.projectId
+  || previous.goalId !== current.goalId
+  || previous.dueDate !== current.dueDate
+  || previous.dueAt !== current.dueAt
+  || previous.estimatedMinutes !== current.estimatedMinutes
+  || previous.archivedAt !== current.archivedAt
+  || previous.workspaceId !== current.workspaceId
+  || previous.stakeholder !== current.stakeholder
+  || previous.waitingFor !== current.waitingFor
+  || previous.blockerReason !== current.blockerReason
+  || previous.pausedUntil !== current.pausedUntil
+  || previous.sectionId !== current.sectionId
+  || previous.taskType !== current.taskType
 
 export function TaskSyncProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
@@ -160,6 +183,7 @@ export function TaskSyncProvider({ children }: { children: ReactNode }) {
         }))
 
         let queue: Promise<unknown> = Promise.resolve()
+        const pendingWrites = new Map<string, number>()
         unsubscribe = useFaroStore.subscribe((current, previous) => {
           if (applyingRemote || current.tasks === previous.tasks) return
 
@@ -177,27 +201,61 @@ export function TaskSyncProvider({ children }: { children: ReactNode }) {
           )
 
           if (!added.length && !updated.length && !removed.length) return
+          const changedTasks = [...added, ...updated, ...removed]
+          for (const task of changedTasks) pendingWrites.set(task.id, (pendingWrites.get(task.id) ?? 0) + 1)
           setState('syncing')
           queue = queue
             .then(async () => {
               const operations = [
                 ...added.map((task) => ({ kind: 'create' as const, task, run: () => taskRepository.create(safeRemoteTask(task), user.id) })),
-                ...updated.map((task) => ({ kind: 'update' as const, task, previous: previousById.get(task.id), run: () => taskRepository.update(safeRemoteTask(task), user.id) })),
+                ...updated.map((task) => {
+                  const previousTask = previousById.get(task.id)
+                  return {
+                    kind: 'update' as const,
+                    task,
+                    previous: previousTask,
+                    run: async () => {
+                      try {
+                        return previousTask && !taskNeedsFullUpdate(previousTask, task)
+                          ? await taskRepository.updateStatus(task.id, task.status, user.id, task.sortOrder)
+                          : await taskRepository.update(safeRemoteTask(task), user.id)
+                      } catch (reason) {
+                        if (!(reason instanceof TaskNotFoundError) || previousTask?.status !== 'done' || task.status === 'done') throw reason
+                        return taskRepository.restore(safeRemoteTask(task), user.id)
+                      }
+                    },
+                  }
+                }),
                 ...removed.map((task) => ({ kind: 'remove' as const, task, run: () => taskRepository.remove(task.id, user.id) })),
               ]
               const results = await Promise.allSettled(operations.map((operation) => operation.run()))
               const failed = operations.filter((_, index) => results[index].status === 'rejected')
-              if (failed.length) {
+              if (!active) return
+              // Server responses and rollbacks are remote applications, never
+              // new user edits. Only replace the exact snapshot we submitted:
+              // a later edit (or deletion) must survive an older request.
+              applyingRemote = true
+              try {
                 useFaroStore.setState((current) => {
                   const byId = new Map(current.tasks.map((task) => [task.id, task]))
-                  for (const operation of failed) {
-                    if (operation.kind === 'create') byId.delete(operation.task.id)
+                  operations.forEach((operation, index) => {
+                    const currentTask = byId.get(operation.task.id)
+                    if (operation.kind === 'remove' ? currentTask !== undefined : currentTask !== operation.task) return
+                    const result = results[index]
+                    if (result.status === 'fulfilled') {
+                      if (result.value) byId.set(operation.task.id, result.value)
+                    } else if (operation.kind === 'create') byId.delete(operation.task.id)
                     else if (operation.kind === 'update' && operation.previous) byId.set(operation.previous.id, operation.previous)
                     else if (operation.kind === 'remove') byId.set(operation.task.id, operation.task)
-                  }
+                  })
                   return { tasks: [...byId.values()] }
                 })
-                throw new Error('No se guardaron algunos cambios; FARO restauró el estado anterior.')
+              } finally { applyingRemote = false }
+              if (failed.length) {
+                const failure = results.find((result) => result.status === 'rejected')
+                const reason = failure?.status === 'rejected' ? failure.reason : undefined
+                const detail = reason && typeof reason === 'object' && 'message' in reason ? String(reason.message) : ''
+                throw new Error(`No se guardaron algunos cambios; FARO restauró el estado anterior.${detail ? ` ${detail}` : ''}`)
               }
             })
             .then(() => {
@@ -207,6 +265,13 @@ export function TaskSyncProvider({ children }: { children: ReactNode }) {
               }
             })
             .catch(reportError)
+            .finally(() => {
+              for (const task of changedTasks) {
+                const remaining = (pendingWrites.get(task.id) ?? 1) - 1
+                if (remaining) pendingWrites.set(task.id, remaining)
+                else pendingWrites.delete(task.id)
+              }
+            })
         })
 
         realtimeChannel = supabase.channel(`tasks:${user.id}`)
@@ -217,10 +282,14 @@ export function TaskSyncProvider({ children }: { children: ReactNode }) {
               useFaroStore.setState((current) => {
                 if (payload.eventType === 'DELETE') {
                   const deleted = payload.old as Pick<Database['public']['Tables']['tasks']['Row'], 'id'>
+                  if (pendingWrites.has(deleted.id)) return current
                   return { tasks: current.tasks.filter((task) => task.id !== deleted.id) }
                 }
                 const remote = taskFromRow(payload.new as Database['public']['Tables']['tasks']['Row'])
-                const exists = current.tasks.some((task) => task.id === remote.id)
+                if (pendingWrites.has(remote.id)) return current
+                const local = current.tasks.find((task) => task.id === remote.id)
+                if (local && Date.parse(remote.updatedAt) < Date.parse(local.updatedAt)) return current
+                const exists = Boolean(local)
                 return { tasks: exists ? current.tasks.map((task) => task.id === remote.id ? remote : task) : [...current.tasks, remote] }
               })
             } finally { applyingRemote = false }
@@ -234,7 +303,12 @@ export function TaskSyncProvider({ children }: { children: ReactNode }) {
             const latest = await taskRepository.list(user.id)
             if (!active) return
             applyingRemote = true
-            useFaroStore.setState({ tasks: latest })
+            useFaroStore.setState((current) => ({
+              tasks: [
+                ...latest.filter((task) => !pendingWrites.has(task.id)),
+                ...current.tasks.filter((task) => pendingWrites.has(task.id)),
+              ],
+            }))
           } catch (reason) {
             if (import.meta.env.DEV) console.debug('[FARO Backlog] voice refresh failed', reason)
           } finally { applyingRemote = false }

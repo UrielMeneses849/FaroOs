@@ -1,11 +1,11 @@
 import { addDays, addMonths, endOfMonth, format, isAfter, isSameMonth, startOfDay, startOfMonth, subMonths } from 'date-fns'
 import type { FinanceData, FinanceTransaction, FinanceTransactionType } from '../features/finance/financeTypes'
-import { categoryBudgetReservations, monthKey, personalBudgetBalanceIntoPeriod, personalBudgetReservations, recurringAppliesToMonth } from './financeService'
+import { categoryBudgetReservations, monthKey, personalBudgetBalanceIntoPeriod, personalBudgetUsageCents, personalBudgetReservations, recurringAppliesToMonth } from './financeService'
 
 /** Keeping the thresholds here makes the Radar auditable and keeps UI out of business rules. */
 export const LIQUIDITY_MODERATION_MULTIPLIER = 1.2
 /** Bump when a formula change makes stored comparison baselines incompatible. */
-export const FINANCE_LIQUIDITY_PROJECTION_VERSION = 5
+export const FINANCE_LIQUIDITY_PROJECTION_VERSION = 7
 
 export type FinanceLiquidityRadarStatus = 'stable' | 'moderation' | 'critical'
 export type LiquidityEventSource = 'movement' | 'recurring' | 'budget' | 'simulation'
@@ -137,7 +137,12 @@ export function financeLiquidityStatusCopy(status: FinanceLiquidityRadarStatus) 
 }
 
 function liquidityImpactFromTransaction(item: FinanceTransaction, activeAccountIds: Set<string>): LiquidityProjectionEvent | undefined {
-  const amountCents = operationalImpactCents(item, activeAccountIds)
+  // Plan is already outside the operational balance. Spending its reserved
+  // portion releases the same reservation, so only the unfunded part reduces it.
+  const releasedPlanCents = item.status !== 'completed' && activeAccountIds.has(item.accountId)
+    && (item.type === 'expense' || item.type === 'debt_payment')
+    ? Math.min(item.amountCents, item.planAmountCents ?? 0) : 0
+  const amountCents = operationalImpactCents(item, activeAccountIds) + releasedPlanCents
   if (!amountCents) return undefined
   return {
     id: `movement:${item.id}`,
@@ -232,7 +237,8 @@ export function personalBudgetScenarioReservationCents(data: FinanceData, scenar
   const adjustmentCents = previousBalanceCents < 0
     ? isSecondFortnight ? previousBalanceCents : 0
     : priorEnvelopeIsStillReserved ? 0 : previousBalanceCents
-  return Math.max(0, scenario.targetAmountCents + adjustmentCents)
+  const committedCents = personalBudgetUsageCents(data, scenario.periodStart, scenario.periodEnd)
+  return Math.max(0, scenario.targetAmountCents + adjustmentCents - committedCents)
 }
 
 function personalBudgetScenarioEvent(
@@ -241,8 +247,8 @@ function personalBudgetScenarioEvent(
   sourceBudgetIds: string[],
   reference: Date,
 ): BudgetReservationEvent | undefined {
-  // A scenario represents new money the user wants to reserve. Dated personal
-  // movements remain visible as independent commitments in the cash curve.
+  // Like a saved budget, a scenario reserves only the uncommitted remainder.
+  // Dated spending keeps its cash impact and consumes the simulated envelope.
   const envelopeCents = personalBudgetScenarioReservationCents(data, scenario, reference)
   if (!envelopeCents) return undefined
   return {

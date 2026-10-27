@@ -7,7 +7,7 @@ import type { DateSelectArg, DayHeaderContentArg, EventClickArg, EventContentArg
 import type { EventResizeDoneArg } from '@fullcalendar/interaction'
 import { addMonths, differenceInMinutes, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameDay, isSameMonth, startOfMonth, startOfWeek } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { CalendarClock, ChevronLeft, ChevronRight, Pencil, Trash2 } from 'lucide-react'
+import { CalendarClock, ChevronLeft, ChevronRight, Pencil, Plus, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, ConfirmDialog, EmptyState, Modal } from '../components/common'
@@ -90,6 +90,8 @@ export function CalendarPage() {
     window.addEventListener('faro:calendar-updated', resetLocalSnapshot)
     return () => window.removeEventListener('faro:calendar-updated', resetLocalSnapshot)
   }, [])
+  const [mobileOptionsOpen, setMobileOptionsOpen] = useState(false)
+  const [isCalendarMobile, setIsCalendarMobile] = useState(() => window.innerWidth <= 760)
   const [workspaceIds, setWorkspaceIds] = useState<string[]>([])
   const [sourceType] = useState<CalendarSourceType | 'all'>('all')
   const [status] = useState<string>('all')
@@ -131,9 +133,31 @@ export function CalendarPage() {
     const rightOrder = calendarWorkspaceOrder.indexOf(right.name)
     return (leftOrder < 0 ? Number.MAX_SAFE_INTEGER : leftOrder) - (rightOrder < 0 ? Number.MAX_SAFE_INTEGER : rightOrder)
   })
-  const initialView = window.innerWidth < 700 ? 'listWeek' : window.innerWidth < 1020 ? 'timeGridDay' : 'rollingWeek'
+  const initialView = window.innerWidth <= 760 ? 'listWeek' : window.innerWidth < 1020 ? 'timeGridDay' : 'rollingWeek'
 
   useEffect(() => { slotHeightRef.current = slotHeight }, [slotHeight])
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 760px)')
+    const updateLayout = () => {
+      setIsCalendarMobile(query.matches)
+      calendarRef.current?.getApi().changeView(query.matches ? 'listWeek' : window.innerWidth < 1020 ? 'timeGridDay' : 'rollingWeek')
+    }
+    query.addEventListener('change', updateLayout)
+    return () => query.removeEventListener('change', updateLayout)
+  }, [])
+
+  const createMobileEntry = () => {
+    const start = new Date(focusedDate)
+    if (isSameDay(start, new Date())) {
+      const now = new Date()
+      start.setHours(now.getHours(), Math.ceil(now.getMinutes() / 30) * 30, 0, 0)
+    } else start.setHours(9, 0, 0, 0)
+    setCreatingKind('event')
+    setCreatingAt(start.toISOString())
+    setCreatingDuration(30)
+    setCreatingWorkspace(workspaceIds.length === 1 ? workspaceIds[0] : activeWorkspaces.find((workspace) => workspace.name === 'Personal')?.id ?? activeWorkspaces[0]?.id)
+  }
 
   useEffect(() => {
     if (!quickEventPending.current || loading || !activeWorkspaces.length) return
@@ -349,8 +373,9 @@ export function CalendarPage() {
   if (error && !items.length) return <div className="page"><EmptyState title="No pudimos cargar el calendario" description={error} action={<Button onClick={() => void forceRefresh()}>Reintentar</Button>} /></div>
   return <div className="page calendar-page"><PageHeader eyebrow={format(new Date(), "EEEE, d 'de' MMMM", { locale: es })} title="Calendario" description="Tiempo, contexto y ejecución en una sola vista." />
     {feedback && <div className="calendar-feedback" role="status">{feedback}<button onClick={() => setFeedback('')}>×</button></div>}
+    <div className="calendar-mobile-actions"><Button icon={<Plus size={18} />} onClick={createMobileEntry}>Nueva entrada</Button><button type="button" aria-expanded={mobileOptionsOpen} aria-controls="calendar-options" onClick={() => setMobileOptionsOpen((open) => !open)}><SlidersHorizontal size={18} /><span>Filtros{workspaceIds.length ? ` · ${workspaceIds.length}` : ''}</span></button></div>
     <div className="calendar-layout">
-      <aside className="calendar-sidebar">
+      <aside id="calendar-options" className={`calendar-sidebar ${mobileOptionsOpen ? 'is-mobile-open' : ''}`}>
         <section className="calendar-google" data-status={google.connection.status}>
           <div className="calendar-google__identity">
             <img src={googleCalendarLogoUrl} alt="Google Calendar" />
@@ -379,7 +404,7 @@ export function CalendarPage() {
       </aside>
       <section ref={calendarSurfaceRef} className="calendar-surface" style={{ '--calendar-slot-height': `${slotHeight}px` } as CSSProperties}>
         <div className={`calendar-zoom-indicator ${zoomIndicator ? 'is-visible' : ''}`} role="status" aria-live="polite">Zoom {calendarZoomPercent(slotHeight)}% <span>⌘ + scroll</span></div>
-        <FullCalendar ref={calendarRef} plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, listPlugin]} views={{ rollingWeek: { type: 'timeGrid', duration: { days: 7 }, dateIncrement: { days: 7 }, dateAlignment: 'day', visibleRange: rollingWeekRange } }} initialView={initialView} initialDate={new Date()} locale="es" timeZone="local" firstDay={1} height="100%" stickyHeaderDates expandRows={false} nowIndicator selectable selectMirror editable events={events} select={selectSlot} eventClick={clickEvent} eventDrop={drop} eventResize={resize} eventContent={calendarEventContent} datesSet={(dateInfo) => { const nextDate = calendarRef.current?.getApi().getDate() ?? new Date(); setFocusedDate(nextDate); setMiniMonth(nextDate); setVisibleRange({ start: dateInfo.start.toISOString(), end: dateInfo.end.toISOString() }) }} customButtons={{ faroToday: { text: 'Hoy', click: () => calendarRef.current?.getApi().gotoDate(new Date()) } }} headerToolbar={{ left: 'prev,next faroToday', center: 'title', right: 'rollingWeek,timeGridWeek,timeGridDay,listWeek' }} buttonText={{ rollingWeek: '7 días', month: 'Mes', week: 'Semana', day: 'Día', list: 'Agenda' }} titleFormat={calendarTitleFormat} dayHeaderContent={calendarDayHeader} dayMaxEvents={2} dayMaxEventRows={2} moreLinkClick="popover" slotMinTime="00:00:00" slotMaxTime="24:00:00" slotDuration="00:30:00" snapDuration="00:30:00" slotLabelInterval="01:00:00" scrollTime="00:00:00" scrollTimeReset allDaySlot={false} eventTimeFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }} />
+        <FullCalendar ref={calendarRef} plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, listPlugin]} views={{ rollingWeek: { type: 'timeGrid', duration: { days: 7 }, dateIncrement: { days: 7 }, dateAlignment: 'day', visibleRange: rollingWeekRange } }} initialView={initialView} initialDate={new Date()} locale="es" timeZone="local" firstDay={1} height={isCalendarMobile ? 'auto' : '100%'} stickyHeaderDates expandRows={false} nowIndicator selectable selectMirror editable events={events} select={selectSlot} eventClick={clickEvent} eventDrop={drop} eventResize={resize} eventContent={calendarEventContent} datesSet={(dateInfo) => { const nextDate = calendarRef.current?.getApi().getDate() ?? new Date(); setFocusedDate(nextDate); setMiniMonth(nextDate); setVisibleRange({ start: dateInfo.start.toISOString(), end: dateInfo.end.toISOString() }) }} customButtons={{ faroToday: { text: 'Hoy', click: () => calendarRef.current?.getApi().gotoDate(new Date()) } }} headerToolbar={{ left: 'prev,next faroToday', center: 'title', right: isCalendarMobile ? 'timeGridDay,listWeek' : 'rollingWeek,timeGridWeek,timeGridDay,listWeek' }} buttonText={{ rollingWeek: '7 días', month: 'Mes', week: 'Semana', day: 'Día', list: 'Agenda' }} titleFormat={calendarTitleFormat} dayHeaderContent={calendarDayHeader} dayMaxEvents={2} dayMaxEventRows={2} moreLinkClick="popover" slotMinTime="00:00:00" slotMaxTime="24:00:00" slotDuration="00:30:00" snapDuration="00:30:00" slotLabelInterval="01:00:00" scrollTime="00:00:00" scrollTimeReset allDaySlot={false} eventTimeFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }} />
       </section>
     </div>
     {creatingAt && <CalendarEntryDialog open startsAt={creatingAt} estimatedMinutes={creatingDuration} workspaceId={creatingWorkspace} initialKind={creatingKind} onClose={(saved, message) => { setCreatingAt(undefined); setCreatingDuration(undefined); setCreatingWorkspace(undefined); setCreatingKind('task'); if (message) setFeedback(message); if (saved) { setLocalItems(null); queueMicrotask(() => void forceRefresh()) } }} />}
@@ -398,7 +423,7 @@ function calendarDayHeader(arg: DayHeaderContentArg) {
 }
 
 function calendarEventContent(arg: EventContentArg) {
-  return <div className="calendar-event-content"><time>{arg.timeText}</time><strong>{arg.event.title}</strong><span>{String(arg.event.extendedProps.workspaceName ?? '')}</span></div>
+  return <div className="calendar-event-content">{arg.view.type !== 'listWeek' && <time>{arg.timeText}</time>}<strong>{arg.event.title}</strong><span>{String(arg.event.extendedProps.workspaceName ?? '')}</span></div>
 }
 
 function MiniMonthCalendar({ month, selected, onMonthChange, onSelect }: {

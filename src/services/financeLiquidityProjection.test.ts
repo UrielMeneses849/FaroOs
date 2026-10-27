@@ -29,6 +29,22 @@ const radar = (data: FinanceData, overrides: Partial<Parameters<typeof financeLi
 })
 
 describe('financeLiquidityProjection', () => {
+  it('does not deduct Plan funding again when a reserved payment is projected', () => {
+    const source = financeData([movement({ id: 'reserved-payment', transactionDate: '2026-07-15', amountCents: 100_000, planAmountCents: 100_000, debtId: 'debt' })])
+    const projection = radar(source, { currentAvailableBalanceCents: 750_000 })
+    expect(projection.closingBalanceCents).toBe(750_000)
+    source.transactions[0].planAmountCents = 60_000
+    expect(radar(source, { currentAvailableBalanceCents: 750_000 }).closingBalanceCents).toBe(710_000)
+  })
+  it('a Plan category budget reserves only money not already allocated to Plan', () => {
+    const source = financeData()
+    source.categories = [{ id: 'plan', name: 'Plan', type: 'expense', isActive: true, isDefault: true }]
+    source.budgets = [{ id: 'plan-budget', categoryId: 'plan', month: '2026-07-01', plannedAmountCents: 400_000, periodStart: '2026-07-16', periodEnd: '2026-07-31', createdAt, updatedAt: createdAt }]
+    source.debtPlan = { debts: [], entries: [{ id: 'allocation', accountId: 'account', amountCents: 150_000, entryDate: '2026-07-10', createdAt }], preferences: { contributionDay: 15, monthlyContributionCents: 0, targetDate: '2026-12-31', strategy: 'balanced' } }
+    const projection = radar(source, { currentAvailableBalanceCents: 850_000, includedBudgetCategoryIds: ['plan'] })
+    expect(projection.events.find(event => event.id === 'budget:plan-budget')?.amountCents).toBe(-250_000)
+    expect(projection.closingBalanceCents).toBe(600_000)
+  })
   it('calcula el saldo día a día, el mínimo y el margen libre', () => {
     const projection = radar(financeData([
       movement({ id: 'actual', transactionDate: '2026-07-02', amountCents: 100_000, status: 'completed' }),
@@ -161,6 +177,60 @@ describe('financeLiquidityProjection', () => {
     expect(day?.balanceCents).toBe(900_000)
     expect(projection.days.find((item) => item.date === '2026-07-10')?.balanceCents).toBe(900_000)
     expect(projection.days.find((item) => item.date === '2026-07-11')?.balanceCents).toBe(500_000)
+  })
+
+  it('consume $190 del escenario Q2 sin reducir dos veces la proyección tras un exceso de Q1', () => {
+    const data = financeData([
+      movement({ id: 'q1-use', categoryId: 'personal', amountCents: 837_150, transactionDate: '2026-10-10', status: 'completed' }),
+    ])
+    data.categories = [{ id: 'personal', name: 'Personal', type: 'expense', isDefault: false, isActive: true }]
+    data.budgets = [
+      { id: 'q1', categoryId: 'personal', month: '2026-10-01', plannedAmountCents: 500_000, name: 'Gastos Personales', periodStart: '2026-10-01', periodEnd: '2026-10-15', createdAt, updatedAt: createdAt },
+      { id: 'q2', categoryId: 'personal', month: '2026-10-01', plannedAmountCents: 500_000, name: 'Gastos Personales', periodStart: '2026-10-16', periodEnd: '2026-10-31', createdAt, updatedAt: createdAt },
+    ]
+    const options = {
+      month: new Date(2026, 9, 1), referenceDate: new Date(2026, 9, 16),
+      currentAvailableBalanceCents: 1_266_351, minimumOperatingBufferCents: 200_000,
+      includePersonalBudgetReservations: true,
+      personalBudgetScenario: { periodStart: '2026-10-16', periodEnd: '2026-10-31', targetAmountCents: 500_000 },
+    }
+    const before = financeLiquidityProjection({ data, ...options })
+    data.transactions.push(movement({ id: 'quesadillas', budgetId: 'q2', categoryId: 'personal', amountCents: 19_000, transactionDate: '2026-10-16', status: 'completed' }))
+    const after = financeLiquidityProjection({ data, ...options, currentAvailableBalanceCents: 1_247_351 })
+    const savedBudget = financeLiquidityProjection({ data, ...options, currentAvailableBalanceCents: 1_247_351, personalBudgetScenario: undefined })
+
+    expect(personalBudgetScenarioReservationCents(data, options.personalBudgetScenario, options.referenceDate)).toBe(143_850)
+    expect(after.events.find(event => event.id === 'budget-scenario:2026-10-16')).toMatchObject({ amountCents: -143_850 })
+    expect(after.days.find(day => day.date === '2026-10-16')?.balanceCents).toBe(1_247_351)
+    expect(after.closingBalanceCents).toBe(before.closingBalanceCents)
+    expect(after.minimumBalanceCents).toBe(before.minimumBalanceCents)
+    expect(after.closingBalanceCents).toBe(savedBudget.closingBalanceCents)
+
+    // A further $1,500 commitment exceeds the $1,438.50 still available.
+    // Reserve nothing extra and keep the genuine $61.50 overrun visible.
+    data.transactions.push(movement({ id: 'birthday', budgetId: 'q2', categoryId: 'personal', amountCents: 150_000, transactionDate: '2026-10-18' }))
+    const overcommitted = financeLiquidityProjection({ data, ...options, currentAvailableBalanceCents: 1_247_351 })
+    expect(personalBudgetScenarioReservationCents(data, options.personalBudgetScenario, options.referenceDate)).toBe(0)
+    expect(overcommitted.events.some(event => event.id === 'budget-scenario:2026-10-16')).toBe(false)
+    expect(overcommitted.closingBalanceCents).toBe(after.closingBalanceCents - 6_150)
+  })
+
+  it('mantiene el mismo remanente al registrar, cancelar o agotar gastos de un escenario vinculado por presupuesto', () => {
+    const data = financeData([
+      movement({ id: 'meal', budgetId: 'q2', categoryId: 'food', amountCents: 19_000, transactionDate: '2026-07-20' }),
+    ])
+    data.categories = [{ id: 'personal', name: 'Personal', type: 'expense', isDefault: false, isActive: true }]
+    data.budgets = [{ id: 'q2', categoryId: 'personal', month: '2026-07-01', plannedAmountCents: 500_000, name: 'Gastos Personales', periodStart: '2026-07-16', periodEnd: '2026-07-31', createdAt, updatedAt: createdAt }]
+    const scenario = { periodStart: '2026-07-16', periodEnd: '2026-07-31', targetAmountCents: 500_000 }
+    const planned = radar(data, { includePersonalBudgetReservations: true, personalBudgetScenario: scenario })
+    expect(planned.closingBalanceCents).toBe(400_000)
+    data.transactions[0].status = 'completed'
+    const paid = radar(data, { referenceDate: new Date(2026, 6, 20), currentAvailableBalanceCents: 881_000, includePersonalBudgetReservations: true, personalBudgetScenario: scenario })
+    expect(paid.closingBalanceCents).toBe(planned.closingBalanceCents)
+    data.transactions[0].status = 'cancelled'
+    expect(personalBudgetScenarioReservationCents(data, scenario)).toBe(500_000)
+    data.transactions[0].status = 'completed'
+    expect(personalBudgetScenarioReservationCents(data, { ...scenario, targetAmountCents: 10_000 })).toBe(0)
   })
 
   it('fecha el ahorro realizado y proyecta el ahorro pendiente en el disponible operativo', () => {
@@ -516,7 +586,8 @@ describe('financeLiquidityProjection', () => {
     })
     expect(scenario.events.find((event) => event.id === 'budget-scenario:2026-07-16')).toMatchObject({
       date: '2026-07-16',
-      amountCents: -500_000,
+      // The $2,000 dated payment consumes part of the $5,000 target.
+      amountCents: -300_000,
       source: 'simulation',
     })
     expect(scenario.events.find((event) => event.id === 'movement:personal-q2')).toMatchObject({
@@ -524,6 +595,7 @@ describe('financeLiquidityProjection', () => {
       source: 'movement',
     })
     expect(data.budgets).toHaveLength(1)
+    expect(scenario.closingBalanceCents).toBe(-100_000)
   })
 
   it('resta del escenario Q2 el exceso de Q1 y nunca genera una reserva negativa', () => {
