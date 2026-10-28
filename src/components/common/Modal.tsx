@@ -33,6 +33,40 @@ export function Modal({ open, title, onClose, children, panelClassName }: ModalP
   }, [onClose])
 
   useEffect(() => {
+    const viewport = window.visualViewport
+    const backdrop = backdropRef.current
+    const panel = panelRef.current
+    if (!open || !viewport || !backdrop || !panel) return
+    const previous = { top: backdrop.style.top, bottom: backdrop.style.bottom, height: backdrop.style.height, maxHeight: panel.style.maxHeight }
+    let frame: number | undefined
+    const fitViewport = () => {
+      frame = undefined
+      if (!Number.isFinite(viewport.height) || viewport.height <= 0) return
+      backdrop.style.top = `${Math.max(0, viewport.offsetTop)}px`
+      backdrop.style.bottom = 'auto'
+      backdrop.style.height = `${viewport.height}px`
+      panel.style.maxHeight = '100%'
+    }
+    const scheduleFit = () => {
+      if (frame === undefined) frame = window.requestAnimationFrame(fitViewport)
+    }
+    // On-screen keyboards can shrink/pan the visual viewport without changing
+    // 100dvh. Keep the existing flex body scroll inside the space still visible.
+    fitViewport()
+    viewport.addEventListener('resize', scheduleFit, { passive: true })
+    viewport.addEventListener('scroll', scheduleFit, { passive: true })
+    return () => {
+      viewport.removeEventListener('resize', scheduleFit)
+      viewport.removeEventListener('scroll', scheduleFit)
+      if (frame !== undefined) window.cancelAnimationFrame(frame)
+      backdrop.style.top = previous.top
+      backdrop.style.bottom = previous.bottom
+      backdrop.style.height = previous.height
+      panel.style.maxHeight = previous.maxHeight
+    }
+  }, [open])
+
+  useEffect(() => {
     if (!open || !backdropRef.current) return
     const backdrop = backdropRef.current
     if (!modalStack.length) {

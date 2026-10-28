@@ -188,6 +188,14 @@ export const financeCategoryRepository = {
     throwIfError(error)
     return categoryFromRow(data!)
   },
+  async remove(id: string, userId: string) {
+    await assertFinanceUser(userId)
+    const { data, error } = await supabase.from('finance_categories').delete().eq('id', id).eq('user_id', userId).eq('is_default', false).select('id').maybeSingle()
+    if (error?.code === '23503') throw new Error('Esta categoría tiene movimientos o presupuestos vinculados. Su historial se conserva; primero reasigna esos registros.')
+    throwIfError(error)
+    if (!data) throw new Error('No se encontró una categoría personal que puedas eliminar.')
+  },
+
 }
 
 export const financeLiquidityRepository = {
@@ -474,6 +482,21 @@ export const financeGoalRepository = {
     const { error } = await supabase.from('finance_goals').delete().eq('id', id).eq('user_id', userId)
     throwIfError(error)
   },
+  async updateReservedContribution(item: FinanceGoalContribution, userId: string) {
+    await assertFinanceUser(userId)
+    if (item.transactionId) throw new Error('Edita el movimiento vinculado para mantener sincronizada la aportación.')
+    const { data, error } = await supabase.from('finance_goal_contributions').update({ amount: centsToNumeric(item.amountCents), contribution_date: item.contributionDate, description: item.description ?? null, notes: item.notes ?? null })
+      .eq('id', item.id).eq('user_id', userId).is('transaction_id', null).select('id').maybeSingle()
+    throwIfError(error)
+    if (!data) throw new Error('La aportación cambió o tiene un movimiento vinculado. Actualiza tus datos.')
+  },
+  async removeReservedContribution(id: string, userId: string) {
+    await assertFinanceUser(userId)
+    const { data, error } = await supabase.from('finance_goal_contributions').delete().eq('id', id).eq('user_id', userId).is('transaction_id', null).select('id').maybeSingle()
+    throwIfError(error)
+    if (!data) throw new Error('La aportación cambió o tiene un movimiento vinculado. Actualiza tus datos.')
+  },
+
 }
 
 export const financePlanningRepository = {
@@ -488,7 +511,8 @@ export const financePlanningRepository = {
     throwIfError(fund.error);throwIfError(entries.error);throwIfError(items.error);throwIfError(closures.error)
     return { savingsFund:fund.data?{id:(fund.data as FundRow).id,name:(fund.data as FundRow).name,createdAt:(fund.data as FundRow).created_at,updatedAt:(fund.data as FundRow).updated_at}:undefined,savingsFundEntries:(entries.data??[]).map(fundEntryFromRow),goalItems:(items.data??[]).map(goalItemFromRow),budgetClosures:(closures.data??[]).map(closureFromRow) }
   },
-  async saveFundEntry(item:Omit<FinanceSavingsFundEntry,'createdAt'>,userId:string){ await assertFinanceUser(userId);const {error}=await supabase.from('finance_savings_fund_entries').insert({id:item.id,user_id:userId,fund_id:item.fundId,amount:centsToNumeric(item.amountCents),entry_date:item.entryDate,description:item.description??null});throwIfError(error) },
+  async saveFundEntry(item:Omit<FinanceSavingsFundEntry,'createdAt'>,userId:string){ await assertFinanceUser(userId);const {error}=await supabase.from('finance_savings_fund_entries').upsert({id:item.id,user_id:userId,fund_id:item.fundId,amount:centsToNumeric(item.amountCents),entry_date:item.entryDate,description:item.description??null},{onConflict:'id'});throwIfError(error) },
+  async removeFundEntry(id: string, userId: string) { await assertFinanceUser(userId); const { error } = await supabase.from('finance_savings_fund_entries').delete().eq('id', id).eq('user_id', userId); throwIfError(error) },
   async saveGoalItem(item:Omit<FinanceGoalItem,'createdAt'|'updatedAt'>,userId:string){await assertFinanceUser(userId);const {error}=await supabase.from('finance_goal_items').upsert({id:item.id,user_id:userId,goal_id:item.goalId,name:item.name,price:centsToNumeric(item.priceCents),priority:item.priority,url:item.url??null,notes:item.notes??null,status:item.status,purchase_date:item.purchaseDate??null,transaction_id:item.transactionId??null},{onConflict:'id'});throwIfError(error)},
   async removeGoalItem(id:string,userId:string){await assertFinanceUser(userId);const {error}=await supabase.from('finance_goal_items').delete().eq('id',id).eq('user_id',userId);throwIfError(error)},
   async closeBudget(budgetId:string,destination:'next_period'|'goal'|'savings_fund'|'available',goalId:string|undefined,userId:string){await assertFinanceUser(userId);// eslint-disable-next-line @typescript-eslint/no-explicit-any

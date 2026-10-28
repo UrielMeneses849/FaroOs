@@ -1,19 +1,22 @@
 import './finance-mobile.css'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { addDays, addMonths, endOfMonth, format, isSameDay, parseISO, subMonths } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
   ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight,
-  Ban, Calculator, CalendarDays, ChartNoAxesCombined, Check, Clock3, Copy, CreditCard, FileDown, FileUp, Landmark, Pencil, PiggyBank, Plus, RefreshCw, Repeat2,
-  RotateCcw, Target, Trash2, WalletCards, House, ReceiptText, Ellipsis, Search,
+  Ban, Calculator, CalendarDays, ChartNoAxesCombined, Check, Clock3, Copy, FileDown, FileUp, Landmark, Pencil, PiggyBank, Plus, RefreshCw, Repeat2,
+  RotateCcw, Target, Trash2, WalletCards, House, Ellipsis, Search,
 } from 'lucide-react'
-import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Button, ConfirmDialog, EmptyState, Modal, ProgressBar } from '../components/common'
 import { PageHeader } from '../components/layout'
 import { ExpenseCategoryDonut } from '../features/finance/ExpenseCategoryDonut'
 import { FinanceLiquidityRadar } from '../features/finance/FinanceLiquidityRadar'
 import { SharedReceiptDialog } from '../features/finance/SharedReceiptDialog'
+import { FinanceNavigation } from '../features/finance/FinanceNavigation'
+import { FinanceCategoryManager, FundEntryEditor, ReservedContributionEditor } from '../features/finance/FinanceRecordDialogs'
+import { FinanceList } from '../features/finance/FinanceList'
 import { DebtPlanPanel } from '../features/finance/DebtPlanPanel'
 import { DebtMovementFields, DebtPicker } from '../features/finance/DebtMovementFields'
 import { debtPlanBalanceCents } from '../services/debtPlanBalance'
@@ -22,7 +25,7 @@ import {
   financeAccountSchema, financeBudgetSchema, financeGoalSchema, financeTransactionSchema,
 } from '../features/finance/financeSchemas'
 import type {
-  FinanceAccount, FinanceBudget, FinanceCategory, FinanceCategoryType, FinanceData, FinanceGoal, FinanceGoalContribution, FinanceGoalItem, FinanceRecurringOccurrence, FinanceRecurringTransaction, FinanceTransaction,
+  FinanceAccount, FinanceBudget, FinanceCategory, FinanceCategoryType, FinanceData, FinanceGoal, FinanceGoalContribution, FinanceGoalItem, FinanceRecurringOccurrence, FinanceRecurringTransaction, FinanceSavingsFundEntry, FinanceTransaction,
   FinanceTransactionStatus, FinanceTransactionType,
 } from '../features/finance/financeTypes'
 import { useFinance } from '../hooks/useFinance'
@@ -38,7 +41,7 @@ import { budgetNameForCategory, fortnightPeriodForMonth } from '../services/fina
 import { FINANCE_LIQUIDITY_PROJECTION_VERSION, financeLiquidityProjection } from '../services/financeLiquidityProjection'
 
 type Panel = 'overview' | 'advisor' | 'transactions' | 'income' | 'accounts' | 'budgets' | 'recurring' | 'savings' | 'fund' | 'goals' | 'plan'
-type Dialog = 'movementMenu' | 'transaction' | 'account' | 'budget' | 'budgetClose' | 'recurring' | 'goal' | 'goalDetail' | 'contribution' | 'fundEntry' | 'goalItem' | 'purchaseItem' | null
+type Dialog = 'movementMenu' | 'transaction' | 'account' | 'budget' | 'budgetClose' | 'recurring' | 'goal' | 'goalDetail' | 'contribution' | 'fundEntry' | 'goalItem' | 'purchaseItem' | 'categories' | 'editContribution' | null
 interface MovementPreset { type?: FinanceTransactionType; categoryName?: string; status?: FinanceTransactionStatus; contribution?: boolean }
 const typeLabel: Record<FinanceTransactionType, string> = {
   income: 'Ingreso', expense: 'Gasto', transfer: 'Transferencia', saving: 'Ahorro',
@@ -48,11 +51,7 @@ const statusLabel: Record<FinanceTransactionStatus, string> = {
   planned: 'Planeado', pending: 'Pendiente', completed: 'Completado', cancelled: 'Cancelado',
 }
 const mobileFinanceSections = [
-  { id: 'transactions', label: 'Movimientos', description: 'Tu historial, ingresos y gastos', icon: ReceiptText },
-  { id: 'recurring', label: 'Gastos programados', description: 'Pagos recurrentes y pendientes', icon: CalendarDays },
-  { id: 'budgets', label: 'Presupuestos', description: 'Cuida tus límites por quincena', icon: Calculator },
   { id: 'accounts', label: 'Cuentas', description: 'Saldos y cuentas en un solo lugar', icon: WalletCards },
-  { id: 'plan', label: 'Plan de deudas', description: 'Pagos y ruta de liquidación', icon: CreditCard },
   { id: 'savings', label: 'Ahorro', description: 'Tu avance y acumulados del año', icon: PiggyBank },
   { id: 'goals', label: 'Metas', description: 'Ahorra para lo que viene', icon: Target },
   { id: 'fund', label: 'Fondo', description: 'Tu reserva para imprevistos', icon: Landmark },
@@ -70,6 +69,8 @@ const categoryTypeLabel: Record<FinanceCategoryType, string> = {
 }
 
 export function FinancePage() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const { data, loading, error, refresh, user } = useFinance()
   const [month, setMonth] = useState(() => new Date())
   const [panel, setPanel] = useState<Panel>(() => {
@@ -88,7 +89,10 @@ export function FinancePage() {
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false)
   const [showOverviewDetails, setShowOverviewDetails] = useState(false)
-  const [quickExpensePending, setQuickExpensePending] = useState(() => new URLSearchParams(window.location.search).get('quick') === 'expense')
+  const quickAction = new URLSearchParams(location.search).get('quick')
+  const quickMovementPending = quickAction === 'movement'
+  const quickExpensePending = quickAction === 'expense'
+  const consumedQuickLocation = useRef<string | null>(null)
   const [movementPreset, setMovementPreset] = useState<MovementPreset>()
   const [editingTransaction, setEditingTransaction] = useState<FinanceTransaction>()
   const [editingAccount, setEditingAccount] = useState<FinanceAccount>()
@@ -98,6 +102,10 @@ export function FinancePage() {
   const [editingGoal, setEditingGoal] = useState<FinanceGoal>()
   const [budgetHalfToEdit, setBudgetHalfToEdit] = useState<'q1' | 'q2'>()
   const [budgetCategoryToEdit, setBudgetCategoryToEdit] = useState<string>()
+  const [editingFundEntry, setEditingFundEntry] = useState<FinanceSavingsFundEntry>()
+  const [deletingFundEntry, setDeletingFundEntry] = useState<FinanceSavingsFundEntry>()
+  const [editingContribution, setEditingContribution] = useState<FinanceGoalContribution>()
+  const [deletingContribution, setDeletingContribution] = useState<FinanceGoalContribution>()
   const [deletingBudget, setDeletingBudget] = useState<FinanceBudget>()
   const [selectedGoal, setSelectedGoal] = useState<FinanceGoal>()
   const [selectedGoalItem, setSelectedGoalItem] = useState<FinanceGoalItem>()
@@ -120,23 +128,45 @@ export function FinancePage() {
   const [sharedReceipt, setSharedReceipt] = useState<File>()
   const [sharePending, setSharePending] = useState(() => new URLSearchParams(window.location.search).has('sharedReceipt'))
   const receiptInputRef = useRef<HTMLInputElement>(null)
+  const financeContentRef = useRef<HTMLDivElement>(null)
+  const scrollPeriod = monthKey(month)
+  useLayoutEffect(() => {
+    if (!financeContentRef.current) return
+    financeContentRef.current.scrollTop = 0
+    financeContentRef.current.scrollLeft = 0
+    for (const list of financeContentRef.current.querySelectorAll<HTMLElement>('.finance-expense-list')) {
+      list.scrollTop = 0
+    }
+    // Narrow and short windows consolidate scrolling into an enclosing pane.
+    for (const selector of ['.finance-layout', '.main-content']) {
+      const pane = financeContentRef.current.closest<HTMLElement>(selector)
+      if (pane) {
+        pane.scrollTop = 0
+        pane.scrollLeft = 0
+      }
+    }
+  }, [panel, scrollPeriod])
   const activeAccounts = data.accounts.filter((item) => item.isActive)
 
   useEffect(() => {
-    if (!quickExpensePending || loading) return
-    const url = new URL(window.location.href)
-    url.searchParams.delete('quick')
-    window.history.replaceState(window.history.state, '', url)
+    if ((!quickMovementPending && !quickExpensePending) || loading) return
+    const entry = `${location.key}:${location.search}`
+    let cancelled = false
     queueMicrotask(() => {
-      setQuickExpensePending(false)
+      if (cancelled || consumedQuickLocation.current === entry) return
+      consumedQuickLocation.current = entry
       if (!activeAccounts.length) {
-        setFeedback('Crea una cuenta antes de registrar tu primer gasto.')
-        return
-      }
-      setMovementPreset({ type: 'expense', status: 'completed' })
-      setDialog('transaction')
+        setFeedback(quickExpensePending ? 'Crea una cuenta antes de registrar tu primer gasto.' : 'Crea una cuenta antes de registrar tu primer movimiento.')
+      } else if (quickExpensePending) {
+        setMovementPreset({ type: 'expense', status: 'completed' })
+        setDialog('transaction')
+      } else setDialog('movementMenu')
+      const search = new URLSearchParams(location.search)
+      search.delete('quick')
+      navigate({ pathname: location.pathname, search: search.toString() ? `?${search}` : '', hash: location.hash }, { replace: true, state: location.state })
     })
-  }, [activeAccounts.length, loading, quickExpensePending])
+    return () => { cancelled = true }
+  }, [activeAccounts.length, loading, location, navigate, quickExpensePending, quickMovementPending])
 
   useEffect(() => {
     const url = new URL(window.location.href)
@@ -171,9 +201,9 @@ export function FinancePage() {
     const timeout = window.setTimeout(() => setFeedback(''), 3000)
     return () => window.clearTimeout(timeout)
   }, [feedback])
-  useEffect(()=>{if(loading||dialog||sharedReceipt||sharePending||quickExpensePending)return;const candidate=data.budgets.find(item=>(item.periodEnd??item.month)<format(new Date(),'yyyy-MM-dd')&&!dismissedBudgetIds.includes(item.id)&&!data.budgetClosures.some(closure=>closure.budgetId===item.id));if(candidate)queueMicrotask(()=>{setClosingBudget(candidate);setDialog('budgetClose')})},[data.budgetClosures,data.budgets,dialog,dismissedBudgetIds,loading,quickExpensePending,sharedReceipt,sharePending])
+  useEffect(()=>{if(loading||dialog||sharedReceipt||sharePending||quickExpensePending||quickMovementPending)return;const candidate=data.budgets.find(item=>(item.periodEnd??item.month)<format(new Date(),'yyyy-MM-dd')&&!dismissedBudgetIds.includes(item.id)&&!data.budgetClosures.some(closure=>closure.budgetId===item.id));if(candidate)queueMicrotask(()=>{setClosingBudget(candidate);setDialog('budgetClose')})},[data.budgetClosures,data.budgets,dialog,dismissedBudgetIds,loading,quickExpensePending,quickMovementPending,sharedReceipt,sharePending])
   useEffect(() => {
-    if (loading || dialog || sharedReceipt || sharePending || quickExpensePending || !user || monthKey(month) !== monthKey(new Date())) return
+    if (loading || dialog || sharedReceipt || sharePending || quickExpensePending || quickMovementPending || !user || monthKey(month) !== monthKey(new Date())) return
     const today = format(new Date(), 'yyyy-MM-dd')
     const half = today.slice(-2) <= '15' ? 'q1' : 'q2'
     const period = fortnightPeriodForMonth(monthKey(month), half)
@@ -187,7 +217,7 @@ export function FinancePage() {
       setBudgetHalfToEdit(half)
       setDialog('budget')
     })
-  }, [data.budgets, data.categories, dialog, loading, month, quickExpensePending, sharedReceipt, sharePending, user])
+  }, [data.budgets, data.categories, dialog, loading, month, quickExpensePending, quickMovementPending, sharedReceipt, sharePending, user])
 
   const metrics = useMemo(() => calculateFinanceMetrics(data, month), [data, month])
   const projectionBreakdown = useMemo(() => financeProjectionBreakdown(data, month), [data, month])
@@ -348,6 +378,7 @@ export function FinancePage() {
   const finish = async (message: string) => {
     setDialog(null); setEditingTransaction(undefined); setEditingAccount(undefined)
     setEditingRecurring(undefined); setEditingOccurrence(undefined); setEditingGoal(undefined); setSelectedGoal(undefined)
+    setEditingFundEntry(undefined); setEditingContribution(undefined)
     await refresh()
     window.dispatchEvent(new Event('faro:finance-updated'))
     setFeedback(message)
@@ -438,38 +469,35 @@ export function FinancePage() {
   if (loading && !data.categories.length) return <div className="page"><div className="planning-skeleton">Sincronizando finanzas…</div></div>
   if (error && !data.categories.length) return <div className="page"><EmptyState title="No pudimos cargar Finanzas" description={error} action={<Button onClick={refresh}>Reintentar</Button>} /></div>
 
-  return <div className={`page finance-os finance-os--${panel}`}>
+  return <div className={`page finance-os finance-os--${panel}`} aria-busy={loading}>
     <div className="finance-mobile-heading">
       <span>FARO · Finanzas</span>
       <h1>{panel === 'overview' ? 'Tu resumen' : panel === 'transactions' ? 'Movimientos' : panel === 'advisor' ? 'Proyecciones' : panel === 'plan' ? 'Tu plan' : ({ income: 'Ingresos', recurring: 'Gastos', savings: 'Ahorro', budgets: 'Presupuesto', goals: 'Metas', accounts: 'Cuentas', fund: 'Fondo' } as const)[panel]}</h1>
     </div>
     <nav className="finance-mobile-tabs" aria-label="Navegación de finanzas">
-      {([{ id: 'overview', label: 'Resumen' }, { id: 'income', label: 'Ingresos' }, { id: 'advisor', label: 'Proyecciones' }] as const).map(({ id, label }) => <button key={id} type="button" aria-current={panel === id ? 'page' : undefined} onClick={() => changePanel(id)}>{label}</button>)}
-      <button type="button" aria-haspopup="dialog" aria-expanded={mobileMoreOpen} aria-label="Más secciones de Finanzas" className={!['overview', 'income', 'advisor'].includes(panel) ? 'is-active' : ''} onClick={() => setMobileMoreOpen(true)}><Ellipsis size={18} aria-hidden="true" /><span>Más</span></button>
+      {([{ id: 'overview', label: 'Resumen' }, { id: 'advisor', label: 'Proyecciones' }, { id: 'income', label: 'Ingresos' }, { id: 'recurring', label: 'Gastos' }, { id: 'plan', label: 'Plan' }, { id: 'transactions', label: 'Movimientos' }, { id: 'budgets', label: 'Presupuestos' }] as const).map(({ id, label }) => <button key={id} type="button" aria-current={panel === id ? 'page' : undefined} onClick={() => changePanel(id)}>{label}</button>)}
+      <button type="button" aria-haspopup="dialog" aria-expanded={mobileMoreOpen} aria-label="Más secciones de Finanzas" className={['savings', 'goals', 'accounts', 'fund'].includes(panel) ? 'is-active' : ''} onClick={() => setMobileMoreOpen(true)}><Ellipsis size={18} aria-hidden="true" /><span>Más</span></button>
     </nav>
-    <div className="finance-mobile-shortcuts">
-      <button type="button" aria-current={panel === 'transactions' ? 'page' : undefined} onClick={() => changePanel('transactions')}><ReceiptText size={17} /><span>Movimientos</span><ArrowRight size={15} /></button>
-      <button type="button" aria-haspopup="dialog" aria-expanded={mobileMoreOpen} onClick={() => setMobileMoreOpen(true)}><WalletCards size={17} aria-hidden="true" /><span>Tus herramientas</span></button>
-    </div>
     <PageHeader
       eyebrow={format(new Date(), "EEEE, d 'de' MMMM", { locale: es })}
       title="Finanzas"
       trailing={panel === 'plan' ? <div className="finance-period finance-period--page-toolbar"><span className="finance-plan-current-date"><CalendarDays size={16} />{format(new Date(), 'd MMM yyyy', { locale: es })}</span><button aria-label="Actualizar datos financieros" title="Actualizar" onClick={() => void refresh()}><RefreshCw size={14} /></button></div> : <div className="finance-period finance-period--page-toolbar"><button aria-label="Mes anterior" onClick={() => setMonth((value) => subMonths(value, 1))}><ArrowLeft size={15} /></button><label><CalendarDays size={16} /><span>{format(month, "MMMM 'de' yyyy", { locale: es })}</span><input aria-label="Periodo" type="month" value={format(month, 'yyyy-MM')} onChange={(event) => event.target.value && setMonth(parseISO(`${event.target.value}-01`))} /></label><button aria-label="Mes siguiente" onClick={() => setMonth((value) => addMonths(value, 1))}><ArrowRight size={15} /></button><button aria-label="Actualizar datos financieros" title="Actualizar" onClick={() => void refresh()}><RefreshCw size={14} /></button><button aria-label="Descargar reporte financiero en PDF" title="Descargar reporte PDF" onClick={exportMonthlyReport}><FileDown size={14} /></button></div>}
     />
+    {(error || loading) && <div className={`finance-data-status${error ? ' finance-data-status--error' : ''}`} role={error ? 'alert' : 'status'}>
+      <div><strong>{error ? 'No pudimos actualizar tus finanzas' : 'Actualizando tus finanzas'}</strong><p>{error ? `${error} Estás viendo los últimos datos cargados.` : 'Conservamos tus datos mientras termina la actualización.'}</p></div>
+      {error && <Button variant="secondary" onClick={() => void refresh()}>Reintentar</Button>}
+    </div>}
     {feedback && <div className="finance-feedback" role="status">{feedback}<button aria-label="Cerrar aviso" onClick={() => setFeedback('')}>×</button></div>}
     {!data.accounts.length && <section className="finance-onboarding"><WalletCards /><div><strong>Crea tu primera cuenta</strong><p>El saldo inicial será la base de tus cálculos. Después podrás registrar tu primer ingreso sin ingresar datos bancarios sensibles.</p></div><Button onClick={() => setDialog('account')}>Crear cuenta</Button><Button variant="ghost" disabled title="Crea una cuenta antes de registrar el ingreso">Registrar ingreso</Button></section>}
     <div className="finance-tabs-row">
-      <nav className="finance-tabs" aria-label="Secciones financieras">
-        {([['overview', 'Resumen'], ['advisor', 'FARO Finanzas'], ['plan', 'Plan'], ['transactions', 'Movimientos'], ['income', 'Ingresos'], ['recurring', 'Gastos'], ['savings', 'Ahorro'], ['budgets', 'Presupuesto'], ['goals', 'Metas'], ['accounts', 'Cuentas'], ['fund', 'Fondo']] as const).map(([id, label]) =>
-          <button key={id} className={panel === id ? 'active' : ''} onClick={() => changePanel(id)}>{label}</button>)}
-      </nav>
+      <FinanceNavigation value={panel} onChange={changePanel} onManageCategories={() => setDialog('categories')} />
       <Button className="finance-new-movement" icon={<Plus size={17} />} disabled={!activeAccounts.length} onClick={() => setDialog('movementMenu')}>Nuevo movimiento</Button>
     </div>
     {(panel === 'overview' || panel === 'transactions') && <section className="finance-mobile-balance" aria-label="Resumen de saldo">
       <span>Disponible operativo hoy</span>
       <div className="finance-mobile-balance__amount"><strong>{formatMxn(metrics.availableBalanceCents)}</strong><small>MXN</small></div>
       <div className="finance-mobile-balance__detail">
-        <div><span>{panel === 'transactions' ? 'Ingresos del mes' : 'Saldo total hoy'}</span><strong>{formatMxn(panel === 'transactions' ? metrics.monthlyIncomeCents : metrics.actualBalanceCents)}</strong></div>
+        <div><span>Ingresos del mes</span><strong>{formatMxn(metrics.monthlyIncomeCents)}</strong></div>
         <div><span>{panel === 'transactions' ? 'Gastos del mes' : 'Gastos pendientes'}</span><strong>{formatMxn(panel === 'transactions' ? metrics.monthlyExpensesCents : projectionBreakdown.gastosPendientes)}</strong></div>
       </div>
     </section>}
@@ -482,19 +510,19 @@ export function FinancePage() {
       <nav className="finance-mobile-more" aria-label="Herramientas de Finanzas">
         {mobileFinanceSections.map(({ id, label, description, icon: Icon }) => <button key={id} type="button" aria-current={panel === id ? 'page' : undefined} onClick={() => { changePanel(id); setMobileMoreOpen(false) }}><i aria-hidden="true"><Icon size={21} /></i><span><strong>{label}</strong><small>{description}</small></span><ArrowRight size={17} /></button>)}
       </nav>
-      <div className="finance-mobile-more-utilities">
+      <div className="finance-mobile-more-utilities"><button type="button" onClick={() => { setMobileMoreOpen(false); setDialog('categories') }}>Gestionar categorías</button>
         <button type="button" onClick={() => { setMobileMoreOpen(false); void refresh() }}><RefreshCw size={17} />Actualizar datos</button>
         <button type="button" onClick={() => { setMobileMoreOpen(false); void exportMonthlyReport() }}><FileDown size={17} />Reporte PDF</button>
         <Link to="/dashboard"><House size={17} />Inicio de FARO<ArrowRight size={16} /></Link>
       </div>
     </Modal>
     <div className="finance-layout">
-    <div className="finance-content">
+    <div ref={financeContentRef} className="finance-content" role="region" aria-label="Contenido de Finanzas" tabIndex={0}>
 
-    {panel === 'plan' && user && <DebtPlanPanel data={data} userId={user.id} onRefresh={refresh} />}
+    {panel === 'plan' && user && <DebtPlanPanel data={data} userId={user.id} onRefresh={refresh} onEditMovement={item => { setEditingTransaction(item); setDialog('transaction') }} onDeleteMovement={item => setDeleting(item)} />}
 
     {panel === 'overview' && <>
-      <div className="finance-mobile-chart">{isFinanceMobile && <FinanceLiquidityRadar summary data={data} month={month} availableTodayCents={metrics.availableBalanceCents} snapshot={liquiditySnapshot} userId={user?.id} onSaveMinimumBuffer={async () => {}} />}</div>
+      <div className="finance-mobile-chart finance-overview-chart"><FinanceLiquidityRadar summary data={data} month={month} availableTodayCents={metrics.availableBalanceCents} snapshot={liquiditySnapshot} userId={user?.id} onSaveMinimumBuffer={async () => {}} /></div>
       <button className="finance-mobile-details-toggle" type="button" aria-expanded={showOverviewDetails} aria-controls="finance-overview-details" onClick={() => setShowOverviewDetails((value) => !value)}>{showOverviewDetails ? 'Ocultar detalles del resumen' : 'Ver más del resumen'}<ArrowDownRight size={17} /></button>
       <div id="finance-overview-details" className={`finance-overview-details${showOverviewDetails ? ' is-expanded' : ''}`}>
       <ProjectionStrip
@@ -509,7 +537,7 @@ export function FinancePage() {
       <div className="finance-summary-grid">
       <section className="finance-excel">
         <header><span className="eyebrow">Previsión mensual</span><h2>Planeado contra real</h2></header>
-        <div className="finance-table finance-table--summary"><div className="finance-table__head"><span>Concepto</span><span>Planeado</span><span>Real</span><span>Diferencia</span></div>
+        <div className="finance-table finance-table--summary finance-scroll-region" tabIndex={0} role="region" aria-label="Comparativo mensual: planeado contra real"><div className="finance-table__head"><span>Concepto</span><span>Planeado</span><span>Real</span><span>Diferencia</span></div>
           {summary.map((row) => <div className="finance-table__row" key={row.label}><strong>{row.label}</strong><span data-label="Planeado">{formatMxn(row.planned)}</span><span data-label="Real">{formatMxn(row.actual)}</span><span data-label="Diferencia" className={row.difference >= 0 ? 'positive' : 'negative'}>{formatMxn(row.difference)}</span></div>)}
         </div>
       </section>
@@ -537,7 +565,7 @@ export function FinancePage() {
       <div className="finance-mobile-movement-filters" role="group" aria-label="Filtrar movimientos por tipo">{([['all', 'Todos'], ['income', 'Ingresos'], ['expense', 'Gastos']] as const).map(([value, label]) => <button type="button" key={value} aria-pressed={typeFilter === value} onClick={() => setTypeFilter(value)}>{label}</button>)}</div>
       <button type="button" className="finance-mobile-filter-toggle" aria-expanded={mobileFiltersOpen} aria-controls="finance-movement-filters" onClick={() => setMobileFiltersOpen((value) => !value)}><Search size={16} />{mobileFiltersOpen ? 'Ocultar filtros' : 'Buscar y filtrar'}</button>
       <div id="finance-movement-filters" className={`finance-toolbar${mobileFiltersOpen ? ' is-expanded' : ''}`}><input aria-label="Buscar movimientos" placeholder="Buscar…" value={search} onChange={(event) => setSearch(event.target.value)} /><select aria-label="Cuenta" value={accountFilter} onChange={(event) => setAccountFilter(event.target.value)}><option value="all">Todas las cuentas</option>{data.accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><select aria-label="Tipo" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}><option value="all">Todos los tipos</option>{Object.entries(typeLabel).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select><select aria-label="Estado" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">Todos los estados</option>{Object.entries(statusLabel).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></div>
-      <div className="finance-table finance-table--transactions"><div className="finance-table__head"><span>Fecha</span><span>Descripción</span><span>Categoría / cuenta</span><span>Estado</span><span>Monto</span><span>Acciones</span></div>
+      <div className="finance-table finance-table--transactions finance-scroll-region" tabIndex={0} role="region" aria-label="Movimientos financieros"><div className="finance-table__head"><span>Fecha</span><span>Descripción</span><span>Categoría / cuenta</span><span>Estado</span><span>Monto</span><span>Acciones</span></div>
         {filteredTransactions.map((item, index) => <Fragment key={item.id}>
           {(index === 0 || filteredTransactions[index - 1]?.transactionDate !== item.transactionDate)
             && <div className="finance-date-group">{movementDateLabel(item.transactionDate)}</div>}
@@ -570,14 +598,14 @@ export function FinancePage() {
         <nav>
           <Button variant="ghost" icon={<Pencil size={13} />} onClick={() => { setEditingAccount(account); setDialog('account') }}>Editar</Button>
           {account.isActive
-            ? <Button variant="ghost" onClick={async () => { if (!user) return; await financeAccountRepository.archive(account.id, user.id); await finish('Cuenta archivada.') }}>Archivar</Button>
+            ? <><Button variant="ghost" onClick={async () => { if (!user) return; await financeAccountRepository.archive(account.id, user.id); await finish('Cuenta archivada.') }}>Archivar</Button><Button variant="ghost" icon={<Trash2 size={13} />} onClick={() => setDeletingAccount(account)}>Eliminar</Button></>
             : <><Button variant="ghost" icon={<RotateCcw size={13} />} onClick={async () => { if (!user) return; await financeAccountRepository.restore(account.id, user.id); await finish('Cuenta restaurada.') }}>Restaurar</Button><Button variant="ghost" icon={<Trash2 size={13} />} onClick={() => setDeletingAccount(account)}>Eliminar definitivamente</Button></>}
         </nav>
       </article>)}</div>
       {!data.accounts.length && <EmptyState title="Tus cuentas, en orden" description="Añade una cuenta para registrar movimientos y conocer tu saldo." action={<Button onClick={() => setDialog('account')}>Crear cuenta</Button>} />}
     </section>}
 
-    {panel === 'budgets' && <section className="finance-section finance-budgets"><SectionHead eyebrow="Control quincenal" title="Presupuestos por categoría" action="Definir presupuesto" onClick={() => { setBudgetHalfToEdit(undefined); setBudgetCategoryToEdit(undefined); setDialog('budget') }} />{budgets.length ? <div className="finance-budget-list">{budgets.map((budget) => { const half = budget.periodStart?.slice(-2) === '01' ? 'q1' : 'q2'; return <article key={budget.id} className={budget.usedPercentage > 100 ? 'exceeded' : budget.usedPercentage >= 85 ? 'warning' : budget.usedPercentage >= 70 ? 'attention' : ''}><div><div><small>{half === 'q1' ? 'Q1 · 1 al 15' : 'Q2 · 16 al cierre'}</small><strong>{budget.name ?? budget.category?.name ?? 'Presupuesto'}</strong></div><span>{budget.periodStart} — {budget.periodEnd}</span></div>{budget.previousPeriodAdjustmentCents < 0 && <div className="finance-budget-adjustment"><span>Exceso de Q1 aplicado a Q2</span><strong>{formatMxn(budget.previousPeriodAdjustmentCents)}</strong><small>Tu límite disponible se ajustó a {formatMxn(budget.effectivePlannedAmountCents)}.</small></div>}<div className="finance-budget-amounts"><span>Asignado<strong>{formatMxn(budget.plannedAmountCents)}</strong></span><span>Gastado<strong>{formatMxn(budget.actualCents)}</strong></span><span>Disponible<b>{formatMxn(budget.remainingCents)}</b></span></div><ProgressBar value={Math.min(100, budget.usedPercentage)} /><footer><span>{budget.usedPercentage.toFixed(0)}% utilizado · {budget.usedPercentage > 100 ? 'Excedido' : budget.usedPercentage >= 100 ? 'Límite alcanzado' : budget.usedPercentage >= 85 ? 'Alerta 85%' : budget.usedPercentage >= 70 ? 'Atención 70%' : 'En control'}</span><div className="finance-budget-actions"><b>{Math.max(0, 100 - budget.usedPercentage).toFixed(0)}% libre</b><Button variant="ghost" size="sm" icon={<Pencil size={12} />} onClick={() => { setBudgetHalfToEdit(half); setBudgetCategoryToEdit(budget.categoryId); setDialog('budget') }}>Editar {half.toUpperCase()}</Button></div></footer></article> })}</div> : <EmptyState title="Sin presupuesto quincenal" description="Define un límite por categoría para esta quincena." action={<Button onClick={() => { setBudgetHalfToEdit(undefined); setBudgetCategoryToEdit(undefined); setDialog('budget') }}>Crear presupuesto</Button>} />}</section>}
+    {panel === 'budgets' && <section className="finance-section finance-budgets"><SectionHead eyebrow="Control quincenal" title="Presupuestos por categoría" action="Definir presupuesto" onClick={() => { setBudgetHalfToEdit(undefined); setBudgetCategoryToEdit(undefined); setDialog('budget') }} />{budgets.length ? <div className="finance-budget-list">{budgets.map((budget) => { const half = budget.periodStart?.slice(-2) === '01' ? 'q1' : 'q2'; return <article key={budget.id} className={budget.usedPercentage > 100 ? 'exceeded' : budget.usedPercentage >= 85 ? 'warning' : budget.usedPercentage >= 70 ? 'attention' : ''}><div><div><small>{half === 'q1' ? 'Q1 · 1 al 15' : 'Q2 · 16 al cierre'}</small><strong>{budget.name ?? budget.category?.name ?? 'Presupuesto'}</strong></div><span>{budget.periodStart} — {budget.periodEnd}</span></div>{budget.previousPeriodAdjustmentCents < 0 && <div className="finance-budget-adjustment"><span>Exceso de Q1 aplicado a Q2</span><strong>{formatMxn(budget.previousPeriodAdjustmentCents)}</strong><small>Tu límite disponible se ajustó a {formatMxn(budget.effectivePlannedAmountCents)}.</small></div>}<div className="finance-budget-amounts"><span>Asignado<strong>{formatMxn(budget.plannedAmountCents)}</strong></span><span>Gastado<strong>{formatMxn(budget.actualCents)}</strong></span><span>Disponible<b>{formatMxn(budget.remainingCents)}</b></span></div><ProgressBar value={Math.min(100, budget.usedPercentage)} /><footer><span>{budget.usedPercentage.toFixed(0)}% utilizado · {budget.usedPercentage > 100 ? 'Excedido' : budget.usedPercentage >= 100 ? 'Límite alcanzado' : budget.usedPercentage >= 85 ? 'Alerta 85%' : budget.usedPercentage >= 70 ? 'Atención 70%' : 'En control'}</span><div className="finance-budget-actions"><b>{Math.max(0, 100 - budget.usedPercentage).toFixed(0)}% libre</b><Button variant="ghost" size="sm" icon={<Pencil size={12} />} onClick={() => { setBudgetHalfToEdit(half); setBudgetCategoryToEdit(budget.categoryId); setDialog('budget') }}>Editar {half.toUpperCase()}</Button><Button variant="ghost" size="sm" icon={<Trash2 size={12} />} aria-label={`Eliminar presupuesto ${budget.name ?? ''}`} onClick={() => setDeletingBudget(budget)}>Eliminar</Button></div></footer></article> })}</div> : <EmptyState title="Sin presupuesto quincenal" description="Define un límite por categoría para esta quincena." action={<Button onClick={() => { setBudgetHalfToEdit(undefined); setBudgetCategoryToEdit(undefined); setDialog('budget') }}>Crear presupuesto</Button>} />}</section>}
 
     {panel === 'income' && <div className="finance-expenses-grid">
       <section className="finance-mobile-income" aria-label="Resumen de ingresos del periodo">
@@ -590,12 +618,12 @@ export function FinancePage() {
       <ProjectionStrip items={projectionItems(incomeProjection)} />
       <section className="finance-expense-panel">
         <SectionHead eyebrow="Entradas previsibles" title="Ingresos recurrentes" action="+" actionLabel="Registrar ingreso recurrente" onClick={() => { setMovementPreset({ type: 'income' }); setDialog('recurring') }} />
-        <div className="finance-expense-list">{recurringForMonth.filter(({ item }) => item.type === 'income').map(({ item, expectedDate, occurrence }) => <RecurringCard key={occurrence?.id ?? item.id} item={item} expectedDate={expectedDate} occurrence={occurrence} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={data.categories.find((category) => category.id === item.categoryId)?.name} busy={savingPaymentId === (occurrence?.id ?? item.id)} onRegister={() => void registerRecurringPayment(item, occurrence)} onEdit={() => { setRecurringEditMode('period'); setEditingRecurring(item); setEditingOccurrence(occurrence); setDialog('recurring') }} onDelete={() => setDeletingRecurring(item)} />)}</div>
+        <FinanceList label="Ingresos recurrentes">{recurringForMonth.filter(({ item }) => item.type === 'income').map(({ item, expectedDate, occurrence }) => <RecurringCard key={occurrence?.id ?? item.id} item={item} expectedDate={expectedDate} occurrence={occurrence} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={data.categories.find((category) => category.id === item.categoryId)?.name} busy={savingPaymentId === (occurrence?.id ?? item.id)} onRegister={() => void registerRecurringPayment(item, occurrence)} onEdit={() => { setRecurringEditMode('period'); setEditingRecurring(item); setEditingOccurrence(occurrence); setDialog('recurring') }} onDelete={() => setDeletingRecurring(item)} />)}</FinanceList>
         {!recurringForMonth.some(({ item }) => item.type === 'income') && <EmptyState title="Sin ingresos recurrentes" description="Registra sueldo, honorarios o pagos periódicos esperados." />}
       </section>
       <section className="finance-expense-panel">
         <SectionHead eyebrow="Entradas extraordinarias" title="Ingresos eventuales" action="+" actionLabel="Registrar eventual" onClick={() => startMovement({ type: 'income', status: 'planned' })} />
-        <div className="finance-expense-list">{eventualIncomes.map((item) => <EventualIncomeCard key={item.id} item={item} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={data.categories.find((category) => category.id === item.categoryId)?.name} busy={savingPaymentId === item.id} onRegister={() => void registerEventualPayment(item)} onEdit={() => { setEditingTransaction(item); setDialog('transaction') }} onStatus={(next) => void status(item, next)} />)}</div>
+        <FinanceList label="Ingresos eventuales">{eventualIncomes.map((item) => <EventualIncomeCard key={item.id} item={item} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={data.categories.find((category) => category.id === item.categoryId)?.name} busy={savingPaymentId === item.id} onRegister={() => void registerEventualPayment(item)} onEdit={() => { setEditingTransaction(item); setDialog('transaction') }} onStatus={(next) => void status(item, next)} onDelete={() => setDeleting(item)} />)}</FinanceList>
         {!eventualIncomes.length && <EmptyState title="Sin ingresos eventuales" description="Planea bonos, ventas o pagos extraordinarios sin afectar el saldo real." />}
       </section>
     </div>}
@@ -604,16 +632,16 @@ export function FinancePage() {
       <ProjectionStrip items={projectionItems(expenseProjection)} />
       <section className="finance-expense-panel">
         <SectionHead eyebrow="Calendario financiero" title="Gastos recurrentes" action="+" actionLabel="Registrar gasto recurrente" onClick={() => setDialog('recurring')} />
-        <div className="finance-expense-list">{recurringForMonth.filter(({ item }) => item.type !== 'income' && item.type !== 'refund').map(({ item, expectedDate, occurrence }) => <RecurringCard key={occurrence?.id ?? item.id} item={item} expectedDate={expectedDate} occurrence={occurrence} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={[data.categories.find((category) => category.id === item.categoryId)?.name, item.debtId ? `Deuda: ${data.debtPlan?.debts.find(debt => debt.id === item.debtId)?.name ?? 'vinculada'}` : undefined].filter(Boolean).join(' · ')} busy={savingPaymentId === (occurrence?.id ?? item.id)} onRegister={() => void registerRecurringPayment(item, occurrence)} onEdit={() => { setRecurringEditMode('period'); setEditingRecurring(item); setEditingOccurrence(occurrence); setDialog('recurring') }} onDelete={() => setDeletingRecurring(item)} />)}</div>
+        <FinanceList label="Gastos recurrentes">{recurringForMonth.filter(({ item }) => item.type !== 'income' && item.type !== 'refund').map(({ item, expectedDate, occurrence }) => <RecurringCard key={occurrence?.id ?? item.id} item={item} expectedDate={expectedDate} occurrence={occurrence} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={[data.categories.find((category) => category.id === item.categoryId)?.name, item.debtId ? `Deuda: ${data.debtPlan?.debts.find(debt => debt.id === item.debtId)?.name ?? 'vinculada'}` : undefined].filter(Boolean).join(' · ')} busy={savingPaymentId === (occurrence?.id ?? item.id)} onRegister={() => void registerRecurringPayment(item, occurrence)} onEdit={() => { setRecurringEditMode('period'); setEditingRecurring(item); setEditingOccurrence(occurrence); setDialog('recurring') }} onDelete={() => setDeletingRecurring(item)} />)}</FinanceList>
         {!recurringForMonth.some(({ item }) => item.type !== 'income' && item.type !== 'refund') && <EmptyState title="Sin gastos recurrentes" description="Registra renta, servicios o cualquier gasto periódico." />}
       </section>
       <section className="finance-expense-panel">
         <SectionHead eyebrow="Una sola ocasión" title="Gastos eventuales" action="+" actionLabel="Registrar eventual" onClick={() => startMovement({ type: 'expense', status: 'planned' })} />
-        <div className="finance-expense-list">{monthlyTransactions.filter((item) => !item.recurringTransactionId && (item.type === 'expense' || item.type === 'debt_payment')).sort((a, b) => {
+        <FinanceList label="Gastos eventuales">{monthlyTransactions.filter((item) => !item.recurringTransactionId && (item.type === 'expense' || item.type === 'debt_payment')).sort((a, b) => {
           const rank = (status: FinanceTransactionStatus) => status === 'planned' ? 0 : status === 'pending' ? 1 : 2
           return rank(a.status) - rank(b.status) || a.transactionDate.localeCompare(b.transactionDate)
         }).map((item) => <article key={item.id}>
-          <header><div><strong>{item.description}</strong><small>{item.transactionDate}</small></div><div className="finance-expense-amount"><b>{formatMxn(item.amountCents)}</b><span className={`finance-occurrence-status finance-occurrence-status--${item.status === 'completed' ? 'paid' : item.status}`}>{item.status === 'completed' ? 'Pagado' : item.status === 'pending' ? 'Pospuesto' : statusLabel[item.status]}</span></div></header>
+          <header><div><strong>{item.description}</strong><small>{formatFinanceDate(item.transactionDate)}</small></div><div className="finance-expense-amount"><b>{formatMxn(item.amountCents)}</b><span className={`finance-occurrence-status finance-occurrence-status--${item.status === 'completed' ? 'paid' : item.status}`}>{item.status === 'completed' ? 'Pagado' : item.status === 'pending' ? 'Pospuesto' : statusLabel[item.status]}</span></div></header>
           <div className="finance-expense-meta"><small>{data.accounts.find((account) => account.id === item.accountId)?.name ?? 'Sin cuenta'}{data.categories.find((category) => category.id === item.categoryId)?.name ? ` · ${data.categories.find((category) => category.id === item.categoryId)?.name}` : ''}{item.debtId && ` · Deuda: ${data.debtPlan?.debts.find(debt => debt.id === item.debtId)?.name ?? 'vinculada'}`}</small></div>
           <footer>
             <Button disabled={item.status !== 'planned' || savingPaymentId === item.id} onClick={() => void registerEventualPayment(item)}>{item.status === 'completed' ? 'Pagado' : savingPaymentId === item.id ? 'Registrando…' : 'Registrar pago'}</Button>
@@ -622,18 +650,18 @@ export function FinancePage() {
             {!['completed', 'cancelled'].includes(item.status) && <Button variant="ghost" onClick={() => void status(item, 'cancelled')}>Cancelar</Button>}
             <Button variant="ghost" icon={<Trash2 size={13} />} onClick={() => setDeleting(item)}>Eliminar</Button>
           </footer>
-        </article>)}</div>
+        </article>)}</FinanceList>
         {!monthlyTransactions.some((item) => !item.recurringTransactionId && (item.type === 'expense' || item.type === 'debt_payment')) && <EmptyState title="Sin gastos eventuales" description="Planea una compra o pago futuro sin afectar todavía tu saldo real." />}
       </section>
     </div>}
 
     {panel === 'savings' && <SavingsPanel metrics={metrics} annual={annualTotals} year={month.getFullYear()} goals={data.goals} contributions={data.contributions} />}
 
-    {panel === 'fund' && <section className="finance-section finance-fund"><SectionHead eyebrow="Reserva flexible" title="Fondo de Ahorro" action="Registrar movimiento" onClick={() => setDialog('fundEntry')} /><div className="finance-fund-hero"><div><PiggyBank size={24} /><span>Saldo disponible en el fondo</span><strong>{formatMxn(fundMetrics.balanceCents)}</strong><small>Dinero reservado sin asignarlo a una meta específica.</small></div><div><span>Ritmo del mes</span><strong>{formatMxn(fundMetrics.monthCents)}</strong><small>{fundMetrics.lastEntry ? `Último movimiento · ${fundMetrics.lastEntry.entryDate}` : 'Haz tu primera aportación'}</small></div></div><div className="finance-fund-kpis"><FinanceKpi label="Aportado este año" value={fundMetrics.yearCents} /><FinanceKpi label="Última aportación" value={fundMetrics.lastEntry?.amountCents ?? 0} context={fundMetrics.lastEntry?.entryDate ?? 'Sin movimientos'} /></div><div className="finance-fund-history"><header><span>Fecha</span><span>Concepto</span><span>Monto</span></header>{data.savingsFundEntries.map(item=><article key={item.id}><time>{item.entryDate}</time><span>{item.description??(item.amountCents>0?'Aportación':'Retiro')}</span><strong className={item.amountCents>=0?'positive':'negative'}>{item.amountCents >= 0 ? '+' : '−'}{formatMxn(Math.abs(item.amountCents))}</strong></article>)}{!data.savingsFundEntries.length&&<EmptyState title="Fondo vacío" description="Reserva dinero sin asignarlo a una meta específica." />}</div></section>}
+    {panel === 'fund' && <section className="finance-section finance-fund"><SectionHead eyebrow="Reserva flexible" title="Fondo de Ahorro" action="Registrar movimiento" onClick={() => { setEditingFundEntry(undefined); setDialog('fundEntry') }} /><div className="finance-fund-hero"><div><PiggyBank size={24} /><span>Saldo disponible en el fondo</span><strong>{formatMxn(fundMetrics.balanceCents)}</strong><small>Dinero reservado sin asignarlo a una meta específica.</small></div><div><span>Ritmo del mes</span><strong>{formatMxn(fundMetrics.monthCents)}</strong><small>{fundMetrics.lastEntry ? `Último movimiento · ${fundMetrics.lastEntry.entryDate}` : 'Haz tu primera aportación'}</small></div></div><div className="finance-fund-kpis"><FinanceKpi label="Aportado este año" value={fundMetrics.yearCents} /><FinanceKpi label="Última aportación" value={fundMetrics.lastEntry?.amountCents ?? 0} context={fundMetrics.lastEntry?.entryDate ?? 'Sin movimientos'} /></div><div className="finance-fund-history"><header><span>Fecha</span><span>Concepto</span><span>Monto</span><span>Acciones</span></header>{data.savingsFundEntries.map(item=><article key={item.id}><time>{item.entryDate}</time><span>{item.description??(item.amountCents>0?'Aportación':'Retiro')}</span><strong className={item.amountCents>=0?'positive':'negative'}>{item.amountCents >= 0 ? '+' : '−'}{formatMxn(Math.abs(item.amountCents))}</strong><nav aria-label={`Acciones del fondo: ${item.description ?? item.entryDate}`}><Button size="sm" variant="ghost" icon={<Pencil size={13} />} onClick={() => { setEditingFundEntry(item); setDialog('fundEntry') }}>Editar</Button><Button size="sm" variant="ghost" icon={<Trash2 size={13} />} onClick={() => setDeletingFundEntry(item)}>Eliminar</Button></nav></article>)}{!data.savingsFundEntries.length&&<EmptyState title="Fondo vacío" description="Reserva dinero sin asignarlo a una meta específica." />}</div></section>}
 
     {panel === 'goals' && <section className="finance-section"><SectionHead eyebrow="Dirección" title="Metas financieras" action="Nueva meta" onClick={() => setDialog('goal')} /><div className="finance-goals">{data.goals.map((goal) => { const progress=goalProgress(goal.id,data);const target=goalTargetCents(goal.id,data);const spent=goalSpentCents(goal.id,data);const available=goalAvailableCents(goal.id,data);return <article className="finance-goal-summary" key={goal.id} onClick={()=>{setSelectedGoal(goal);setDialog('goalDetail')}}><header><Target /><div><strong>{goal.name}</strong><small>{goal.priority} · {goal.status}</small></div><b>{progress.percentage.toFixed(0)}%</b></header><ProgressBar value={progress.percentage}/><div className="finance-goal-metrics"><span>Objetivo total<strong>{formatMxn(target)}</strong></span><span>Total aportado<strong>{formatMxn(progress.savedCents)}</strong></span><span>Total gastado<strong>{formatMxn(spent)}</strong></span><span>Disponible en meta<strong>{formatMxn(available)}</strong></span><span>Pendiente por comprar<strong>{formatMxn(Math.max(0,target-spent))}</strong></span><span>Pendiente por financiar<strong>{formatMxn(Math.max(0,target-progress.savedCents))}</strong></span></div><footer onClick={event=>event.stopPropagation()}><Button variant="secondary" onClick={()=>{setSelectedGoal(goal);setDialog('goalDetail')}}>Ver detalle</Button><Button variant="secondary" onClick={()=>{setSelectedGoal(goal);setDialog('contribution')}}>Registrar aportación</Button><Button variant="ghost" onClick={()=>{setEditingGoal(goal);setDialog('goal')}}>Editar meta</Button>{goal.status==='active'&&<Button variant="ghost" onClick={async()=>{if(!user)return;await financeGoalRepository.save({...goal,status:'paused'},user.id);await finish('Meta pausada.')}}>Pausar</Button>}{goal.status==='paused'&&<Button variant="ghost" onClick={async()=>{if(!user)return;await financeGoalRepository.save({...goal,status:'active'},user.id);await finish('Meta reanudada.')}}>Reanudar</Button>}<Button variant="danger" icon={<Trash2 size={13}/>} onClick={()=>setDeletingGoal(goal)}>Eliminar meta</Button></footer></article>})}</div>{!data.goals.length&&<EmptyState title="Sin metas financieras" description="Convierte una intención de ahorro en una dirección medible."/>}</section>}
     </div>
-    <aside className="finance-side-kpis"><FinanceMetrics metrics={metrics} previous={previous} hasPreviousData={hasPreviousData} midMonthProjection={midMonthProjection} projection={baselineLiquidityProjection} projectionBreakdown={projectionBreakdown} month={month} /></aside>
+    {panel !== 'plan' && panel !== 'advisor' && <aside className="finance-side-kpis" aria-label="Resumen financiero" tabIndex={0}><FinanceMetrics metrics={metrics} previous={previous} hasPreviousData={hasPreviousData} midMonthProjection={midMonthProjection} projection={baselineLiquidityProjection} projectionBreakdown={projectionBreakdown} month={month} /></aside>}
     </div>
 
     <input ref={receiptInputRef} className="finance-receipt-input" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Importar comprobante" onChange={(event) => { const file = event.target.files?.[0]; if (file) setSharedReceipt(file); event.target.value = '' }} />
@@ -684,8 +712,18 @@ export function FinancePage() {
     />}
     {dialog === 'goal' && <GoalDialog initial={editingGoal} accounts={data.accounts.filter((item) => item.isActive)} onClose={() => { setDialog(null); setEditingGoal(undefined) }} onSave={async (item) => { if (!user) return; await financeGoalRepository.save(item, user.id); await finish('Meta guardada.') }} />}
     {dialog === 'contribution' && <ContributionDialog goal={selectedGoal} goals={data.goals.filter((item) => item.status === 'active')} accounts={data.accounts.filter((item) => item.isActive)} onClose={() => { setDialog(null); setSelectedGoal(undefined) }} onSave={async (item) => { if (!user) return; await financeGoalRepository.contribute(item, user.id); await finish('Aportación registrada y vinculada a la meta.') }} />}
-    {dialog === 'fundEntry' && data.savingsFund && <FundEntryDialog onClose={()=>setDialog(null)} onSave={async item=>{if(!user||!data.savingsFund)return;await financePlanningRepository.saveFundEntry({...item,fundId:data.savingsFund.id},user.id);await finish(item.amountCents>0?'Aportación al fondo registrada.':'Retiro del fondo registrado.')}} />}
-    {dialog === 'goalDetail' && selectedGoal && <GoalDetailModal goal={selectedGoal} data={data} onClose={()=>{setDialog(null);setSelectedGoal(undefined)}} onAdd={()=>{setSelectedGoalItem(undefined);setDialog('goalItem')}} onEdit={item=>{setSelectedGoalItem(item);setDialog('goalItem')}} onPurchase={item=>{setSelectedGoalItem(item);setDialog('purchaseItem')}} onDiscard={async item=>{if(!user)return;await financePlanningRepository.saveGoalItem({...item,status:'discarded'},user.id);await refresh();setFeedback('Artículo descartado.')}} onDelete={item=>setDeletingGoalItem(item)} />}
+    {dialog === 'fundEntry' && data.savingsFund && <FundEntryEditor fundId={data.savingsFund.id} initial={editingFundEntry} balanceCents={fundMetrics.balanceCents} onClose={() => { setDialog(null); setEditingFundEntry(undefined) }} onSave={async item => { if (!user) return; await financePlanningRepository.saveFundEntry(item, user.id); await finish(editingFundEntry ? 'Movimiento del fondo actualizado.' : 'Movimiento del fondo registrado.') }} />}
+    {dialog === 'categories' && <FinanceCategoryManager categories={data.categories} onClose={() => setDialog(null)} onSave={async category => { if (!user) throw new Error('Inicia sesión para administrar categorías.'); await financeCategoryRepository.save(category, user.id); await refresh() }} onDelete={async category => { if (!user) return; await financeCategoryRepository.remove(category.id, user.id); await refresh() }} />}
+    {dialog === 'editContribution' && editingContribution && <ReservedContributionEditor initial={editingContribution} goalName={data.goals.find(goal => goal.id === editingContribution.goalId)?.name ?? 'Meta'} onClose={() => { setEditingContribution(undefined); setDialog(selectedGoal ? 'goalDetail' : null) }} onSave={async contribution => { if (!user) return; await financeGoalRepository.updateReservedContribution(contribution, user.id); await finish('Aportación actualizada.') }} />}
+    <ConfirmDialog open={Boolean(deletingFundEntry)} title="Eliminar movimiento del fondo" description={`Eliminarás “${deletingFundEntry?.description ?? 'este movimiento'}” del fondo y se recalculará su saldo.`} confirmLabel="Eliminar movimiento" onClose={() => setDeletingFundEntry(undefined)} onConfirm={async () => { if (!user || !deletingFundEntry) return; try { if (fundMetrics.balanceCents - deletingFundEntry.amountCents < 0) throw new Error('Esta aportación ya se utilizó. Corrige primero los retiros vinculados al saldo del fondo.'); await financePlanningRepository.removeFundEntry(deletingFundEntry.id, user.id); setDeletingFundEntry(undefined); await finish('Movimiento del fondo eliminado.') } catch (reason) { setDeletingFundEntry(undefined); setFeedback(reason instanceof Error ? reason.message : 'No se pudo eliminar el movimiento.') } }} />
+    <ConfirmDialog open={Boolean(deletingContribution)} title="Eliminar aportación" description={deletingContribution?.transactionId ? 'Se eliminará también el movimiento de ahorro vinculado y se recalcularán los saldos de tu cuenta y tu meta.' : 'Se eliminará la aportación de dinero previamente apartado. No se modificará ningún movimiento de tus cuentas.'} confirmLabel="Eliminar aportación" onClose={() => { setDeletingContribution(undefined); setDialog(selectedGoal ? 'goalDetail' : null) }} onConfirm={async () => { if (!user || !deletingContribution) return; try { if (deletingContribution.transactionId) await financeTransactionRepository.remove(deletingContribution.transactionId, user.id); else await financeGoalRepository.removeReservedContribution(deletingContribution.id, user.id); setDeletingContribution(undefined); await finish('Aportación eliminada.') } catch (reason) { setDeletingContribution(undefined); setFeedback(reason instanceof Error ? reason.message : 'No se pudo eliminar la aportación.') } }} />
+    {dialog === 'goalDetail' && selectedGoal && <GoalDetailModal goal={selectedGoal} data={data} onEditContribution={contribution => {
+      if (contribution.transactionId) {
+        const transaction = data.transactions.find(item => item.id === contribution.transactionId)
+        if (!transaction) { setFeedback('Actualiza tus datos para cargar el movimiento de esta aportación.'); return }
+        setEditingTransaction(transaction); setDialog('transaction')
+      } else { setEditingContribution(contribution); setDialog('editContribution') }
+    }} onDeleteContribution={contribution => { setDialog(null); setDeletingContribution(contribution) }} onClose={()=>{setDialog(null);setSelectedGoal(undefined)}} onAdd={()=>{setSelectedGoalItem(undefined);setDialog('goalItem')}} onEdit={item=>{setSelectedGoalItem(item);setDialog('goalItem')}} onPurchase={item=>{setSelectedGoalItem(item);setDialog('purchaseItem')}} onDiscard={async item=>{if(!user)return;await financePlanningRepository.saveGoalItem({...item,status:'discarded'},user.id);await refresh();setFeedback('Artículo descartado.')}} onDelete={item=>setDeletingGoalItem(item)} />}
     {dialog === 'goalItem' && selectedGoal && <GoalItemDialog goal={selectedGoal} initial={selectedGoalItem} onClose={()=>setDialog('goalDetail')} onSave={async item=>{if(!user)return;await financePlanningRepository.saveGoalItem(item,user.id);await refresh();setFeedback('Artículo guardado.');setSelectedGoalItem(undefined);setDialog('goalDetail')}} />}
     {dialog === 'purchaseItem' && selectedGoalItem && <PurchaseItemDialog item={selectedGoalItem} accounts={activeAccounts} categories={data.categories.filter(item=>item.type==='expense'&&item.isActive)} transactions={data.transactions} onClose={()=>setDialog('goalDetail')} onSave={async (item,movement)=>{if(!user)return;if(movement)await financeTransactionRepository.save(movement,user.id);await financePlanningRepository.saveGoalItem(item,user.id);await refresh();setFeedback('Compra vinculada a la meta.');setDialog('goalDetail')}} />}
     <ConfirmDialog open={Boolean(deletingGoalItem)} title={deletingGoalItem?.transactionId?'Conservar movimiento financiero':'Eliminar artículo'} description={deletingGoalItem?.transactionId?'Este artículo tiene un movimiento asociado. El movimiento no se eliminará; el artículo se marcará como descartado.':'El artículo se eliminará definitivamente de la meta. ¿Deseas continuar?'} confirmLabel={deletingGoalItem?.transactionId?'Descartar artículo':'Eliminar'} onClose={()=>setDeletingGoalItem(undefined)} onConfirm={async()=>{if(!user||!deletingGoalItem)return;if(deletingGoalItem.transactionId)await financePlanningRepository.saveGoalItem({...deletingGoalItem,status:'discarded'},user.id);else await financePlanningRepository.removeGoalItem(deletingGoalItem.id,user.id);setDeletingGoalItem(undefined);await refresh();setFeedback(deletingGoalItem.transactionId?'Artículo descartado; el movimiento se conservó.':'Artículo eliminado.')}} />
@@ -702,7 +740,7 @@ export function FinancePage() {
       }
     }} />
     <ConfirmDialog open={Boolean(deleting)} title="Eliminar movimiento" description="Esta acción elimina el movimiento definitivamente y recalcula los saldos. ¿Deseas continuar?" onClose={() => setDeleting(undefined)} onConfirm={async () => { if (!user || !deleting) return; await financeTransactionRepository.remove(deleting.id, user.id); setDeleting(undefined); await finish('Movimiento eliminado.') }} />
-    <ConfirmDialog open={Boolean(deletingAccount)} title="Eliminar cuenta definitivamente" description="Solo se eliminará si no tiene movimientos ni relaciones. Si conserva historial, FARO bloqueará la operación y la cuenta permanecerá archivada." onClose={() => setDeletingAccount(undefined)} onConfirm={async () => {
+    <ConfirmDialog open={Boolean(deletingAccount)} title="Eliminar cuenta definitivamente" description="Solo se eliminará si no tiene movimientos ni relaciones. Si conserva historial, FARO bloqueará la operación y conservará la cuenta. Puedes archivarla desde su tarjeta." onClose={() => setDeletingAccount(undefined)} onConfirm={async () => {
       if (!user || !deletingAccount) return
       try {
         await financeAccountRepository.remove(deletingAccount.id, user.id)
@@ -754,7 +792,7 @@ function RecurringCard({ item, expectedDate, occurrence, account, category, busy
   </article>
 }
 
-function EventualIncomeCard({ item, account, category, busy, onRegister, onEdit, onStatus }: {
+function EventualIncomeCard({ item, account, category, busy, onRegister, onEdit, onStatus, onDelete }: {
   item: FinanceTransaction
   account?: string
   category?: string
@@ -762,6 +800,7 @@ function EventualIncomeCard({ item, account, category, busy, onRegister, onEdit,
   onRegister: () => void
   onEdit: () => void
   onStatus: (status: FinanceTransactionStatus) => void
+  onDelete: () => void
 }) {
   const collected = item.status === 'completed'
   const postponed = item.status === 'pending'
@@ -773,6 +812,7 @@ function EventualIncomeCard({ item, account, category, busy, onRegister, onEdit,
       <Button variant="ghost" onClick={onEdit}>Editar</Button>
       {!collected && <Button variant="ghost" onClick={() => onStatus(postponed ? 'planned' : 'pending')}>{postponed ? 'Marcar esperado' : 'Posponer'}</Button>}
       {!collected && <Button variant="ghost" onClick={() => onStatus('cancelled')}>Cancelar</Button>}
+      <Button variant="ghost" icon={<Trash2 size={13} />} onClick={onDelete}>Eliminar</Button>
     </footer>
   </article>
 }
@@ -813,7 +853,6 @@ function FinanceMetrics({ metrics, previous, hasPreviousData, midMonthProjection
     <div className="finance-kpi-group finance-kpi-group--position">
       <header><span>Posición de hoy</span></header>
       <FinanceKpi tone="available" featured icon={<Landmark />} label="Disponible operativo hoy" value={metrics.availableBalanceCents} context={`Cuentas activas − ahorro − Plan · ${todayLabel}`} />
-      <FinanceKpi tone="actual" icon={<CreditCard />} label="Saldo total hoy" value={metrics.actualBalanceCents} context={`Todas tus cuentas · ${todayLabel}`} />
     </div>
     <div className="finance-kpi-group finance-kpi-group--flow">
       <header><span>Realizado en {selectedMonthLabel}</span></header>
@@ -830,9 +869,9 @@ function FinanceMetrics({ metrics, previous, hasPreviousData, midMonthProjection
 
 function PeriodFlowChart({ flow }: { flow: { incomeCents: number; expenseCents: number; netCents: number } }) {
   const rows = [
-    { name: 'Ingresos', value: flow.incomeCents, color: '#f1f1ef' },
-    { name: 'Gastos', value: -flow.expenseCents, color: '#858a91' },
-    { name: 'Neto', value: flow.netCents, color: '#c5c8cb' },
+    { name: 'Ingresos', value: flow.incomeCents, color: 'var(--finance-chart-income, #f1f1ef)' },
+    { name: 'Gastos', value: -flow.expenseCents, color: 'var(--finance-chart-expense, #858a91)' },
+    { name: 'Neto', value: flow.netCents, color: 'var(--finance-chart-net, #c5c8cb)' },
   ]
   const compactAxis = (value: number) => {
     if (value === 0) return '0'
@@ -842,18 +881,19 @@ function PeriodFlowChart({ flow }: { flow: { incomeCents: number; expenseCents: 
   return <div className="finance-period-flow__chart">
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={rows} margin={{ top: 26, right: 18, bottom: 8, left: 2 }}>
-        <CartesianGrid vertical={false} stroke="#30343a" strokeDasharray="4 6" />
-        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#a8b0bb', fontSize: 9 }} interval={0} />
-        <YAxis axisLine={false} tickLine={false} width={42} tick={{ fill: '#9aa4b0', fontSize: 8 }} tickFormatter={compactAxis} />
+        <CartesianGrid vertical={false} stroke="var(--finance-chart-grid, #30343a)" strokeDasharray="4 6" />
+        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'var(--finance-chart-tick, #a8b0bb)', fontSize: 9 }} interval={0} />
+        <YAxis axisLine={false} tickLine={false} width={42} tick={{ fill: 'var(--finance-chart-tick, #9aa4b0)', fontSize: 8 }} tickFormatter={compactAxis} />
         <ReferenceLine y={0} stroke="#62676e" strokeDasharray="4 4" />
-        <Tooltip cursor={{ fill: 'rgba(255,255,255,.035)' }} formatter={(value) => formatMxn(Number(value))} contentStyle={{ background: '#1d2024', border: '1px solid #44484e', borderRadius: 10 }} labelStyle={{ color: '#f3f3f1' }} />
+        <Tooltip cursor={{ fill: 'rgba(255,255,255,.035)' }} formatter={(value) => formatMxn(Number(value))} contentStyle={{ background: 'var(--finance-tooltip-bg, #1d2024)', border: '1px solid var(--finance-tooltip-border, #44484e)', borderRadius: 10 }} labelStyle={{ color: 'var(--finance-tooltip-text, #f3f3f1)' }} />
         <Bar dataKey="value" maxBarSize={92} radius={[2, 2, 0, 0]}>
           {rows.map((row) => <Cell key={row.name} fill={row.color} />)}
-          <LabelList dataKey="value" position="top" formatter={(value) => formatMxn(Number(value ?? 0))} fill="#e5ebf3" fontSize={9} />
+          <LabelList dataKey="value" position="top" formatter={(value) => formatMxn(Number(value ?? 0))} fill="var(--finance-chart-tick, #e5ebf3)" fontSize={9} />
         </Bar>
       </BarChart>
     </ResponsiveContainer>
     <div className="finance-period-flow__legend"><span><i />Ingresos</span><span><i />Gastos</span><span><i />Resultado neto</span></div>
+    <dl className="finance-flow-summary" aria-label="Importes del flujo del periodo"><div><dt>Ingresos</dt><dd>{formatMxn(flow.incomeCents)}</dd></div><div><dt>Gastos</dt><dd>{formatMxn(flow.expenseCents)}</dd></div><div><dt>Resultado neto</dt><dd>{formatMxn(flow.netCents)}</dd></div></dl>
   </div>
 }
 
@@ -1014,16 +1054,19 @@ function TransactionDialog({ financeData, initial, preset, accounts, categories,
   return <Modal open panelClassName="finance-dialog" title={initial ? 'Editar movimiento' : 'Nuevo movimiento'} onClose={onClose}><form className="finance-form" onSubmit={submit}><div className="finance-form-grid"><label>Tipo<select value={type} onChange={(event) => changeType(event.target.value as FinanceTransactionType)}>{Object.entries(typeLabel).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label><label>Monto MXN<input type="number" min=".01" step=".01" required value={amount} onChange={(event) => setAmount(event.target.value)} /></label></div><label>Descripción<input autoFocus required maxLength={160} value={description} onChange={(event) => setDescription(event.target.value)} /></label><div className="finance-form-grid"><label>Fecha<input type="date" required value={date} onChange={(event) => setDate(event.target.value)} /></label><label>Estado<select value={status} onChange={(event) => setStatus(event.target.value as FinanceTransactionStatus)}>{Object.entries(statusLabel).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label></div><label>Cuenta<select required value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="">Selecciona</option>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>{type === 'transfer' ? <label>Cuenta destino<select required value={destinationAccountId} onChange={(event) => setDestinationAccountId(event.target.value)}><option value="">Selecciona</option>{accounts.filter((item) => item.id !== accountId).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label> : <><div className="finance-category-field"><label>Categoría<select required value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="">Selecciona</option>{matchingCategories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><Button type="button" variant="secondary" size="sm" icon={<Plus size={13} />} onClick={() => { setCreatingCategory((current) => !current); setError('') }}>Nueva categoría</Button></div>{creatingCategory && categoryType && <div className="finance-new-category"><div><strong>Nueva categoría de {categoryTypeLabel[categoryType]}</strong><small>Se guarda en tu cuenta y estará disponible en FARO Desktop y Mobile.</small></div><div><input autoFocus aria-label="Nombre de la nueva categoría" maxLength={60} placeholder="Ej. Deudas" value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void createCategory() } }} /><Button type="button" size="sm" loading={creatingCategorySaving} onClick={() => void createCategory()}>Añadir</Button></div></div>}{isPersonalExpense?<p className="finance-form-hint">{automaticBudget?`Vinculado automáticamente a Gastos Personales · ${automaticBudget.periodStart} — ${automaticBudget.periodEnd}`:'No existe un presupuesto personal para la fecha elegida. El gasto se guardará sin presupuesto.'}</p>:type==='expense'&&<label>Presupuesto asociado <span>opcional</span><select value={budgetId} onChange={event=>setBudgetId(event.target.value)}><option value="">Sin presupuesto</option>{budgets.map(item=><option key={item.id} value={item.id}>{item.name??'Gastos Personales'} · {item.periodStart}</option>)}</select></label>}</>}{(type === 'expense' || type === 'debt_payment') && <DebtMovementFields data={financeData} debtId={debtId} accountId={accountId} onDebt={value => { setDebtId(value); setPlanAmount('0'); setPrincipal(''); setSettlement(false) }} planAmount={planAmount} onPlanAmount={setPlanAmount} principal={principal} onPrincipal={setPrincipal} settlement={settlement} onSettlement={setSettlement} />} <label>Notas<textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} /></label><p className="privacy-note">No ingreses números de cuenta, tarjeta ni credenciales bancarias.</p><ErrorText value={error} /><div className="modal-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit" disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button></div></form></Modal>
 }
 
-function FundEntryDialog({onClose,onSave}:{onClose:()=>void;onSave:(item:{id:string;fundId:string;amountCents:number;entryDate:string;description?:string})=>Promise<void>}){const[kind,setKind]=useState<'deposit'|'withdraw'>('deposit');const[amount,setAmount]=useState('');const[date,setDate]=useState(format(new Date(),'yyyy-MM-dd'));const[description,setDescription]=useState('');const[error,setError]=useState('');return <Modal open panelClassName="finance-dialog" title="Movimiento del Fondo" onClose={onClose}><form className="finance-form" onSubmit={async event=>{event.preventDefault();const cents=moneyToCents(amount);if(cents<=0)return setError('Ingresa un monto mayor que cero.');try{await onSave({id:crypto.randomUUID(),fundId:'',amountCents:kind==='deposit'?cents:-cents,entryDate:date,description:description||undefined})}catch(reason){setError(reason instanceof Error?reason.message:'No se pudo guardar.')}}}><div className="finance-form-grid"><label>Operación<select value={kind} onChange={event=>setKind(event.target.value as typeof kind)}><option value="deposit">Aportar</option><option value="withdraw">Retirar</option></select></label><label>Monto MXN<input autoFocus required type="number" min=".01" step=".01" value={amount} onChange={event=>setAmount(event.target.value)}/></label></div><label>Fecha<input type="date" value={date} onChange={event=>setDate(event.target.value)}/></label><label>Descripción<input value={description} onChange={event=>setDescription(event.target.value)}/></label><p className="finance-form-hint">Es una reserva lógica: no modifica el saldo real de tus cuentas.</p><ErrorText value={error}/><div className="modal-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit">Guardar</Button></div></form></Modal>}
-
-function GoalDetailModal({goal,data,onClose,onAdd,onEdit,onPurchase,onDiscard,onDelete}:{goal:FinanceGoal;data:FinanceData;onClose:()=>void;onAdd:()=>void;onEdit:(item:FinanceGoalItem)=>void;onPurchase:(item:FinanceGoalItem)=>void;onDiscard:(item:FinanceGoalItem)=>Promise<void>;onDelete:(item:FinanceGoalItem)=>void}) {
+function GoalDetailModal({goal,data,onClose,onAdd,onEdit,onPurchase,onDiscard,onDelete,onEditContribution,onDeleteContribution}:{goal:FinanceGoal;data:FinanceData;onClose:()=>void;onAdd:()=>void;onEdit:(item:FinanceGoalItem)=>void;onPurchase:(item:FinanceGoalItem)=>void;onDiscard:(item:FinanceGoalItem)=>Promise<void>;onDelete:(item:FinanceGoalItem)=>void;onEditContribution:(item:FinanceGoalContribution)=>void;onDeleteContribution:(item:FinanceGoalContribution)=>void}) {
   const progress=goalProgress(goal.id,data);const target=goalTargetCents(goal.id,data);const spent=goalSpentCents(goal.id,data);const available=goalAvailableCents(goal.id,data)
   const items=data.goalItems.filter(item=>item.goalId===goal.id)
   return <Modal open panelClassName="finance-dialog finance-goal-detail-modal" title={`Detalle · ${goal.name}`} onClose={onClose}><div className="finance-goal-detail">
     <div className="finance-goal-detail__summary"><span>Objetivo<strong>{formatMxn(target)}</strong></span><span>Aportado<strong>{formatMxn(progress.savedCents)}</strong></span><span>Gastado<strong>{formatMxn(spent)}</strong></span><span>Disponible<strong>{formatMxn(available)}</strong></span><span>Por comprar<strong>{formatMxn(Math.max(0,target-spent))}</strong></span><span>Por financiar<strong>{formatMxn(Math.max(0,target-progress.savedCents))}</strong></span></div>
     <div className="finance-goal-detail__heading"><div><span className="eyebrow">Artículos</span><strong>{items.length} registrados</strong></div><Button size="sm" icon={<Plus size={14}/>} onClick={onAdd}>Añadir artículo</Button></div>
     <div className="finance-goal-item-list">{items.map(item=>{const movement=data.transactions.find(transaction=>transaction.id===item.transactionId);return <article key={item.id} onClick={()=>onEdit(item)}><div><strong>{item.name}</strong><small>{item.url?<a href={item.url} target="_blank" rel="noreferrer" onClick={event=>event.stopPropagation()}>Abrir enlace <ArrowUpRight size={11}/></a>:'Sin enlace'}</small></div><b>{formatMxn(item.priceCents)}</b><span>{item.priority}</span><span>{item.status}</span><small>{item.purchaseDate??'Sin compra'}</small><small title={movement?.description}>{movement?`Movimiento: ${movement.description}`:'Sin movimiento'}</small><nav onClick={event=>event.stopPropagation()}><button onClick={()=>onEdit(item)}>Editar</button>{item.status==='pending'&&<button onClick={()=>onPurchase(item)}>Comprar</button>}{item.status!=='discarded'&&<button onClick={()=>void onDiscard(item)}>Descartar</button>}<button className="danger" onClick={()=>onDelete(item)}>Eliminar</button></nav></article>})}{!items.length&&<EmptyState title="Sin artículos" description="Añade el primer artículo de esta meta." action={<Button onClick={onAdd}>Añadir artículo</Button>}/>}</div>
-  </div></Modal>
+
+    <section className="finance-contribution-history" aria-label="Aportaciones de la meta"><h3>Aportaciones</h3><div className="finance-record-list">{data.contributions.filter(item => item.goalId === goal.id).map(item => <article key={item.id}>
+      <div><strong>{formatMxn(item.amountCents)}</strong><small>{formatFinanceDate(item.contributionDate)} · {item.transactionId ? 'Movimiento vinculado' : 'Dinero previamente apartado'}</small><small>{item.description ?? item.notes}</small></div>
+      <nav aria-label={`Acciones de aportación ${formatMxn(item.amountCents)}`}><Button size="sm" variant="ghost" onClick={() => onEditContribution(item)}>Editar</Button><Button size="sm" variant="ghost" onClick={() => onDeleteContribution(item)}>Eliminar</Button></nav>
+    </article>)}</div>{!data.contributions.some(item => item.goalId === goal.id) && <p className="finance-form-hint">Aún no hay aportaciones registradas.</p>}</section>
+</div></Modal>
 }
 
 function GoalItemDialog({goal,initial,onClose,onSave}:{goal:FinanceGoal;initial?:FinanceGoalItem;onClose:()=>void;onSave:(item:Omit<FinanceGoalItem,'createdAt'|'updatedAt'>)=>Promise<void>}){const[name,setName]=useState(initial?.name??'');const[price,setPrice]=useState(initial?String(initial.priceCents/100):'');const[priority,setPriority]=useState<FinanceGoalItem['priority']>(initial?.priority??'medium');const[url,setUrl]=useState(initial?.url??'');const[notes,setNotes]=useState(initial?.notes??'');const[status,setStatus]=useState<FinanceGoalItem['status']>(initial?.status??'pending');const[error,setError]=useState('');return <Modal open panelClassName="finance-dialog" title={`Artículo · ${goal.name}`} onClose={onClose}><form className="finance-form" onSubmit={async event=>{event.preventDefault();if(!name.trim()||moneyToCents(price)<=0)return setError('Completa nombre y precio.');try{await onSave({id:initial?.id??crypto.randomUUID(),goalId:goal.id,name:name.trim(),priceCents:moneyToCents(price),priority,url:url||undefined,notes:notes||undefined,status,purchaseDate:initial?.purchaseDate,transactionId:initial?.transactionId})}catch(reason){setError(reason instanceof Error?reason.message:'No se pudo guardar.')}}}><label>Nombre<input autoFocus required value={name} onChange={event=>setName(event.target.value)}/></label><div className="finance-form-grid"><label>Precio<input type="number" min=".01" step=".01" required value={price} onChange={event=>setPrice(event.target.value)}/></label><label>Prioridad<select value={priority} onChange={event=>setPriority(event.target.value as typeof priority)}><option value="low">Baja</option><option value="medium">Media</option><option value="high">Alta</option><option value="critical">Crítica</option></select></label></div><label>Enlace opcional<input type="url" value={url} onChange={event=>setUrl(event.target.value)}/></label><label>Notas <span>opcional</span><textarea rows={3} value={notes} onChange={event=>setNotes(event.target.value)}/></label><label>Estado<select value={status} onChange={event=>setStatus(event.target.value as typeof status)}><option value="pending">Pendiente</option><option value="purchased">Comprado</option><option value="discarded">Descartado</option></select></label><ErrorText value={error}/><div className="modal-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit">Guardar</Button></div></form></Modal>}

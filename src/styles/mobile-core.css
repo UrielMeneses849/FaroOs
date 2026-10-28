@@ -340,7 +340,7 @@
   #root .today-context :is(.today-agenda-board, .today-workspaces-board) h2 { font-size: 18px; line-height: 1.4; }
   #root .today-context :is(.today-agenda-board, .today-workspaces-board) .eyebrow { font-size: 12px; }
   #root .today-context :is(.today-agenda-board, .today-workspaces-board) > header button { min-height: 44px; color: #d5d9df; font-size: 12px; }
-  #root .today-context .today-agenda-list { padding: 2px 16px; overflow: visible; }
+  #root .today-context .today-agenda-list { padding: 2px 16px; overflow: visible; overscroll-behavior-y: auto; }
   #root .today-context .today-agenda-list > button { grid-template-columns: 60px 6px minmax(0, 1fr); gap: 9px; min-height: 76px; padding: 15px 0; }
   #root .today-context .today-agenda-list time { color: #c4cad2; font-size: 12px; }
   #root .today-context .today-agenda-list strong { font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
@@ -354,7 +354,7 @@
   #root .today-context .today-unscheduled article span,
   #root .today-context .today-unscheduled > p { color: #a8afb7; font-size: 12px; line-height: 1.55; }
   #root .today-context .today-unscheduled article button { min-height: 44px; flex: 0 0 auto; padding: 0 4px; color: #d9dde2; font-size: 12px; }
-  #root .today-context .today-workspaces-board > div { padding: 12px; overflow: visible; scrollbar-gutter: auto; }
+  #root .today-context .today-workspaces-board > div { padding: 12px; overflow: visible; overscroll-behavior-y: auto; scrollbar-gutter: auto; }
   #root .today-context .today-workspace-card { border-color: #343a42; border-radius: 14px; background: #14171b; }
   #root .today-context .today-workspace-card > header { padding: 15px 13px; }
   #root .today-context .today-workspace-card > header :is(strong, b) { font-size: 14px; }

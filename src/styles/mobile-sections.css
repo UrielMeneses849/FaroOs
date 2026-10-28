@@ -145,7 +145,7 @@
   #root .journal-page .journal-toolbar > label { display:flex; grid-column:1/-1; gap:10px; min-width:0; min-height:50px; padding:0 14px; border:1px solid #3a3e45; border-radius:14px; background:#181b1f; }
   #root .journal-page .journal-toolbar input { min-width:0; min-height:48px; font-size:16px; }
   #root .journal-page .journal-toolbar > .button { min-width:0; padding-inline:9px; font-size:12px; }
-  #root .journal-page .journal-list { display:grid; gap:12px; height:auto; max-height:none; overflow:visible!important; flex:none!important; border:0; scrollbar-gutter:auto; }
+  #root .journal-page .journal-list { display:grid; gap:12px; height:auto; max-height:none; overflow:visible!important; flex:none!important; border:0; overscroll-behavior-y:auto; scrollbar-gutter:auto; }
   #root .journal-page .journal-entry { grid-template-columns:42px minmax(0,1fr); gap:11px 13px; padding:19px 16px 12px; border:1px solid #34383f; border-radius:18px; background:#181b1f; }
   #root .journal-page .journal-entry__date span { color:#e6e8eb; font-size:26px; }
   #root .journal-page .journal-entry__date small { display:block; margin-top:3px; color:#a0a6af; font-size:10px; line-height:1.5; }

@@ -9,7 +9,7 @@ import { addMonths, differenceInMinutes, eachDayOfInterval, endOfMonth, endOfWee
 import { es } from 'date-fns/locale'
 import { CalendarClock, ChevronLeft, ChevronRight, Pencil, Plus, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { Button, ConfirmDialog, EmptyState, Modal } from '../components/common'
 import { StatusSelector } from '../components/common/StatusSelector'
 import { PageHeader } from '../components/layout'
@@ -36,7 +36,7 @@ import { calendarEntryRepository } from '../repositories/calendarEntryRepository
 import { useFaroStore } from '../store'
 import type { Priority, Task, TaskStatus } from '../types'
 
-const googleCalendarLogoUrl = 'https://www.gstatic.com/calendar/images/dynamiclogo_2020q4/calendar_31_2x.png'
+import googleCalendarLogoUrl from '../assets/google-calendar.png'
 const calendarWorkspaceOrder = ['BIMSA', 'BBVA', 'FARO OS', 'Nexvora', 'Portfolio', 'Portafolio', 'Personal']
 const calendarWorkspaceColors: Record<string, string> = {
   BIMSA: '#f3f3f1',
@@ -79,6 +79,7 @@ function calendarTitleFormat(arg: { start: { marker: Date }; end?: { marker: Dat
 export function CalendarPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const { data, loading, error, forceRefresh, google } = useCalendarData()
   const { data: workspaces } = useWorkspaces()
   const tasks = useFaroStore((state) => state.tasks)
@@ -100,7 +101,8 @@ export function CalendarPage() {
   const [creatingDuration, setCreatingDuration] = useState<number>()
   const [creatingWorkspace, setCreatingWorkspace] = useState<string>()
   const [creatingKind, setCreatingKind] = useState<'event' | 'task'>('task')
-  const quickEventPending = useRef(new URLSearchParams(window.location.search).get('quick') === 'event')
+  const quickEventPending = new URLSearchParams(location.search).get('quick') === 'event'
+  const consumedQuickLocation = useRef<string | null>(null)
   const [selected, setSelected] = useState<CalendarItem | null>(null)
   const [editing, setEditing] = useState<Task | null>(null)
   const [finishedTask, setFinishedTask] = useState<Task | null>(null)
@@ -160,19 +162,25 @@ export function CalendarPage() {
   }
 
   useEffect(() => {
-    if (!quickEventPending.current || loading || !activeWorkspaces.length) return
-    quickEventPending.current = false
-    const url = new URL(window.location.href)
-    url.searchParams.delete('quick')
-    window.history.replaceState(window.history.state, '', url)
-    const start = new Date()
-    start.setSeconds(0, 0)
-    start.setMinutes(Math.ceil(start.getMinutes() / 30) * 30)
-    setCreatingKind('event')
-    setCreatingAt(start.toISOString())
-    setCreatingDuration(30)
-    setCreatingWorkspace(activeWorkspaces.find((workspace) => workspace.name === 'Personal')?.id ?? activeWorkspaces[0]?.id)
-  }, [activeWorkspaces, loading])
+    if (!quickEventPending || loading || !activeWorkspaces.length) return
+    const entry = `${location.key}:${location.search}`
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled || consumedQuickLocation.current === entry) return
+      consumedQuickLocation.current = entry
+      const start = new Date()
+      start.setSeconds(0, 0)
+      start.setMinutes(Math.ceil(start.getMinutes() / 30) * 30)
+      setCreatingKind('event')
+      setCreatingAt(start.toISOString())
+      setCreatingDuration(30)
+      setCreatingWorkspace(activeWorkspaces.find((workspace) => workspace.name === 'Personal')?.id ?? activeWorkspaces[0]?.id)
+      const search = new URLSearchParams(location.search)
+      search.delete('quick')
+      navigate({ pathname: location.pathname, search: search.toString() ? `?${search}` : '', hash: location.hash }, { replace: true, state: location.state })
+    })
+    return () => { cancelled = true }
+  }, [activeWorkspaces, loading, location, navigate, quickEventPending])
 
   useEffect(() => {
     const surface = calendarSurfaceRef.current

@@ -10,8 +10,8 @@ describe('MobileNavigation', () => {
     const onQuick = vi.fn()
     render(<MemoryRouter initialEntries={['/calendar']}><MobileNavigation onQuick={onQuick} /></MemoryRouter>)
 
-    expect(screen.getByRole('link', { name: /Dashboard/ })).toHaveAttribute('href', '/dashboard')
-    expect(screen.getByRole('link', { name: /Backlog/ })).toHaveAttribute('href', '/backlog')
+    expect(screen.getByRole('link', { name: /Inicio/ })).toHaveAttribute('href', '/dashboard')
+    expect(screen.getByRole('link', { name: /Pendientes/ })).toHaveAttribute('href', '/backlog')
     expect(screen.getByRole('link', { name: /Calendario/ })).toHaveClass('mobile-nav__link--active')
     expect(screen.getByRole('link', { name: /Finanzas/ })).toHaveAttribute('href', '/finance')
 

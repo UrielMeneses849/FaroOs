@@ -34,3 +34,8 @@
 .dp-forecast-payoff strong { color: #8de5b9; }
 .dp-forecast-payoff p { font-size: 12px; }
 .dp-timeline-row { display: contents; }
+
+.dp-timeline-scroll:focus-visible {
+  outline: 2px solid var(--text-primary, #a9bfff);
+  outline-offset: -3px;
+}

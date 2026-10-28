@@ -29,13 +29,27 @@ describe('Mini state and hover intent', () => {
   })
 })
 describe('Mini voice states', () => {
+  it('rejects a new voice turn during processing or a pending confirmation', () => {
+    machine.voice({ state: 'executing' })
+    expect(machine.invoke()).toBe(false)
+    expect(state()).toBe('executing')
+    machine.voice({ state: 'awaiting_confirmation', pendingAction: { requestId: 'pending', summary: 'Prueba' } as unknown as PendingVoiceAction })
+    expect(machine.invoke()).toBe(false)
+    expect(state()).toBe('awaiting_confirmation')
+  })
+  it('returns to the base surface without manufacturing a success after ready alone', () => {
+    machine.voice({ state: 'consulting' }); wait(300)
+    machine.voice({ state: 'ready' })
+    expect(state()).toBe('ambient')
+    expect(machine.getSnapshot().snapshot.feedback).toBeUndefined()
+  })
   it('listens immediately and holds understanding for 200 ms without delaying Voice', () => {
     machine.invoke(); expect(state()).toBe('listening')
     machine.voice({ state: 'understanding' }); wait(30)
     machine.voice({ state: 'speaking', feedback: 'Listo.' }); expect(state()).toBe('understanding')
     wait(170); expect(state()).toBe('speaking')
     machine.voice({ state: 'ready', feedback: 'Listo.' }); expect(state()).toBe('success')
-    wait(1199); expect(state()).toBe('success'); wait(1); expect(state()).toBe('ambient')
+    wait(3499); expect(state()).toBe('success'); wait(1); expect(state()).toBe('ambient')
   })
   it('does not flash consulting for a fast operation', () => {
     machine.voice({ state: 'understanding' }); machine.voice({ state: 'consulting' }); wait(100)
@@ -97,7 +111,7 @@ describe('Wake standby is a presentation boundary, not a microphone stop', () =>
     expect(state()).toBe('listening')
     machine.voice({ state: 'speaking' })
     machine.voice({ state: 'listening', waitingForWake: true })
-    expect(state()).toBe('success'); wait(1200); expect(state()).toBe('ambient')
+    expect(state()).toBe('ambient'); wait(1200); expect(state()).toBe('ambient')
   })
   it('shows executing even when the Core retains its pending action during the request', () => {
     const pendingAction = { id: 'pending', summary: 'Prueba', toolName: 'registerExpense' } as unknown as PendingVoiceAction

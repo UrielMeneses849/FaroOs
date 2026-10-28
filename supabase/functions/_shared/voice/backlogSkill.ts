@@ -41,7 +41,7 @@ function taskLine(task: TaskRow, workspaces: Workspace[], timezone: string) {
 }
 
 function statusLabel(status: string) {
-  return ({ todo: 'Por hacer', doing: 'En progreso', blocked: 'En revisión', done: 'Completado' } as Record<string, string>)[status] ?? status
+  return ({ todo: 'Por hacer', doing: 'En progreso', waiting: 'En espera', blocked: 'En revisión', done: 'Completado' } as Record<string, string>)[status] ?? status
 }
 
 function priorityLabel(priority: string) {
@@ -166,6 +166,7 @@ function durationLabel(minutes: number) {
 
 function statusFromMessage(message: string): BacklogStatus | undefined {
   const normalized = normalizeVoiceText(message)
+  if (/\b(?:en espera|dependencia|dependencias|esperando a)\b/.test(normalized)) return 'waiting'
   if (/\b(?:terminad[ao]|completad[ao]|marca(?:la)? como terminad[ao]|completa)\b/.test(normalized)) return 'done'
   if (/\b(?:reabre|regresa.*por hacer|por hacer)\b/.test(normalized)) return 'todo'
   if (/\b(?:en progreso|progreso)\b/.test(normalized)) return 'doing'

@@ -1,4 +1,4 @@
-import { ChevronDown, LogOut, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { ChevronDown, LogOut, PanelLeftClose, PanelLeftOpen, Sun, Target } from 'lucide-react'
 import { useId, useState, type SyntheticEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { NavLink, useLocation } from 'react-router-dom'
@@ -8,16 +8,33 @@ import { isFaroDesktop } from '../../desktop/desktopBridge'
 import orbUrl from '../../assets/faro-orb-v1.png'
 
 interface SidebarProps {
+  variant?: 'default' | 'paper'
   collapsed: boolean
   onToggleCollapsed: () => void
   openGroups: Partial<Record<NavigationGroup['id'], boolean>>
   onToggleGroup: (groupId: NavigationGroup['id']) => void
 }
 
-export function Sidebar({ collapsed, onToggleCollapsed, openGroups, onToggleGroup }: SidebarProps) {
+export function Sidebar({ variant = 'default', collapsed, onToggleCollapsed, openGroups, onToggleGroup }: SidebarProps) {
   const { signOut } = useAuth()
   const { pathname } = useLocation()
   const desktop = isFaroDesktop()
+  const primaryIds = ['dashboard', 'finance', 'backlog', 'calendar']
+  const personalIds = ['health', 'journal', 'needs']
+  const all = navigationGroups.flatMap((group) => group.children)
+  const groups: readonly NavigationGroup[] = variant === 'paper' ? [
+    { ...navigationGroups[0], children: primaryIds.map((id) => {
+      const item = all.find((entry) => entry.id === id)!
+      return { ...item, label: id === 'dashboard' ? 'Inicio' : id === 'backlog' ? 'Pendientes' : item.label }
+    }) },
+    { ...navigationGroups[1], collapsible: false, children: [
+      ...personalIds.map((id) => all.find((entry) => entry.id === id)!),
+      { id: 'goals', label: 'Objetivos', icon: Target, route: '/goals', activePrefix: '/goals/' },
+      { id: 'today', label: 'Hoy', icon: Sun, route: '/today' },
+      ...all.filter((item) => item.id === 'vault'),
+    ] },
+    ...navigationGroups.filter((group) => group.id === 'device' || group.id === 'faro'),
+  ] : navigationGroups
   const navId = useId()
   const [tooltip, setTooltip] = useState<{ label: string; top: number } | null>(null)
   const showLabel = (event: SyntheticEvent) => {
@@ -53,7 +70,7 @@ export function Sidebar({ collapsed, onToggleCollapsed, openGroups, onToggleGrou
       </div>
 
       <nav id={navId} className="sidebar__nav sidebar-nav-v2" aria-label="Navegación principal">
-        {navigationGroups.map((group) => {
+        {groups.map((group) => {
           const children = group.children.filter((item) => !item.desktopOnly || desktop)
           if (!children.length) return null
           const isGroupActive = children.some((item) => navigationItemIsActive(item, pathname))
@@ -70,13 +87,11 @@ export function Sidebar({ collapsed, onToggleCollapsed, openGroups, onToggleGrou
           </section>
 
           if (!group.collapsible) {
-            const item = children[0]
-            const ItemIcon = item.icon
-            return <section className="sidebar-group sidebar-group--inicio" key={group.id}>
+            return <section className={`sidebar-group sidebar-group--flat sidebar-group--${group.id}`} key={group.id}>
               <span className="sidebar-group__label">{group.label}</span>
-              <NavLink to={item.route} className={`sidebar-child-link ${navigationItemIsActive(item, pathname) ? 'sidebar-child-link--active' : ''}`}>
-                <ItemIcon size={18} aria-hidden="true" /><span>{item.label}</span>
-              </NavLink>
+              {children.map((item) => <NavLink key={item.id} to={item.route} className={`sidebar-child-link ${navigationItemIsActive(item, pathname) ? 'sidebar-child-link--active' : ''}`}>
+                <item.icon size={18} aria-hidden="true" /><span>{item.label}</span>
+              </NavLink>)}
             </section>
           }
 

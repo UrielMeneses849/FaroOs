@@ -17,4 +17,11 @@ describe('Backlog deterministic fast path', () => {
     expect(routeBacklogIntent('Reabre esa tarea.')).toMatchObject({ intent: 'update_backlog_status', entities: { status: 'todo' } })
     expect(routeBacklogIntent('Elimínala.')).toMatchObject({ intent: 'delete_backlog_task' })
   })
+
+  it('distingue la espera externa de revisión y permite consultar dependencias', () => {
+    expect(routeBacklogIntent('Pon la segunda en espera.')).toMatchObject({ intent: 'update_backlog_status', entities: { ordinal: 2, status: 'waiting' } })
+    expect(routeBacklogIntent('¿Qué tareas tengo en espera?')).toMatchObject({ intent: 'list_tasks_by_status', entities: { status: 'waiting' } })
+    expect(routeBacklogIntent('¿Qué dependencias tengo?')).toMatchObject({ intent: 'list_tasks_by_status', entities: { status: 'waiting' } })
+    expect(routeBacklogIntent('Pon la segunda en revisión.')).toMatchObject({ intent: 'update_backlog_status', entities: { status: 'blocked' } })
+  })
 })

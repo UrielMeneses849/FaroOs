@@ -1,4 +1,4 @@
-import { Check, Flag, FolderKanban, Lightbulb, Target, Zap } from 'lucide-react'
+import { Check, Flag, FolderKanban, Lightbulb, Mic, Target, Zap } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { Button, Modal } from '../../components/common'
 import { useFaroStore } from '../../store'
@@ -22,7 +22,7 @@ const priorities: Array<{ value: Priority; label: string }> = [
 ]
 const initialValues: CaptureValues = { title: '', kind: 'idea', area: 'personal', description: '', priority: 'medium', date: '', projectId: '', goalId: '' }
 
-export function QuickCaptureDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function QuickCaptureDialog({ open, onClose, onVoice }: { open: boolean; onClose: () => void; onVoice?: () => void }) {
   const [values, setValues] = useState<CaptureValues>(initialValues)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [saved, setSaved] = useState(false)
@@ -64,6 +64,7 @@ export function QuickCaptureDialog({ open, onClose }: { open: boolean; onClose: 
         <div className="capture-success" role="status"><div><Check /></div><strong>Capturado</strong><span>Ya está seguro en tu backlog.</span></div>
       ) : (
         <form className="capture-form" onSubmit={submit}>
+          {onVoice && <button type="button" className="day-capture-voice" onClick={onVoice}><Mic size={18} />Hablar con FARO</button>}
           <label className="capture-title">
             <span className="sr-only">Título</span>
             <Zap size={18} aria-hidden="true" />

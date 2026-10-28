@@ -1,0 +1,114 @@
+/* The selected Mi día concept, contained entirely in the existing mobile PWA. */
+#root .page.mobile-day-dashboard { --day-page: #0d0f10; --day-surface: #131619; --day-border: #2b3035; --day-text: #f5f5f2; --day-muted: #a8afb9; --day-blue: #56b3ff; display: grid; width: 100%; min-width: 0; gap: 12px; min-height: 0; height: auto; margin: 0; padding: 30px 14px 16px; color: var(--day-text); background: var(--day-page); }
+#root .mobile-day-dashboard * { min-width: 0; }
+#root .day-heading { margin: 0 3px 7px; }
+#root .day-heading h1 { margin: 0; font-size: 38px; font-weight: 600; letter-spacing: -.05em; line-height: 1.18; }
+#root .day-heading p { margin: 6px 0 0; color: var(--day-muted); font-size: 17px; line-height: 1.5; }
+#root .day-heading time { display: block; }
+#root .day-heading time::first-letter { text-transform: uppercase; }
+#root .mobile-day-dashboard :is(button, a) { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+#root .mobile-day-dashboard :is(button, a, input):focus-visible { outline: 2px solid var(--day-blue); outline-offset: 3px; }
+#root .day-gadget, #root .day-mini { border: 1px solid var(--day-border); border-radius: 19px; background: var(--day-surface); }
+#root .mobile-day-dashboard h2 { margin: 0; color: var(--day-muted); font-size: 11px; font-weight: 500; letter-spacing: .11em; line-height: 1.5; text-transform: uppercase; }
+#root .day-next { min-height: 124px; padding: 18px 20px 17px; }
+#root .day-next__event { display: grid; grid-template-columns: minmax(0, 1fr) 34px; gap: 9px; align-items: center; margin-top: 10px; padding-left: 12px; border-left: 3px solid var(--day-blue); color: var(--day-text); text-decoration: none; }
+#root .day-next__event strong { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 19px; font-weight: 600; line-height: 1.3; letter-spacing: -.025em; overflow-wrap: anywhere; }
+#root .day-next__event span { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; font-size: 13px; line-height: 1.5; }
+#root .day-next__event span > svg { flex-shrink: 0; color: var(--day-muted); }
+#root .day-next__event time { font-weight: 600; }
+#root .day-next__event i { font-style: normal; color: var(--day-muted); }
+#root .day-next__event b { color: var(--day-blue); font-weight: 500; }
+#root .day-next__event > svg { justify-self: end; width: 34px; height: 34px; padding: 7px; border: 1px solid var(--day-border); border-radius: 50%; }
+#root .day-priorities { min-height: 190px; padding: 16px 19px 7px; }
+#root .day-priorities > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#root .day-priorities > header > a { display: grid; width: 44px; height: 30px; margin: -7px -10px -7px 0; place-items: center; color: var(--day-muted); }
+#root .day-priorities ul { display: grid; margin: 8px 0 0; padding: 0; list-style: none; }
+#root .day-priorities li { display: grid; grid-template-columns: 35px minmax(0, 1fr); gap: 8px; min-height: 48px; align-items: center; border-top: 1px solid var(--day-border); }
+#root .day-priorities li:first-child { border-top: 0; }
+#root .day-priority-check { display: grid; width: 35px; min-height: 46px; place-items: center start; cursor: pointer; }
+#root .day-priority-check input { appearance: none; width: 21px; height: 21px; min-height: 0; margin: 0; border: 1.5px solid #c5c9ce; border-radius: 5px; background: transparent; cursor: pointer; }
+#root .day-priority-title { display: block; width: 100%; min-height: 46px; padding: 10px 0; border: 0; color: var(--day-text); background: transparent; text-align: left; font: inherit; font-size: 15px; line-height: 1.45; overflow-wrap: anywhere; cursor: pointer; }
+#root .day-mini-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+#root .day-mini { display: flex; min-height: 155px; flex-direction: column; gap: 12px; padding: 17px 15px 13px; }
+#root .day-mini > header { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+#root .day-mini > header > svg { color: #c5c9ce; }
+#root .day-mini__value { display: block; margin-top: 1px; font-size: clamp(21px, 6.25vw, 29px); font-weight: 600; line-height: 1.3; letter-spacing: -.045em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+#root .day-money > a { display: flex; min-height: 35px; align-items: center; gap: 3px; margin-top: auto; color: var(--day-blue); text-decoration: none; font-size: 13px; font-weight: 500; }
+#root .day-focus__toggle { display: flex; width: calc(100% + 4px); min-height: 39px; align-items: center; justify-content: center; gap: 5px; margin: auto -2px 0; padding: 7px 4px; border: 1px solid var(--day-border); border-radius: 10px; color: var(--day-text); background: transparent; font: inherit; font-size: 11px; font-weight: 500; cursor: pointer; }
+#root .day-focus__toggle > svg { flex-shrink: 0; }
+#root .day-focus__reset { display: flex; align-items: center; justify-content: center; gap: 4px; min-height: 30px; margin: -9px 0 -9px; padding: 3px; border: 0; background: transparent; color: var(--day-muted); font: inherit; font-size: 11px; cursor: pointer; }
+#root .day-focus__finished { font-size: 11px; color: var(--day-blue); }
+#root .day-capture { display: flex; width: 100%; min-height: 55px; align-items: center; justify-content: center; gap: 12px; margin-top: 1px; padding: 9px 12px; border: 0; border-radius: 16px; color: #111316; background: #f5f5f2; font: inherit; font-size: 16px; font-weight: 600; letter-spacing: -.02em; cursor: pointer; }
+#root .day-capture img { width: 32px; height: 32px; flex-shrink: 0; object-fit: contain; }
+#root .day-state { display: grid; align-content: center; gap: 7px; min-height: 68px; margin: 8px 0 0; color: var(--day-muted); font-size: 13px; line-height: 1.5; }
+#root .day-state :is(p, strong) { margin: 0; font-weight: 400; }
+#root .day-state :is(a, button), #root .day-cache-notice button, #root .day-sync-notice button, #root .day-money__state button { display: inline-flex; align-items: center; gap: 4px; width: fit-content; min-height: 30px; padding: 0; border: 0; background: transparent; color: var(--day-blue); font: inherit; text-decoration: none; cursor: pointer; }
+#root .day-cache-notice, #root .day-sync-notice { margin: 6px 0 0; color: var(--day-muted); font-size: 11px; line-height: 1.5; }
+#root .day-money__state { display: grid; min-height: 38px; align-content: center; gap: 5px; font-size: 13px; line-height: 1.45; color: var(--day-muted); }
+#root .day-undo { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 8px 12px; border: 1px solid var(--day-border); border-radius: 12px; color: var(--day-muted); background: var(--day-surface); font-size: 12px; }
+#root .day-undo > span { flex: 1 1 170px; overflow-wrap: anywhere; }
+#root .day-undo > button { display: inline-flex; min-height: 36px; align-items: center; gap: 5px; padding: 4px; border: 0; background: transparent; color: var(--day-blue); font: inherit; cursor: pointer; }
+.day-capture-voice { display: flex; align-items: center; gap: 8px; min-height: 44px; margin-bottom: 16px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 11px; color: var(--text-primary); background: transparent; font: inherit; cursor: pointer; }
+@media (max-width: 760px) {
+  body:has(.mobile-day-dashboard) .app-shell--mobile-ready .mobile-topbar { background: #0d0f10; border-bottom-color: transparent; }
+  body:has(.mobile-day-dashboard) .mobile-topbar .mobile-topbar__section { display: none; }
+  body:has(.mobile-day-dashboard) .mobile-topbar .brand--mobile > strong { font-size: 22px; }
+  body:has(.mobile-day-dashboard) .mobile-nav--faro { background: #0d0f10; }
+  body:has(.mobile-day-dashboard) .mobile-nav--faro .mobile-nav__link--active { color: #f5f5f2; }
+}
+@media (max-width: 360px) {
+  #root .page.mobile-day-dashboard { padding-inline: 12px; padding-top: 24px; }
+  #root .day-heading h1 { font-size: 34px; }
+  #root .day-heading p { font-size: 15px; }
+  #root .day-next { padding-inline: 16px; }
+  #root .day-next__event strong { font-size: 17px; }
+  #root .day-priorities { padding-inline: 15px; }
+  #root .day-mini { padding-inline: 11px; }
+  #root .day-mini__value { font-size: 22px; }
+  #root .day-focus__toggle { font-size: 10px; }
+}
+/* Preserve comfortable touch targets without changing the compact grouping. */
+#root .day-priorities > header > a { height: 44px; margin-block: -14px; }
+#root .day-priorities li { grid-template-columns: 44px minmax(0, 1fr); gap: 2px; }
+#root .day-priority-check { width: 44px; }
+#root .day-mini__value { font-size: clamp(23px, 7.4vw, 29px); }
+#root .day-money[data-long-amount=true] .day-mini__value { font-size: clamp(19px, 5.6vw, 24px); }
+#root .day-money > a, #root .day-focus__toggle { min-height: 44px; }
+#root .day-focus__toggle { font-size: 12px; }
+@media (max-width: 760px) {
+  html:has(.mobile-day-dashboard) { scrollbar-width: none; }
+  html:has(.mobile-day-dashboard)::-webkit-scrollbar { display: none; }
+  body:has(.mobile-day-dashboard) #root .mobile-topbar .brand--mobile img { filter: none; }
+  body:has(.mobile-day-dashboard) #root .mobile-nav--faro .mobile-nav__link > span,
+  body:has(.mobile-day-dashboard) #root .mobile-nav--faro .mobile-nav__link > small { font-size: 11px; }
+  body:has(.mobile-day-dashboard) #root .mobile-nav--faro .mobile-nav__create > span { width: 40px; height: 40px; border-radius: 50%; }
+  body:has(.mobile-day-dashboard) #root .mobile-nav--faro .mobile-nav__link--active::after { width: 4px; height: 4px; border-radius: 50%; background: #56b3ff; }
+}
+@media (max-width: 360px) {
+  #root .day-mini__value { font-size: 25px; }
+  #root .day-focus__toggle { font-size: 11px; }
+}
+
+@media (max-width: 760px) {
+  body:has(.mobile-day-dashboard) #root .app-shell--mobile-ready .mobile-topbar { background: #0d0f10; border-bottom-color: transparent; }
+  body:has(.mobile-day-dashboard) #root .mobile-topbar .brand--mobile > strong { font-size: 22px; }
+  body:has(.mobile-day-dashboard) #root .app-shell--mobile-ready > .mobile-nav--faro { background: #0d0f10; }
+}
+@media (max-width: 760px) {
+  #root .page.mobile-day-dashboard { padding-bottom: 8px; }
+  body:has(.mobile-day-dashboard) #root .app-shell--mobile-ready .main-content { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+}
+
+#root .day-focus__controls { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 4px; margin-top: auto; }
+#root .day-focus__controls[data-active=true] { grid-template-columns: minmax(0, 1fr) 36px; }
+#root .day-focus__controls .day-focus__toggle { width: 100%; margin: 0; }
+#root .day-focus__controls .day-focus__reset { display: grid; min-height: 44px; margin: 0; padding: 0; border: 1px solid var(--day-border); border-radius: 10px; place-items: center; }
+#root .day-focus__controls[data-active=true] { grid-template-columns: minmax(0, 1fr) 44px; }
+#root .day-focus__controls[data-active=true] .day-focus__toggle > svg { display: none; }
+
+/* Match the chosen home header while retaining the shared shell on other apps. */
+@media (max-width: 760px) {
+  body:has(.mobile-day-dashboard) #root .app-shell--mobile-ready .mobile-topbar { height: calc(80px + env(safe-area-inset-top)); min-height: 80px; padding-top: calc(26px + env(safe-area-inset-top)); padding-bottom: 10px; }
+  #root .page.mobile-day-dashboard { padding-top: 14px; }
+  body:has(.mobile-day-dashboard) #root .app-shell--mobile-ready .main-content { min-height: calc(100dvh - 80px - env(safe-area-inset-top)); }
+}

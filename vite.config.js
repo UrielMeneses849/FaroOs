@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
+import { createPwaShortcuts } from './src/features/pwa/pwaShortcuts.ts'
 
 export default defineConfig(({ command, mode }) => {
   // GitHub Pages publishes this repository at /FaroOs/. Keep local
@@ -43,12 +44,7 @@ export default defineConfig(({ command, mode }) => {
             { src: 'pwa-icons/faro-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
             { src: 'pwa-icons/faro-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
           ],
-          shortcuts: [
-            { name: 'Hoy', short_name: 'Hoy', url: `${webScope}today` },
-            { name: 'Lista del sábado', short_name: 'Compras', description: 'Tu lista, inventario y presupuesto de casa', url: `${webScope}needs` },
-            { name: 'Registrar gasto', short_name: 'Gasto', description: 'Anota un gasto en pocos toques', url: `${webScope}finance?quick=expense` },
-            { name: 'Nuevo evento', short_name: 'Evento', description: 'Añade algo a tu calendario', url: `${webScope}calendar?quick=event` },
-          ],
+          shortcuts: createPwaShortcuts(webScope),
           share_target: {
             action: `${webScope}share-target`,
             method: 'POST',

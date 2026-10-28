@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { VoicePanel, type VoicePresentation } from './VoicePanel'
 import { FARO_LOCAL_WAKE_EVENT, FARO_VOICE_ACTION_EVENT, FARO_VOICE_PANEL_OPENED_EVENT, FARO_VOICE_SESSION_ENDED_EVENT, publishFaroVoiceSnapshot } from './desktopVoiceEvents'
 import { FARO_VOICE_PRODUCTION_ENABLED, type FaroVoiceSnapshot, type FaroVoiceSurface, type FaroVoiceVisualState } from './faroVoiceConfig'
@@ -21,15 +21,27 @@ export function FaroVoiceProvider({ children }: { children: ReactNode }) {
   const [autoStartToken, setAutoStartToken] = useState(0)
   const [activateOnStart, setActivateOnStart] = useState(false)
   const [presentation, setPresentation] = useState<VoicePresentation>('modal')
+  const latestSnapshot = useRef<FaroVoiceSnapshot>({ state: 'ready' })
+  const openingMini = useRef(false)
   const openFaroVoice = useCallback(({ surface: origin }: { surface: FaroVoiceSurface }) => {
     if (!FARO_VOICE_PRODUCTION_ENABLED) return
     setSurface(origin)
+    openingMini.current = false
+    // A previous Mini activation token must never start audio in a normal modal.
+    setAutoStartToken(0)
+    setActivateOnStart(false)
     setPresentation('modal')
     setOpen(true)
     window.dispatchEvent(new Event(FARO_VOICE_PANEL_OPENED_EVENT))
   }, [])
   const openFaroMiniVoice = useCallback((wakeDetected = false) => {
-    if (!FARO_VOICE_PRODUCTION_ENABLED) return
+    const snapshot = latestSnapshot.current
+    const busy = ['awaiting_confirmation', 'executing', 'consulting', 'understanding', 'speaking', 'listening'].includes(snapshot.state)
+    if (!FARO_VOICE_PRODUCTION_ENABLED || openingMini.current || snapshot.pendingAction || busy || (snapshot.state !== 'error' && snapshot.inputStatus)) return
+    // Claim the opening synchronously: native events can arrive before React commits.
+    openingMini.current = true
+    latestSnapshot.current = { state: 'listening', inputStatus: 'opening' }
+    setVisualState('listening')
     setPresentation('mini')
     setOpen(true)
     setActivateOnStart(wakeDetected)
@@ -37,6 +49,8 @@ export function FaroVoiceProvider({ children }: { children: ReactNode }) {
     window.dispatchEvent(new Event(FARO_VOICE_PANEL_OPENED_EVENT))
   }, [])
   const closeFaroVoice = useCallback(() => {
+    openingMini.current = false
+    latestSnapshot.current = { state: 'ready' }
     setOpen(false)
     setPresentation('modal')
     setActivateOnStart(false)
@@ -45,6 +59,9 @@ export function FaroVoiceProvider({ children }: { children: ReactNode }) {
     window.dispatchEvent(new Event(FARO_VOICE_SESSION_ENDED_EVENT))
   }, [])
   const setVoiceSnapshot = useCallback((snapshot: FaroVoiceSnapshot) => {
+    latestSnapshot.current = snapshot
+    // An initial idle mount isn't an acknowledgement that audio finished opening.
+    if (snapshot.state !== 'ready' || snapshot.inputStatus) openingMini.current = false
     setVisualState(snapshot.state)
     publishFaroVoiceSnapshot(snapshot)
   }, [])

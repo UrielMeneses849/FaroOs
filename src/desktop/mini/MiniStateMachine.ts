@@ -17,6 +17,9 @@ const lockedStates = new Set<FaroMiniState>(['listening', 'understanding', 'cons
 export function canAutoCollapse(context: MiniContext) {
   return context.autoCollapse && !lockedStates.has(context.state) && !Object.values(context.locks).some(Boolean)
 }
+export function canStartMiniVoice(context: MiniContext) {
+  return !context.locks.pendingConfirmation && !context.locks.executing && !lockedStates.has(context.state)
+}
 const initial = (): MiniContext => ({ state: 'ambient', zone: 'far', focusActive: false, snapshot: { state: 'ready' }, autoCollapse: true, reducedMotion: false, locks: { pointerInside: false, pointerPressed: false, controlFocused: false, dragging: false, menuOpen: false, pendingConfirmation: false, speaking: false, listening: false, executing: false, focusConfig: false } })
 
 function presentationState(snapshot: FaroVoiceSnapshot) {
@@ -53,7 +56,7 @@ export class MiniStateMachine {
     // keyboard lock after confirming via Enter and unmounting that button.
     this.publish({ state, locks: { ...this.context.locks, controlFocused: false } })
     recordMiniMetric('stateTransitions')
-    if (state === 'success') this.schedule('success', 1200, () => { this.successElapsed = true; this.reconcile() })
+    if (state === 'success') this.schedule('success', Math.min(12000, Math.max(3500, (this.context.snapshot.feedback?.length ?? 0) * 45)), () => { this.successElapsed = true; this.reconcile() })
     if (state === 'error') this.schedule('error', 5000, () => { this.errorElapsed = true; this.reconcile() })
     this.reconcile()
   }
@@ -108,7 +111,7 @@ export class MiniStateMachine {
     if (['ambient', 'peek', 'focus_compact', 'focus_expanded'].includes(this.context.state)) this.transition(active ? 'focus_expanded' : 'ambient')
   }
   invoke() {
-    if (this.context.locks.pendingConfirmation) return
+    if (!canStartMiniVoice(this.context)) return false
     this.cancel('voice')
     this.lock('listening', true)
     this.voiceKey = ''
@@ -117,6 +120,7 @@ export class MiniStateMachine {
     this.schedule('input-start', 22000, () => this.fail('No pude activar el micrófono. Reintenta o abre FARO para revisar la conexión.'))
     markMiniWake()
     this.transition('listening')
+    return true
   }
   shortcut() {
     if (this.context.state === 'ambient' || this.context.state === 'focus_compact') this.invoke()
@@ -146,6 +150,9 @@ export class MiniStateMachine {
     this.cancel('voice')
     if (state === 'ready') {
       if (['speaking', 'executing', 'consulting', 'understanding', 'awaiting_confirmation'].includes(this.context.state)) {
+        // Ready is also emitted when stopping/cancelling a session. Only a
+        // real response warrants a result surface; it is not proof of a write.
+        if (!snapshot.feedback?.trim()) { this.transition(this.base()); return }
         const delay = this.context.state === 'understanding' ? Math.max(0, 200 - (Date.now() - this.enteredAt)) : 0
         if (delay) this.schedule('voice', delay, () => this.transition('success')); else this.transition('success')
       } else if (this.context.state === 'listening') this.transition(this.base())

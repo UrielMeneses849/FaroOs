@@ -72,7 +72,13 @@ export function FaroMini() {
       if (name === 'expand_focus') { machine.expandFocus(); return }
       if (name === 'listening') { machine.invoke(); return }
       if (name === 'shortcut' && !['ambient', 'focus_compact'].includes(current.state)) { if (current.state === 'listening' && !current.locks.pendingConfirmation) await requestFaroVoiceAction('stop_listening'); else machine.collapse(); return }
-      if (name === 'talk' || name === 'shortcut') { machine.invoke(); await requestFaroVoiceAction('open_and_listen'); return }
+      if (name === 'talk' || name === 'shortcut') {
+        if (!machine.invoke()) return
+        if (name === 'shortcut') await invoke('mini_activate_control').catch(() => {})
+        await requestFaroVoiceAction('open_and_listen'); return
+      }
+      const routes: Record<string, string> = { today: '/today', new_task: '/backlog?quick=task', movement: '/finance?quick=movement' }
+      if (name in routes) { await invoke('open_main_route_command', { route: routes[name] }); return }
       if (name === 'stop') { await requestFaroVoiceAction('stop_listening'); return }
       if (name === 'confirm' || name === 'cancel') {
         if (!current.snapshot.pendingAction || current.locks.executing) return

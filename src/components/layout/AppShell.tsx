@@ -1,5 +1,5 @@
 import { LogOut, Menu, Plus, Sun, Target } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { allNavigationItems, navigationGroups, navigationItemIsActive, settingsItem } from '../../app/navigation'
 import { QuickCaptureDialog } from '../../features/capture/QuickCaptureDialog'
@@ -8,11 +8,14 @@ import { IconButton, Modal } from '../common'
 import { MobileNavigation } from './MobileNavigation'
 import { MobileQuickActions } from './MobileQuickActions'
 import { Sidebar } from './Sidebar'
+import { DesktopTopbar } from './DesktopTopbar'
 import { readSidebarPreferences, writeSidebarPreferences } from './sidebarState'
 import { isFaroDesktop } from '../../desktop/desktopBridge'
 import orbUrl from '../../assets/faro-orb-v1.png'
+import { QuickActionEntry } from '../../features/pwa/QuickActionEntry'
 
 export function AppShell() {
+  const mainContentRef = useRef<HTMLElement>(null)
   const [sidebarPreferences, setSidebarPreferences] = useState(readSidebarPreferences)
   const [captureOpen, setCaptureOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -55,15 +58,17 @@ export function AppShell() {
   })).filter((group) => group.children.length)
 
   useEffect(() => {
-    if (window.matchMedia?.('(max-width: 760px)').matches) {
-      document.scrollingElement?.scrollTo?.({ top: 0, behavior: 'auto' })
-    }
+    const scrollOwner = window.matchMedia?.('(max-width: 760px)').matches
+      ? document.scrollingElement
+      : mainContentRef.current
+    scrollOwner?.scrollTo?.({ top: 0, left: 0, behavior: 'auto' })
   }, [pathname])
 
   return (
-    <div className={`app-shell app-shell--mobile-ready app-shell--sidebar-v2 app-shell--persistent-sidebar ${sidebarPreferences.collapsed ? 'app-shell--collapsed' : 'app-shell--expanded'}`}>
+    <div className={`app-shell app-shell--paper app-shell--mobile-ready app-shell--sidebar-v2 app-shell--persistent-sidebar ${sidebarPreferences.collapsed ? 'app-shell--collapsed' : 'app-shell--expanded'}`}>
       <a className="skip-link" href="#main-content">Saltar al contenido</a>
       <Sidebar
+        variant="paper"
         collapsed={sidebarPreferences.collapsed}
         onToggleCollapsed={() => updateSidebarPreferences((current) => ({ ...current, collapsed: !current.collapsed }))}
         openGroups={sidebarPreferences.openGroups}
@@ -73,6 +78,7 @@ export function AppShell() {
         }))}
       />
       <div className="app-body">
+        <DesktopTopbar onCapture={() => setCaptureOpen(true)} />
         <div className="mobile-topbar">
           <NavLink className="brand brand--mobile" to="/dashboard" aria-label="FARO, ir al inicio"><img className="sidebar-brand__logo" src={orbUrl} alt="" aria-hidden="true" /><strong>FARO</strong><span className="mobile-topbar__section">{currentMobileApp === 'Dashboard' ? 'Inicio' : currentMobileApp}</span></NavLink>
           <div className="mobile-topbar__actions">
@@ -80,8 +86,9 @@ export function AppShell() {
             <IconButton label="Abrir menú" aria-haspopup="dialog" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}><Menu size={20} /></IconButton>
           </div>
         </div>
-        <main id="main-content" className="main-content"><Outlet context={{ capture: () => setCaptureOpen(true) }} /></main>
+        <main ref={mainContentRef} id="main-content" className="main-content"><Outlet context={{ capture: () => setCaptureOpen(true) }} /></main>
       </div>
+      <QuickActionEntry key={pathname} />
       <MobileNavigation onQuick={() => setQuickOpen(true)} />
       <MobileQuickActions
         open={quickOpen}

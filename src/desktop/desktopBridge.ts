@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { isFaroTauriRuntime } from '../core/platform/runtime'
+import type { FaroMainRoute } from './desktopNavigation'
 import type { FaroDesktopVoiceAction } from '../features/voice/desktopVoiceEvents'
 import type { FaroVoiceSnapshot } from '../features/voice/faroVoiceConfig'
 import type { ComputerConfig, ComputerNativeRequest, ComputerNativeResult } from '../features/computer/computerTypes'
@@ -40,7 +41,7 @@ export const publishFaroDesktopVoiceSnapshot = (snapshot: FaroVoiceSnapshot) => 
 export const getFaroDesktopVoiceSnapshot = () => desktopInvoke<FaroVoiceSnapshot | null>('get_voice_snapshot')
 export const requestFaroVoiceAction = (action: FaroDesktopVoiceAction) => desktopInvoke('request_voice_action_command', { action })
 export const submitFaroVoiceTranscript = (transcript: string) => desktopInvoke('submit_voice_transcript_command', { transcript })
-export const openFaroMainRoute = (route: '/finance' | '/calendar' | '/backlog') => desktopInvoke('open_main_route_command', { route })
+export const openFaroMainRoute = (route: FaroMainRoute) => desktopInvoke('open_main_route_command', { route })
 export const quitFaro = () => desktopInvoke('quit_faro_command')
 export const getDesktopWakeModel = () => desktopInvoke<number[] | null>('get_wake_model_command')
 export const getDesktopPreferences = () => desktopInvoke<DesktopPreferences>('get_desktop_preferences_command')

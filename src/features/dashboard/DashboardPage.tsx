@@ -19,6 +19,10 @@ import type { HealthLog } from '../../types'
 import { getDesktopStorageCapacity, isFaroDesktop } from '../../desktop/desktopBridge'
 import type { StorageCapacity } from '../storage/storageTypes'
 import { getSupabaseDatabaseCapacity, type SupabaseDatabaseCapacity } from '../storage/supabaseCapacity'
+import { TaskFormDialog } from '../planning/PlanningDialogs'
+import { PaperDashboard } from './PaperDashboard'
+import type { Task } from '../../types'
+import { MobileDayDashboard } from './MobileDayDashboard'
 
 const workspaceAccents: Record<string, string> = {
   personal: '#f4f4f2', bbva: '#c8cbd0', bimsa: '#9ea3aa', nexvora: '#747b84',
@@ -39,14 +43,30 @@ function ratio(value: number, total: number) {
 }
 
 export function DashboardPage() {
+  const [desktop, setDesktop] = useState(() => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(min-width: 761px)').matches)
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
+    const query = window.matchMedia('(min-width: 761px)')
+    const update = () => setDesktop(query.matches)
+    query.addEventListener?.('change', update)
+    return () => query.removeEventListener?.('change', update)
+  }, [])
+  return desktop ? <DesktopDashboardPage /> : <MobileDayDashboard />
+}
+
+function DesktopDashboardPage() {
   const navigate = useNavigate()
   const { data: workspaces } = useWorkspaces()
-  const { data: finance } = useFinance()
-  const { data: calendar, error: calendarError, refresh: refreshCalendar } = useCalendarData()
+  const { data: finance, loading: financeLoading, error: financeError, refresh: refreshFinance } = useFinance()
+  const { data: calendar, loading: calendarLoading, error: calendarError, refresh: refreshCalendar } = useCalendarData()
   const { logs: healthLogs, save: saveHealth } = useHealthRecords()
   const tasks = useFaroStore((state) => state.tasks)
+  const updateTask = useFaroStore((state) => state.updateTask)
+  const paperDesktop = true
+  const [paperMoreOpen, setPaperMoreOpen] = useState(false)
+  const [paperTaskDialog, setPaperTaskDialog] = useState<Task | 'new'>()
   const [weightOpen, setWeightOpen] = useState(false)
-  const [recentLimit, setRecentLimit] = useState(() => window.innerWidth <= 760 ? 4 : 12)
+  const [recentLimit, setRecentLimit] = useState(() => typeof window === 'undefined' || window.innerWidth <= 760 ? 4 : 12)
   const [maintenanceOpen, setMaintenanceOpen] = useState(false)
   const [macCapacity, setMacCapacity] = useState<StorageCapacity>()
   const [macCapacityError, setMacCapacityError] = useState('')
@@ -97,13 +117,19 @@ export function DashboardPage() {
   }
 
   return <div className="page dashboard-page dashboard-ops faro-monochrome-dashboard">
+    {paperDesktop && <PaperDashboard finance={finance} financeLoading={financeLoading} financeError={financeError} refreshFinance={refreshFinance}
+      calendar={calendar} calendarLoading={calendarLoading} calendarError={calendarError} refreshCalendar={refreshCalendar} tasks={tasks}
+      onCreateTask={() => setPaperTaskDialog('new')} onEditTask={setPaperTaskDialog}
+      onCompleteTask={(task) => updateTask(task.id, { status: 'done' })}
+      onRegisterMovement={() => { sessionStorage.setItem('faro-finance-panel', 'transactions'); navigate('/finance?quick=movement') }} />}
     <div className="dashboard-voice-heading"><PageHeader eyebrow={format(new Date(), "EEEE, d 'de' MMMM", { locale: es })} title="Dashboard" voiceSurface="dashboard" showVoice={false} /></div>
     <nav className="dashboard-mobile-shortcuts" aria-label="Accesos rápidos">
       <Link to="/finance"><WalletCards size={20} /><span>Finanzas</span><small>Saldo y proyecciones</small></Link>
       <Link to="/backlog"><CheckSquare size={20} /><span>Pendientes</span><small>Tus workspaces</small></Link>
       <Link to="/calendar"><CalendarDays size={20} /><span>Agenda</span><small>Organiza tu tiempo</small></Link>
     </nav>
-    <div className="dashboard-command">
+    {paperDesktop && <button className="paper-home-more" type="button" aria-expanded={paperMoreOpen} aria-controls="dashboard-supporting-panels" onClick={() => setPaperMoreOpen((open) => !open)}><span><strong>Más de tu día</strong><small>Workspaces, salud, movimientos y capacidad</small></span><Plus size={18} aria-hidden="true" /></button>}
+    <div className="dashboard-command" id="dashboard-supporting-panels" data-paper-expanded={paperMoreOpen}>
       <main className="dashboard-command__main">
         <section className="ops-panel ops-calendar"><PanelHead eyebrow="Próximos compromisos" title="" to="/calendar" label="Abrir calendario" />{calendarError ? <EmptyState title="Calendario no disponible" description={calendarError} action={<Button onClick={refreshCalendar}>Reintentar</Button>} /> : <><div className="ops-timeline">{upcoming.map((item, index) => {
           const workspace = workspaces.find((candidate) => candidate.id === item.workspaceId)
@@ -132,7 +158,7 @@ export function DashboardPage() {
         </section>
         <section className="ops-panel ops-execution"><PanelHead eyebrow="Estado de workspaces" title="" to="/backlog" label="Abrir backlog" /><div className="ops-treemap">{workspaceRows.map((row) => <button key={row.workspace.id} style={{ '--workspace-color': workspaceAccents[row.workspace.name.toLowerCase()] ?? '#74747d' } as CSSProperties} data-overdue={row.overdue > 0} data-empty={row.open === 0} onClick={() => navigate(`/backlog?workspace=${row.workspace.id}`)}><strong>{row.workspace.name}</strong><b>{row.open}</b><span>{row.doing > 0 ? `${row.doing} en curso` : row.overdue > 0 ? `${row.overdue} vencida${row.overdue === 1 ? '' : 's'}` : row.open ? `${row.pending} pendientes` : 'Sin pendientes'}</span></button>)}</div></section>
         <section className="ops-panel ops-finance"><PanelHead eyebrow="Finanzas" title="Gasto por categoría" to="/finance" label="Abrir Finanzas" /><ExpenseCategoryDonut variant="dashboard" data={expenseByCategory} emptyDescription="La distribución aparecerá al registrar gastos." /></section>
-        <section className="ops-panel ops-health"><PanelHead eyebrow="Salud" title="Peso" to="/health" label="Abrir Salud" /><div className="ops-health-action"><Scale /><div><span>Último peso</span><strong>{latestWeight?.weightKg ? `${latestWeight.weightKg} kg` : 'Sin registro'}</strong><small className={weightChange == null ? '' : weightChange <= 0 ? 'positive' : 'negative'}>{weightChange == null ? latestWeight?.occurredAt ? `Registrado el ${latestWeight.occurredAt.slice(0, 10)}` : 'Comienza tu historial de peso' : `${weightChange <= 0 ? '↓' : '↑'} ${Math.abs(weightChange).toFixed(1)} kg desde el inicio`}</small></div></div>{weightHistory.length ? <div className="dashboard-weight-chart" aria-label="Evolución reciente del peso"><ResponsiveContainer width="100%" height="100%"><LineChart data={weightHistory} accessibilityLayer margin={{ top: 8, right: 12, bottom: 0, left: 0 }}><CartesianGrid stroke="#30343a" vertical={false} strokeDasharray="4 6" /><XAxis dataKey="date" stroke="#8b9199" tickLine={false} axisLine={false} fontSize={9} minTickGap={24} /><YAxis dataKey="weight" domain={['dataMin - 1', 'dataMax + 1']} stroke="#8b9199" tickLine={false} axisLine={false} fontSize={9} width={30} /><Line type="monotone" dataKey="weight" stroke="#f7f7f5" strokeWidth={2.4} dot={false} activeDot={{ r: 4, fill: '#111316', stroke: '#ffffff', strokeWidth: 2 }} /></LineChart></ResponsiveContainer></div> : <p className="dashboard-weight-empty">Registra tu peso para mostrar la evolución.</p>}{weightStale && <div className="ops-health-alert"><span>No has registrado tu peso recientemente</span><Button size="sm" onClick={() => setWeightOpen(true)}>Registrar peso</Button></div>}</section>
+        <section className="ops-panel ops-health"><PanelHead eyebrow="Salud" title="Peso" to="/health" label="Abrir Salud" /><div className="ops-health-action"><Scale /><div><span>Último peso</span><strong>{latestWeight?.weightKg ? `${latestWeight.weightKg} kg` : 'Sin registro'}</strong><small className={weightChange == null ? '' : weightChange <= 0 ? 'positive' : 'negative'}>{weightChange == null ? latestWeight?.occurredAt ? `Registrado el ${latestWeight.occurredAt.slice(0, 10)}` : 'Comienza tu historial de peso' : `${weightChange <= 0 ? '↓' : '↑'} ${Math.abs(weightChange).toFixed(1)} kg desde el inicio`}</small></div></div>{weightHistory.length ? <div className="dashboard-weight-chart" aria-label="Evolución reciente del peso"><ResponsiveContainer width="100%" height="100%"><LineChart data={weightHistory} accessibilityLayer margin={{ top: 8, right: 12, bottom: 0, left: 0 }}><CartesianGrid stroke={paperDesktop ? '#e3e8ef' : '#30343a'} vertical={false} strokeDasharray="4 6" /><XAxis dataKey="date" stroke="#8b9199" tickLine={false} axisLine={false} fontSize={9} minTickGap={24} /><YAxis dataKey="weight" domain={['dataMin - 1', 'dataMax + 1']} stroke="#8b9199" tickLine={false} axisLine={false} fontSize={9} width={30} /><Line type="monotone" dataKey="weight" stroke={paperDesktop ? '#16477d' : '#f7f7f5'} strokeWidth={2.4} dot={false} activeDot={{ r: 4, fill: '#111316', stroke: '#ffffff', strokeWidth: 2 }} /></LineChart></ResponsiveContainer></div> : <p className="dashboard-weight-empty">Registra tu peso para mostrar la evolución.</p>}{weightStale && <div className="ops-health-alert"><span>No has registrado tu peso recientemente</span><Button size="sm" onClick={() => setWeightOpen(true)}>Registrar peso</Button></div>}</section>
       </main>
       <aside className="dashboard-finance-sidebar">
         <section className="finance-side-balance"><header><span>Resumen financiero</span><WalletCards size={18} /></header><small>Disponible operativo</small><strong>{formatMxn(metrics.availableBalanceCents)}</strong>{availableVariation != null && <em className={availableVariation >= 0 ? 'positive' : 'negative'}>{availableVariation >= 0 ? '+' : ''}{availableVariation.toFixed(1)}% respecto al periodo anterior</em>}<p>Dinero activo después de gastos y ahorro apartado.</p><div className="dashboard-spend-today"><span>Gastado hoy</span><b>{formatMxn(todayExpenses)}</b></div><dl><div><dt>Ingresos del periodo</dt><dd>{formatMxn(metrics.monthlyIncomeCents)}</dd></div><div><dt>Gastos del periodo</dt><dd>{formatMxn(metrics.monthlyExpensesCents)}</dd></div><div><dt>Balance real</dt><dd>{formatMxn(metrics.actualBalanceCents)}</dd></div></dl><Button size="sm" icon={<Plus size={14} />} onClick={openMovements}>Registrar movimiento</Button></section>
@@ -141,6 +167,7 @@ export function DashboardPage() {
     </div>
     {weightOpen && <QuickWeightDialog onClose={() => setWeightOpen(false)} onSave={saveHealth} />}
     {maintenanceOpen && <DataMaintenanceDialog onClose={() => setMaintenanceOpen(false)} supabaseCapacity={supabaseCapacity} />}
+    {paperTaskDialog && <TaskFormDialog open initial={paperTaskDialog === 'new' ? undefined : paperTaskDialog} status="todo" onClose={() => setPaperTaskDialog(undefined)} />}
   </div>
 }
 function QuickWeightDialog({ onClose, onSave }: { onClose: () => void; onSave: (log: HealthLog) => Promise<HealthLog> }) {

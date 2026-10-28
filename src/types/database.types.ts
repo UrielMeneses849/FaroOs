@@ -3615,6 +3615,16 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      revise_finance_debt_plan_entry: {
+        Args: {
+          target_id: string
+          target_amount?: number | null
+          target_date?: string | null
+          target_notes?: string | null
+          target_remove?: boolean
+        }
+        Returns: undefined
+      }
       allocate_finance_debt_plan: {
         Args: {
           target_account: string

@@ -61,6 +61,7 @@ BACKLOG
 - Programar, mover, desprogramar, cambiar estado o eliminar una tarea requiere confirmación. Consultar tareas no.
 - Desprogramar elimina únicamente su horario; conserva título, descripción, workspace, prioridad, proyecto y estado.
 - “En revisión” equivale al estado blocked; completar registra el momento real de finalización y reabrir borra ese momento.
+- “En espera” o “Dependencia” equivale a waiting: falta una respuesta, entrega o validación de otra persona. No equivale a revisión ni a completado.
 
 SUPERFICIE
 ${surfaceInstructions[surface]}

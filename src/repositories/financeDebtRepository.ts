@@ -70,6 +70,14 @@ export const financeDebtRepository = {
     })
     throwIfError(error)
   },
+  async reviseEntry(input: { id: string; amountCents?: number; date?: string; notes?: string; remove?: boolean }, userId: string) {
+    await assertFinanceUser(userId)
+    const { error } = await supabase.rpc('revise_finance_debt_plan_entry', {
+      target_id: input.id, target_amount: input.amountCents == null ? null : centsToNumeric(input.amountCents),
+      target_date: input.date ?? null, target_notes: input.notes ?? null, target_remove: input.remove ?? false,
+    })
+    throwIfError(error)
+  },
   async link(debtId: string | undefined, source: { recurringId?: string; transactionId?: string }, userId: string) {
     await assertFinanceUser(userId)
     const { error } = await supabase.rpc('link_finance_debt', {

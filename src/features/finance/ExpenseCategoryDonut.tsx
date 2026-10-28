@@ -5,7 +5,7 @@ import { formatMxn } from '../../services/financeService'
 
 export interface ExpenseCategoryDatum { name: string; value: number }
 
-const categoryColors = ['#f4f4f2', '#d7d9dc', '#b9bdc2', '#969ca3', '#747b84', '#565d66', '#3a4048']
+const categoryColors = ['#f4f4f2', '#d7d9dc', '#b9bdc2', '#969ca3', '#747b84', '#565d66', '#3a4048'].map((color, index) => `var(--finance-category-${index + 1}, ${color})`)
 
 export function ExpenseCategoryDonut({ data, emptyDescription = 'No hay gastos completados en este periodo.', variant = 'default' }: { data: ExpenseCategoryDatum[]; emptyDescription?: string; variant?: 'default' | 'dashboard' }) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null)
@@ -34,7 +34,7 @@ export function ExpenseCategoryDonut({ data, emptyDescription = 'No hay gastos c
           <Pie data={chartRows} dataKey="value" nameKey="name" innerRadius={innerRadius} outerRadius={outerRadius} paddingAngle={2} onMouseEnter={(_, index) => setActiveIndex(index)} onMouseLeave={() => setActiveIndex(null)}>
             {chartRows.map((item, index) => <Cell key={item.name} fill={categoryColors[index % categoryColors.length]} />)}
           </Pie>
-          <Tooltip formatter={(value) => formatMxn(Number(value))} wrapperStyle={{ zIndex: 5 }} contentStyle={{ background: '#181b1f', border: '1px solid #393d43', borderRadius: 10, color: '#f7f7f5' }} />
+          <Tooltip formatter={(value) => formatMxn(Number(value))} wrapperStyle={{ zIndex: 5 }} contentStyle={{ background: 'var(--finance-tooltip-bg, #181b1f)', border: '1px solid var(--finance-tooltip-border, #393d43)', borderRadius: 10, color: 'var(--finance-tooltip-text, #f7f7f5)' }} />
         </PieChart>
       </ResponsiveContainer>
       <div className="expense-category-chart__total"><span>Total gastado</span><strong>{formatMxn(total)}</strong>{active && <small>{active.name} · {(active.value / total * 100).toFixed(1)}%</small>}</div>

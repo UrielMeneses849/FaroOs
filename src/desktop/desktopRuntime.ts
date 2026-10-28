@@ -5,6 +5,7 @@ import { getConfiguredFaroVoiceAdapters, type LocalWakeState } from '../core/voi
 import { FARO_DESKTOP_NAVIGATE_EVENT, FARO_LOCAL_WAKE_EVENT, FARO_VOICE_ACTION_EVENT, FARO_VOICE_PANEL_OPENED_EVENT, FARO_VOICE_SESSION_ENDED_EVENT, FARO_VOICE_SNAPSHOT_EVENT, FARO_VOICE_TRANSCRIPT_EVENT, type FaroDesktopVoiceAction } from '../features/voice/desktopVoiceEvents'
 import type { FaroVoiceSnapshot } from '../features/voice/faroVoiceConfig'
 import { getDesktopPreferences, publishFaroDesktopVoiceSnapshot, showFaroMini, updateDesktopPreferences } from './desktopBridge'
+import { isFaroMainRoute } from './desktopNavigation'
 
 let installed = false
 let voiceReady = false
@@ -76,7 +77,7 @@ export function installFaroDesktopRuntime() {
     dispatchDesktopEvent(FARO_VOICE_TRANSCRIPT_EVENT, payload)
   })
   void listen<string>('faro://navigate', ({ payload }) => {
-    if (payload === '/finance' || payload === '/calendar' || payload === '/backlog' || payload === '/settings') {
+    if (isFaroMainRoute(payload)) {
       void router.navigate(payload)
       dispatchDesktopEvent(FARO_DESKTOP_NAVIGATE_EVENT, payload)
     }

@@ -1,10 +1,11 @@
-import { render, screen, within, fireEvent } from '@testing-library/react'
+import { render, screen, within, fireEvent, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FinanceData } from './financeTypes'
 import { DebtPlanPanel } from './DebtPlanPanel'
 import { financeDebtRepository } from '../../repositories/financeDebtRepository'
 
-vi.mock('../../repositories/financeDebtRepository', () => ({ financeDebtRepository: { pay: vi.fn().mockResolvedValue(undefined) } }))
+vi.mock('../../lib/supabase/client', () => ({ supabase: { auth: {}, functions: {} } }))
+vi.mock('../../repositories/financeDebtRepository', () => ({ financeDebtRepository: { pay: vi.fn().mockResolvedValue(undefined), remove: vi.fn().mockResolvedValue(undefined), reviseEntry: vi.fn().mockResolvedValue(undefined) } }))
 vi.mock('recharts', () => ({
   ResponsiveContainer: () => null, Area: () => null, AreaChart: () => null, CartesianGrid: () => null,
   ReferenceLine: () => null, Tooltip: () => null, XAxis: () => null, YAxis: () => null,
@@ -106,5 +107,76 @@ describe('Coppel monthly calendar and November payoff', () => {
     expect(screen.getByRole('columnheader', { name: 'Deuda / semana' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Ver proyección Coppel · Telcel 15 dic 2026/ })).toHaveTextContent('15 dic')
     expect(screen.getByRole('button', { name: /Ver proyección Coppel · PS5 Digital 15 nov 2026/ })).toHaveTextContent('Liquidación prevista')
+  })
+})
+
+
+describe('Keyboard access to the debt timeline', () => {
+  it('keeps an explicit focus target when there are no payment buttons in the calendar', () => {
+    const source = fixture()
+    source.debtPlan!.debts = []
+    setup(source)
+    const timeline = screen.getByRole('region', { name: 'Calendario de pagos' })
+    expect(timeline).toHaveAttribute('tabindex', '0')
+    timeline.focus()
+    expect(timeline).toHaveFocus()
+    expect(within(timeline).queryByRole('button')).not.toBeInTheDocument()
+    expect(within(timeline).getByRole('table', { name: 'Pagos por deuda y fecha' })).toBeInTheDocument()
+  })
+})
+
+
+describe('Contextual debt deletion', () => {
+  it('requires confirmation before deleting from the debt card', async () => {
+    vi.mocked(financeDebtRepository.remove).mockClear()
+    setup()
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminar Moto' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Eliminar deuda' })).getByRole('button', { name: 'Cancelar' }))
+    expect(financeDebtRepository.remove).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminar Moto' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Eliminar deuda' })).getByRole('button', { name: 'Confirmar' }))
+    await waitFor(() => expect(financeDebtRepository.remove).toHaveBeenCalledWith('moto', 'user'))
+  })
+})
+
+
+describe('Plan reservation corrections', () => {
+  const source = () => {
+    const data = fixture()
+    data.debtPlan!.entries = [{ id: 'reserve-original', accountId: 'bank', amountCents: 30000, entryDate: '2026-10-20', notes: 'Aportación original', createdAt: '' }]
+    return data
+  }
+  const history = () => fireEvent.click(screen.getByRole('button', { name: 'Ver aportaciones y liberar dinero' }))
+  it('edits the same reserve, keeps its account and submits corrected amount and date', async () => {
+    vi.mocked(financeDebtRepository.reviseEntry).mockClear()
+    setup(source()); history()
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Editar' }))
+    const dialog = within(screen.getByRole('dialog'))
+    expect(dialog.getByLabelText('Cuenta de origen')).toBeDisabled()
+    expect(dialog.getByLabelText('Monto MXN')).toHaveValue(300)
+    expect(dialog.getByLabelText('Fecha de la reserva')).toHaveValue('2026-10-20')
+    fireEvent.change(dialog.getByLabelText('Monto MXN'), { target: { value: '400' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Actualizar reserva' }))
+    await waitFor(() => expect(financeDebtRepository.reviseEntry).toHaveBeenCalledWith(expect.objectContaining({ id: 'reserve-original', amountCents: 40000, date: '2026-10-20' }), 'user'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+  it('cancels without deleting and confirms deletion using the original id', async () => {
+    vi.mocked(financeDebtRepository.reviseEntry).mockClear()
+    setup(source()); history()
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Eliminar' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancelar' }))
+    expect(financeDebtRepository.reviseEntry).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    history(); fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Eliminar' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Eliminar reserva' }))
+    await waitFor(() => expect(financeDebtRepository.reviseEntry).toHaveBeenCalledWith({ id: 'reserve-original', remove: true }, 'user'))
+  })
+  it('keeps the editor and the original record when the server rejects a change', async () => {
+    vi.mocked(financeDebtRepository.reviseEntry).mockRejectedValueOnce(new Error('Parte de esta reserva ya se utilizó.'))
+    setup(source()); history()
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Editar' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Actualizar reserva' }))
+    await waitFor(() => expect(within(screen.getByRole('dialog')).getByRole('alert')).toHaveTextContent('ya se utilizó'))
+    expect(within(screen.getByRole('dialog')).getByLabelText('Monto MXN')).toHaveValue(300)
   })
 })

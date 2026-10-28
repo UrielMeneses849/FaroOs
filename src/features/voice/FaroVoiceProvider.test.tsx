@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { FaroVoicePresence } from './FaroVoicePresence'
 import { FARO_VOICE_ACTION_EVENT } from './desktopVoiceEvents'
@@ -35,4 +35,58 @@ it('desktop Talk activates the existing command-listening path without opening a
   fireEvent(window, new CustomEvent(FARO_VOICE_ACTION_EVENT, { detail: 'open_and_listen' }))
   expect(panel.mock.lastCall?.[0]).toMatchObject({ open: true, presentation: 'mini', activateOnStart: true })
   expect(screen.getAllByTestId('voice-panel')).toHaveLength(1)
+})
+
+
+it('normal voice access clears the prior Mini microphone activation', () => {
+  render(<FaroVoiceProvider><Accesses /></FaroVoiceProvider>)
+  fireEvent(window, new CustomEvent(FARO_VOICE_ACTION_EVENT, { detail: 'open_and_listen' }))
+  expect(panel.mock.lastCall?.[0]).toMatchObject({ presentation: 'mini', autoStartToken: 1, activateOnStart: true })
+  fireEvent.click(screen.getByText('Dashboard'))
+  expect(panel.mock.lastCall?.[0]).toMatchObject({ open: true, presentation: 'modal', autoStartToken: 0, activateOnStart: false })
+})
+
+it.each(['awaiting_confirmation', 'executing', 'consulting', 'understanding', 'speaking', 'listening'] as const)('does not restart Mini from a native Talk action during %s', state => {
+  render(<FaroVoiceProvider><Accesses /></FaroVoiceProvider>)
+  fireEvent(window, new CustomEvent(FARO_VOICE_ACTION_EVENT, { detail: 'open_and_listen' }))
+  const props = panel.mock.lastCall?.[0] as { onSnapshotChange: (snapshot: { state: typeof state }) => void }
+  act(() => props.onSnapshotChange({ state }))
+  fireEvent(window, new CustomEvent(FARO_VOICE_ACTION_EVENT, { detail: 'open_and_listen' }))
+  expect(panel.mock.lastCall?.[0]).toMatchObject({ presentation: 'mini', autoStartToken: 1, activateOnStart: true })
+})
+
+
+it('coalesces native Talk events that arrive before React commits', () => {
+  render(<FaroVoiceProvider><Accesses /></FaroVoiceProvider>)
+  act(() => {
+    window.dispatchEvent(new CustomEvent(FARO_VOICE_ACTION_EVENT, { detail: 'open_and_listen' }))
+    window.dispatchEvent(new CustomEvent(FARO_VOICE_ACTION_EVENT, { detail: 'open_and_listen' }))
+  })
+  expect(panel.mock.lastCall?.[0]).toMatchObject({ presentation: 'mini', autoStartToken: 1 })
+})
+
+it('protects an errored pending proposal immediately, and allows retry after an error without one', () => {
+  render(<FaroVoiceProvider><Accesses /></FaroVoiceProvider>)
+  fireEvent(window, new CustomEvent(FARO_VOICE_ACTION_EVENT, { detail: 'open_and_listen' }))
+  const props = panel.mock.lastCall?.[0] as { onSnapshotChange: (snapshot: import('./faroVoiceConfig').FaroVoiceSnapshot) => void }
+  act(() => {
+    props.onSnapshotChange({ state: 'error', pendingAction: { requestId: '00000000-0000-4000-8000-000000000001', toolName: 'createExpense', arguments: { amount: 120 }, summary: 'Registrar gasto de $120' } })
+    window.dispatchEvent(new CustomEvent(FARO_VOICE_ACTION_EVENT, { detail: 'open_and_listen' }))
+  })
+  expect(panel.mock.lastCall?.[0]).toMatchObject({ autoStartToken: 1 })
+  act(() => {
+    props.onSnapshotChange({ state: 'error' })
+    window.dispatchEvent(new CustomEvent(FARO_VOICE_ACTION_EVENT, { detail: 'open_and_listen' }))
+  })
+  expect(panel.mock.lastCall?.[0]).toMatchObject({ autoStartToken: 2 })
+})
+
+
+it('keeps the Mini opening claim through the console initial idle snapshot', () => {
+  render(<FaroVoiceProvider><Accesses /></FaroVoiceProvider>)
+  fireEvent(window, new CustomEvent(FARO_VOICE_ACTION_EVENT, { detail: 'open_and_listen' }))
+  const props = panel.mock.lastCall?.[0] as { onSnapshotChange: (snapshot: { state: 'ready' }) => void }
+  act(() => props.onSnapshotChange({ state: 'ready' }))
+  fireEvent(window, new CustomEvent(FARO_VOICE_ACTION_EVENT, { detail: 'open_and_listen' }))
+  expect(panel.mock.lastCall?.[0]).toMatchObject({ autoStartToken: 1 })
 })

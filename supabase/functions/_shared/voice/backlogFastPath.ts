@@ -19,7 +19,7 @@ export type BacklogFastIntent =
   | 'delete_backlog_task'
   | 'unknown'
 
-export type BacklogStatus = 'todo' | 'doing' | 'blocked' | 'done'
+export type BacklogStatus = 'todo' | 'doing' | 'waiting' | 'blocked' | 'done'
 export type BacklogPriority = 'low' | 'medium' | 'high' | 'critical'
 
 export type BacklogFastRoute = {
@@ -64,6 +64,7 @@ function duration(value: string) {
 }
 
 function status(value: string): BacklogStatus | undefined {
+  if (/\b(?:en espera|dependencia|dependencias|esperando a)\b/.test(value)) return 'waiting'
   if (/\b(?:reabre|reabreme|regresa.*por hacer)\b/.test(value)) return 'todo'
   if (/\b(?:terminad[ao]s?|completad[ao]s?|hech[ao]s?)\b/.test(value)) return 'done'
   if (/\b(?:en progreso|progreso|haciendo|hacer ahora)\b/.test(value)) return 'doing'
@@ -158,7 +159,7 @@ export function routeBacklogIntent(message: string): BacklogFastRoute {
   if (/\b(?:que estoy haciendo|que hago ahora|tarea actual|actualmente)\b/.test(normalized)) return { ...base, intent: 'get_current_task', confidence: .99 }
   if (/\b(?:vencen hoy|vence hoy|para hoy)\b/.test(normalized)) return { ...base, intent: 'list_tasks_due_today', confidence: .99 }
   if (/\b(?:vencid[ao]s?|atrasad[ao]s?)\b/.test(normalized)) return { ...base, intent: 'list_overdue_tasks', confidence: .99 }
-  if (/\b(?:en revision|revision|en progreso|completad[ao]s?|terminad[ao]s?|por hacer)\b/.test(normalized) && /\b(?:que|cuales|tareas|tengo)\b/.test(normalized)) return { ...base, intent: 'list_tasks_by_status', confidence: .98 }
+  if (/\b(?:en espera|dependencias|en revision|revision|en progreso|completad[ao]s?|terminad[ao]s?|por hacer)\b/.test(normalized) && /\b(?:que|cuales|tareas|tengo)\b/.test(normalized)) return { ...base, intent: 'list_tasks_by_status', confidence: .98 }
   if (/\b(?:busca|buscar|encuentra|encontrar)\b/.test(normalized) && hasTaskWord) return { ...base, intent: 'find_backlog_task', confidence: .94 }
   if (/\b(?:que tengo de|tareas de|pendiente(?:s)? de)\b/.test(normalized) && entities.workspaceName) return { ...base, intent: 'list_tasks_by_workspace', confidence: .94 }
   if (/\b(?:que tengo|que me falta|mis pendientes|pendientes|backlog|tareas)\b/.test(normalized)) return { ...base, intent: 'list_backlog_tasks', confidence: .96 }
