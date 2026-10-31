@@ -1,5 +1,5 @@
 import { render, screen, within, fireEvent, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FinanceData } from './financeTypes'
 import { DebtPlanPanel } from './DebtPlanPanel'
 import { financeDebtRepository } from '../../repositories/financeDebtRepository'
@@ -20,6 +20,7 @@ const fixture = (): FinanceData => ({
     preferences: { monthlyContributionCents: 0, contributionDay: 15, targetDate: '2027-12-31', strategy: 'minimum' } },
 })
 
+beforeEach(() => vi.clearAllMocks())
 afterEach(() => vi.useRealTimers())
 function setup(source = fixture()) {
   vi.useFakeTimers({ toFake: ['Date'] })
@@ -28,6 +29,16 @@ function setup(source = fixture()) {
 }
 
 describe('debt calendar interactions', () => {
+  it('records a due habitual payment in one action using the existing defaults', async () => {
+    vi.mocked(financeDebtRepository.pay).mockClear()
+    const source = fixture()
+    source.debtPlan!.debts[0].nextPaymentDate = '2026-10-27'
+    setup(source)
+    fireEvent.click(screen.getByRole('button', { name: /^Registrar pago$/ }))
+    await waitFor(() => expect(financeDebtRepository.pay).toHaveBeenCalledTimes(1))
+    expect(financeDebtRepository.pay).toHaveBeenCalledWith(expect.objectContaining({ debtId: 'moto', accountId: 'bank', amountCents: 90_600, transactionDate: '2026-10-27', status: 'completed' }), undefined, 'user')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
   it('opens the selected future balance, simulates without saving and uses a different balance for another week', () => {
     setup()
     fireEvent.click(screen.getByRole('button', { name: /Ver proyección Moto 6 feb 2027/ }))
@@ -48,9 +59,10 @@ describe('debt calendar interactions', () => {
     setup()
     fireEvent.click(screen.getByRole('button', { name: 'Registrar pago' }))
     const dialog = within(screen.getByRole('dialog'))
+    fireEvent.click(dialog.getByText('Ajustes del acreedor'))
     fireEvent.change(dialog.getByLabelText('Saldo a plazo después de este pago MXN'), { target: { value: '22000' } })
     fireEvent.change(dialog.getByLabelText('Nuevo monto para liquidar MXN'), { target: { value: '18000' } })
-    fireEvent.click(dialog.getByRole('button', { name: 'Confirmar pago registrado' }))
+    fireEvent.click(dialog.getByRole('button', { name: 'Registrar pago' }))
     expect(financeDebtRepository.pay).toHaveBeenCalledWith(expect.objectContaining({
       amountCents: 90600, debtBalanceAdjustmentCents: 25600, debtQuoteCents: 1800000, transactionDate: '2026-10-27',
     }), undefined, 'user')

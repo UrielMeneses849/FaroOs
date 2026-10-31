@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { FinanceDebt } from '../features/finance/debtTypes'
 import type { FinanceData, FinanceTransaction } from '../features/finance/financeTypes'
-import { debtRemainingCents, projectDebtPlan, validSettlementQuote, advanceDebtDate } from './debtPlanService'
+import { debtRemainingCents, debtPayoffEstimateCents, projectDebtPlan, validSettlementQuote, advanceDebtDate } from './debtPlanService'
 import { debtPlanAvailableCents, debtPlanBalanceCents } from './debtPlanBalance'
 import { calculateFinanceMetrics } from './financeService'
 
@@ -18,6 +18,15 @@ const data = (debts: FinanceDebt[] = [debt()], transactions: FinanceTransaction[
 })
 
 describe('debt snapshots and linked payments', () => {
+  it('updates the running payoff estimate from known payments without relabeling an old quote as valid', () => {
+    const purchase = debt({ kind: 'purchase', settlementCents: 580000, quoteDate: '2026-10-14' })
+    const source = data([purchase], [movement({ debtPrincipalCents: 50000 })])
+    expect(debtPayoffEstimateCents(purchase, source)).toBe(530000)
+    expect(validSettlementQuote(purchase, source, '2026-10-17')).toBe(false)
+    source.transactions[0].status = 'cancelled'
+    expect(debtPayoffEstimateCents(purchase, source)).toBe(580000)
+    expect(debtPayoffEstimateCents(debt(), data())).toBe(1450000)
+  })
   it('only reduces the snapshot for completed payments on or after its date', () => {
     const source = data([debt()], [movement({ transactionDate: '2026-10-13' }), movement(), movement({ status: 'planned' }), movement({ status: 'cancelled' })])
     expect(debtRemainingCents(debt(), source)).toBe(1365000)

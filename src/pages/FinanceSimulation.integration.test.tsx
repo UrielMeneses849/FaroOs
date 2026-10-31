@@ -65,6 +65,20 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('persistent simulation across the Finance workspace', () => {
+  it('records the due motorcycle installment directly and tracks it in recurring expenses without opening a form', async () => {
+    mocks.data!.categories.push({ id: 'plan', name: 'Plan', type: 'expense', isActive: true, isDefault: false })
+    mocks.data!.debtPlan!.debts.push({ id: 'moto', name: 'Moto', creditor: 'Vento', kind: 'loan', status: 'active', balanceCents: 500_000, balanceDate: '2026-11-01', paymentCents: 90_600, frequency: 'weekly', nextPaymentDate: '2026-11-10', agreementStatus: 'none', priority: 0, createdAt: '', updatedAt: '' })
+    mocks.save.mockImplementationOnce(async input => { mocks.data = { ...mocks.data!, transactions: [{ ...input, createdAt: '', updatedAt: '' }] } })
+    show()
+    await userEvent.click(primaryPanel('Gastos'))
+    const recurring = within(screen.getByRole('region', { name: 'Gastos recurrentes' }))
+    const moto = within(recurring.getAllByText('Moto')[0].closest('article')!)
+    await userEvent.click(moto.getByRole('button', { name: 'Registrar pago' }))
+    expect(mocks.save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ amountCents: 90_600, debtId: 'moto', accountId: 'bank', transactionDate: '2026-11-10', status: 'completed' }), undefined, 'owner')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Saldo restante: $4,094.00')
+    expect(recurring.getByText('Pagado', { exact: true })).toBeInTheDocument()
+  })
   it('applies the scenario to the projection, restores the original forecast when switched off, and leaves actual balances intact', async () => {
     sessionStorage.setItem('faro-finance-panel', 'advisor')
     localStorage.setItem(financeSimulationStorageKey('owner'), JSON.stringify(saved()))

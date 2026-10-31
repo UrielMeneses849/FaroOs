@@ -563,3 +563,10 @@
 @media (max-width: 360px) {
   #root .finance-mobile-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
+
+@media(max-width:760px) {
+  .pwa-experience .pwa-status-card { min-height: 70px; }
+  .pwa-experience .pwa-status-card strong { font-size: 13px; line-height: 1.5; }
+  .pwa-experience .pwa-status-card span { font-size: 12px; line-height: 1.5; }
+  .pwa-experience .pwa-status-card button { min-height: 44px; min-width: 44px; font-size: 13px; }
+}

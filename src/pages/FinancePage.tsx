@@ -27,6 +27,7 @@ import { DebtPaymentDialog, DebtPlanPanel } from '../features/finance/DebtPlanPa
 import { DebtMovementFields, DebtPicker } from '../features/finance/DebtMovementFields'
 import { scheduledDebtPayments, debtRemainingCents, debtHasRecurringSchedule, type ScheduledDebtPayment } from '../services/debtSchedule'
 import { financeDebtRepository } from '../repositories/financeDebtRepository'
+import { habitualDebtPayment } from '../services/debtPayment'
 import { debtPlanBalanceCents } from '../services/debtPlanBalance'
 import type { FinanceDebt } from '../features/finance/debtTypes'
 import {
@@ -132,6 +133,7 @@ export function FinancePage() {
   const [deletingRecurring, setDeletingRecurring] = useState<FinanceRecurringTransaction>()
   const [revertingOccurrence, setRevertingOccurrence] = useState<FinanceRecurringOccurrence>()
   const paymentLocks = useRef(new Set<string>())
+  const debtPaymentIds = useRef(new Map<string, string>())
   const promptedFortnights = useRef(new Set<string>())
   const [savingPaymentId, setSavingPaymentId] = useState<string>()
   const [search, setSearch] = useState('')
@@ -437,6 +439,19 @@ export function FinancePage() {
     setMovementPreset(preset)
     setDialog('transaction')
   }
+  const registerScheduledDebtPayment = async (payment: ScheduledDebtPayment) => {
+    if (!user || simulationEnabled || paymentLocks.current.has(payment.id)) return
+    if (payment.date !== format(new Date(), 'yyyy-MM-dd')) { setDebtPayment(payment); return }
+    paymentLocks.current.add(payment.id); setSavingPaymentId(payment.id)
+    try {
+      const id = debtPaymentIds.current.get(payment.id) ?? crypto.randomUUID()
+      debtPaymentIds.current.set(payment.id, id)
+      const input = habitualDebtPayment(payment.debt, data, id, payment)
+      await financeDebtRepository.pay(input, undefined, user.id)
+      await finish(`Pago de ${formatMxn(input.amountCents)} registrado. Saldo restante: ${formatMxn(Math.max(0, debtRemainingCents(payment.debt, data) - input.amountCents))}.`)
+    } catch (reason) { setFeedback(reason instanceof Error ? reason.message : 'No se pudo registrar el pago.') }
+    finally { paymentLocks.current.delete(payment.id); setSavingPaymentId(undefined) }
+  }
   const registerRecurringPayment = async (item: FinanceRecurringTransaction, currentOccurrence?: FinanceRecurringOccurrence) => {
     const lockId = currentOccurrence?.id ?? item.id
     if (!user || paymentLocks.current.has(lockId)) return
@@ -513,6 +528,7 @@ export function FinancePage() {
       title="Finanzas"
       trailing={panel === 'plan' || isDecisionPanel ? <div className="finance-period finance-period--page-toolbar"><span className="finance-plan-current-date"><CalendarDays size={16} />{format(new Date(), 'd MMM yyyy', { locale: es })}</span><button aria-label="Actualizar datos financieros" title="Actualizar" onClick={() => void refresh()}><RefreshCw size={14} /></button></div> : <div className="finance-period finance-period--page-toolbar"><button aria-label="Mes anterior" onClick={() => setMonth((value) => subMonths(value, 1))}><ArrowLeft size={15} /></button><label><CalendarDays size={16} /><span>{format(month, "MMMM 'de' yyyy", { locale: es })}</span><input aria-label="Periodo" type="month" value={format(month, 'yyyy-MM')} onChange={(event) => event.target.value && setMonth(parseISO(`${event.target.value}-01`))} /></label><button aria-label="Mes siguiente" onClick={() => setMonth((value) => addMonths(value, 1))}><ArrowRight size={15} /></button><button aria-label="Actualizar datos financieros" title="Actualizar" onClick={() => void refresh()}><RefreshCw size={14} /></button><button aria-label="Descargar reporte financiero en PDF" title="Descargar reporte PDF" onClick={exportMonthlyReport}><FileDown size={14} /></button></div>}
     />
+    {data.debtPlanError && <div className="finance-data-status finance-data-status--error" role="alert"><div><strong>No se cargaron tus pagos de Plan</strong><p>{data.debtPlanError} Las cuotas de tus deudas pueden estar incompletas.</p></div><Button variant="secondary" onClick={() => void refresh()}>Reintentar Plan</Button></div>}
     {(error || loading) && <div className={`finance-data-status${error ? ' finance-data-status--error' : ''}`} role={error ? 'alert' : 'status'}>
       <div><strong>{error ? 'No pudimos actualizar tus finanzas' : 'Actualizando tus finanzas'}</strong><p>{error ? `${error} Estás viendo los últimos datos cargados.` : 'Conservamos tus datos mientras termina la actualización.'}</p></div>
       {error && <Button variant="secondary" onClick={() => void refresh()}>Reintentar</Button>}
@@ -542,6 +558,7 @@ export function FinancePage() {
         {financeDecisionPanels.map(([id, label]) => <button key={id} type="button" aria-current={panel === id ? 'page' : undefined} onClick={() => { changePanel(id); setMobileMoreOpen(false) }}><i aria-hidden="true"><Calculator size={21} /></i><span><strong>{label}</strong><small>Herramienta de planeación financiera</small></span><ArrowRight size={17} /></button>)}
       </nav>
       <div className="finance-mobile-more-utilities"><button type="button" onClick={() => { setMobileMoreOpen(false); if (!simulationEnabled) setDialog('categories'); else setFeedback('Apaga la simulación para administrar tus categorías reales.') }}>Gestionar categorías</button>
+        <button type="button" onClick={() => { setMobileMoreOpen(false); window.dispatchEvent(new Event('faro:pwa-check-update')) }}><RefreshCw size={17} />Actualizar app</button>
         <button type="button" onClick={() => { setMobileMoreOpen(false); void refresh() }}><RefreshCw size={17} />Actualizar datos</button>
         <button type="button" onClick={() => { setMobileMoreOpen(false); void exportMonthlyReport() }}><FileDown size={17} />Reporte PDF</button>
         <Link to="/dashboard"><House size={17} />Inicio de FARO<ArrowRight size={16} /></Link>
@@ -658,11 +675,11 @@ export function FinancePage() {
       <ProjectionStrip items={projectionItems(expenseProjection)} />
       <section className="finance-expense-panel">
         <SectionHead eyebrow="Calendario financiero" title="Gastos recurrentes" action="+" actionLabel="Registrar gasto recurrente" onClick={() => setDialog('recurring')} />
-        <FinanceList label="Gastos recurrentes">{recurringForMonth.filter(({ item }) => item.type !== 'income' && item.type !== 'refund').map(({ item, expectedDate, occurrence }) => <RecurringCard key={occurrence?.id ?? item.id} item={item} expectedDate={expectedDate} occurrence={occurrence} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={[data.categories.find((category) => category.id === item.categoryId)?.name, item.debtId ? `Deuda: ${data.debtPlan?.debts.find(debt => debt.id === item.debtId)?.name ?? 'vinculada'}` : undefined].filter(Boolean).join(' · ')} busy={savingPaymentId === (occurrence?.id ?? item.id)} onRegister={() => void registerRecurringPayment(item, occurrence)} onEdit={() => { setRecurringEditMode('period'); setEditingRecurring(item); setEditingOccurrence(occurrence); setDialog('recurring') }} onDelete={() => setDeletingRecurring(item)} />)}{debtPaymentsForMonth.map(payment => <article key={payment.id} className="finance-expense--pending">
+        <FinanceList label="Gastos recurrentes">{debtPaymentsForMonth.map(payment => <article key={payment.id} className="finance-expense--pending">
           <header><div><strong>{payment.debt.name}</strong><small>{formatFinanceDate(payment.date)}</small></div><div className="finance-expense-amount"><b>{formatMxn(payment.amountCents)}</b><span className="finance-occurrence-status finance-occurrence-status--pending">Pendiente</span></div></header>
           <div className="finance-expense-meta"><small>Pago recurrente de Plan · {payment.debt.creditor}</small></div>
-          <footer><Button onClick={() => { setDebtPaymentError(''); setDebtPayment(payment) }}>Registrar pago</Button><Button variant="ghost" onClick={() => changePanel('plan')}>Ver en Plan</Button></footer>
-        </article>)}{debtScheduledMovements.map(item => <article key={item.id} className={`finance-expense--${item.status === 'completed' ? 'paid' : 'pending'}`}>
+          <footer><Button loading={savingPaymentId === payment.id} onClick={() => void registerScheduledDebtPayment(payment)}>Registrar pago</Button><Button variant="ghost" onClick={() => { setDebtPaymentError(''); setDebtPayment(payment) }}>Otro monto o fecha</Button><Button variant="ghost" onClick={() => changePanel('plan')}>Ver en Plan</Button></footer>
+        </article>)}{recurringForMonth.filter(({ item }) => item.type !== 'income' && item.type !== 'refund').map(({ item, expectedDate, occurrence }) => <RecurringCard key={occurrence?.id ?? item.id} item={item} expectedDate={expectedDate} occurrence={occurrence} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={[data.categories.find((category) => category.id === item.categoryId)?.name, item.debtId ? `Deuda: ${data.debtPlan?.debts.find(debt => debt.id === item.debtId)?.name ?? 'vinculada'}` : undefined].filter(Boolean).join(' · ')} busy={savingPaymentId === (occurrence?.id ?? item.id)} onRegister={() => void registerRecurringPayment(item, occurrence)} onEdit={() => { setRecurringEditMode('period'); setEditingRecurring(item); setEditingOccurrence(occurrence); setDialog('recurring') }} onDelete={() => setDeletingRecurring(item)} />)}{debtScheduledMovements.map(item => <article key={item.id} className={`finance-expense--${item.status === 'completed' ? 'paid' : 'pending'}`}>
           <header><div><strong>{data.debtPlan?.debts.find(debt => debt.id === item.debtId)?.name}</strong><small>{formatFinanceDate(item.transactionDate)}</small></div><div className="finance-expense-amount"><b>{formatMxn(item.amountCents)}</b><span className={`finance-occurrence-status finance-occurrence-status--${item.status === 'completed' ? 'paid' : 'pending'}`}>{item.status === 'completed' ? 'Pagado' : 'Pendiente'}</span></div></header>
           <div className="finance-expense-meta"><small>Pago de Plan · {data.accounts.find(account => account.id === item.accountId)?.name}</small></div>
           <footer><Button variant="ghost" onClick={() => { setEditingTransaction(item); setDialog('transaction') }}>Editar pago</Button><Button variant="ghost" onClick={() => changePanel('plan')}>Ver en Plan</Button></footer>

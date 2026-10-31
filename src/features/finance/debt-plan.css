@@ -39,3 +39,16 @@
   outline: 2px solid var(--text-primary, #a9bfff);
   outline-offset: -3px;
 }
+
+/* The habitual payment needs a summary; corrections stay available on demand. */
+.dp-payment-summary { padding: 18px 20px; border: 1px solid var(--border, #dfe5ed); border-radius: 13px; background: var(--surface, #fff); }
+.dp-payment-summary > span { color: var(--text-secondary, #637085); font-size: 13px; }
+.dp-payment-summary > strong { display: block; margin: 5px 0; color: var(--text-primary, #213349); font-size: 30px; font-variant-numeric: tabular-nums; letter-spacing: -.04em; }
+.dp-payment-summary > p { margin: 0; color: var(--text-secondary, #637085); font-size: 13px; }
+.dp-payment-adjustments { min-width: 0; padding: 0 14px 12px; border: 1px solid var(--border, #dfe5ed); border-radius: 10px; }
+.dp-payment-adjustments:not([open]) { padding-bottom: 0; }
+.dp-payment-adjustments > summary { min-height: 44px; padding: 12px 0; box-sizing: border-box; cursor: pointer; color: var(--text-primary, #213349); font-size: 13px; font-weight: 600; }
+.dp-payment-adjustments > summary:focus-visible { outline: 2px solid #6486b3; outline-offset: 3px; }
+.dp-payment-adjustments > :not(summary) { margin-top: 12px; }
+.dp-payment-modal .dp-check { min-height: 44px; }
+@media(max-width:760px) { .dp-payment-modal .dp-form-actions { position: sticky; bottom: -22px; padding-bottom: 10px !important; background: var(--surface); } }

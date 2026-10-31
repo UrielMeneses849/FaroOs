@@ -10,7 +10,8 @@ import { financeDebtRepository } from '../../repositories/financeDebtRepository'
 import { financeLiquidityRepository } from '../../repositories/financeRepositories'
 import { accountBalance, calculateFinanceMetrics, financeFrequencyLabel, formatMxn } from '../../services/financeService'
 import { debtPlanAvailableCents, debtPlanBalanceCents } from '../../services/debtPlanBalance'
-import { debtPayments, debtWithLatestQuote, debtRemainingCents, projectDebtPlan, debtPlanAdvanceDays, validSettlementQuote, type DebtPlanEvent } from '../../services/debtPlanService'
+import { debtPaymentDefaults, habitualDebtPayment } from '../../services/debtPayment'
+import { debtPayments, debtPayoffEstimateCents, debtWithLatestQuote, debtRemainingCents, projectDebtPlan, debtPlanAdvanceDays, validSettlementQuote, type DebtPlanEvent } from '../../services/debtPlanService'
 import './debt-plan.css'
 
 const dateKey = () => format(new Date(), 'yyyy-MM-dd')
@@ -41,6 +42,7 @@ export function DebtPlanPanel({ readOnly = false, data, userId, onRefresh, onEdi
   const [offset, setOffset] = useState(0)
   const [showArchived, setShowArchived] = useState(false)
   const [monthlyDraft, setMonthlyDraft] = useState<number>()
+  const paymentIds = useRef(new Map<string, string>())
   const preferences = data.debtPlan?.preferences
   const reference = useMemo(() => new Date(), [])
   const projection = useMemo(() => projectDebtPlan(data, { reference, monthlyContributionCents: monthlyDraft }), [data, reference, monthlyDraft])
@@ -78,6 +80,18 @@ export function DebtPlanPanel({ readOnly = false, data, userId, onRefresh, onEdi
     setSelected(debt ?? data.debtPlan?.debts.find(item => item.id === event?.debtId) ?? active[0])
     setPaymentEvent(event); setDialog('payment'); setError('')
   }
+  const registerHabitualPayment = (event: DebtPlanEvent) => {
+    const debt = active.find(item => item.id === event.debtId)
+    if (!debt) return
+    if (event.date !== dateKey() || event.kind !== 'payment' || event.closes) { openPayment(event, debt); return }
+    void run(async () => {
+      const id = paymentIds.current.get(event.id) ?? crypto.randomUUID()
+      paymentIds.current.set(event.id, id)
+      const input = habitualDebtPayment(debt, data, id, event)
+      await financeDebtRepository.pay(input, event.occurrenceId, userId)
+      await saved(`Pago de ${formatMxn(input.amountCents)} registrado. Saldo restante: ${formatMxn(Math.max(0, debtRemainingCents(debt, data) - input.amountCents))}.`)
+    })
+  }
   if (!data.debtPlan) return <EmptyState title="Plan no está disponible" description={data.debtPlanError ?? 'Actualiza tus finanzas para cargar el plan.'} action={<Button onClick={() => void onRefresh()}>Reintentar</Button>} />
   return <section className="debt-plan" aria-label="Plan de liquidación">
     {notice && <div className="dp-notice" role="status"><CheckCircle2 size={16} />{notice}<button onClick={() => setNotice('')} aria-label="Cerrar aviso">Cerrar</button></div>}
@@ -103,7 +117,7 @@ export function DebtPlanPanel({ readOnly = false, data, userId, onRefresh, onEdi
             <header><span className="dp-debt-icon"><DebtIcon debt={debt} /></span><div><button onClick={() => { setSelected(debt); setDialog('history') }}>{debt.name}</button><small>{debt.creditor || 'Sin acreedor'} · {paid ? 'Liquidada' : debt.status === 'paused' ? 'Pausada' : debt.status === 'archived' ? 'Archivada' : financeFrequencyLabel[debt.frequency]}</small></div>{paid && <CheckCircle2 size={15} />}</header>
             <div className="dp-debt-balance"><span>Saldo a plazo</span><strong>{formatMxn(balance)}</strong></div>
             <ProgressBar value={Math.min(100, (debt.balanceCents - balance) / debt.balanceCents * 100)} />
-            {!paid && debt.settlementCents != null && <div className="dp-rule"><span>Liquidación cotizada</span><b>{formatMxn(debt.settlementCents)}</b><small>{validSettlementQuote(debt, data, dateKey()) ? `Vigente · ${labelDate(debt.quoteValidUntil ?? debt.quoteDate)}` : 'Requiere actualizar cotización'}</small></div>}
+            {!paid && debt.settlementCents != null && <div className="dp-rule"><span>{validSettlementQuote(debt, data, dateKey()) ? 'Liquidación cotizada' : 'Liquidación estimada'}</span><b>{formatMxn(debtPayoffEstimateCents(debt, data))}</b><small>{validSettlementQuote(debt, data, dateKey()) ? `Vigente · ${labelDate(debt.quoteValidUntil ?? debt.quoteDate)}` : 'Última cotización menos abonos; confirma el importe final con el acreedor.'}</small></div>}
             {!paid && debt.agreementStatus !== 'none' && <div className="dp-agreement">Convenio {debt.agreementStatus === 'confirmed' ? 'confirmado' : 'propuesto'} · {debt.agreementPayments} pagos</div>}
             {!paid && <div className="dp-rule"><span>Pago habitual</span><b>{formatMxn(debt.paymentCents)}</b><small>{debtScheduleLabel(debt)}</small><small>{projection.payoffDates[debt.id] ? `Fin estimado · ${labelDate(projection.payoffDates[debt.id])}` : `Próximo · ${labelDate(debt.nextPaymentDate)}`}</small></div>}
             {!paid && projection.events.some(event => event.debtId === debt.id && plannedPayoff(debt, event)) && <div className="dp-payoff-rule"><Flag size={13} /><span>Liquidar el {labelDate(debt.deadline, "d 'de' MMMM yyyy")}</span></div>}
@@ -125,7 +139,7 @@ export function DebtPlanPanel({ readOnly = false, data, userId, onRefresh, onEdi
       </div>
       <aside className="dp-actions">
         <section className="dp-surface dp-fund"><div className="dp-section-head"><h3>Tu dinero en Plan</h3><Wallet size={17} /></div><strong className="dp-big">{formatMxn(fundBalance)}</strong><p>Reservado en tus cuentas para atacar deudas.</p><Button icon={<Plus size={15} />} disabled={!data.accounts.some(account => account.isActive && account.currency === 'MXN')} onClick={() => { setSelected(undefined); setEditingEntry(undefined); setError(''); setDialog('fund') }}>Aportar a Plan</Button><button className="dp-text-action" onClick={() => { setSelected(undefined); setDialog('history') }}>Ver aportaciones y liberar dinero</button></section>
-        <section className="dp-surface dp-next"><div className="dp-section-head"><h3>Tu siguiente movimiento</h3></div>{next ? <><small className="dp-blue">{labelDate(next.date, "EEEE, d 'de' MMMM")}</small><h4>{data.debtPlan.debts.find(debt => debt.id === next.debtId)?.name}</h4><strong className="dp-big">{formatMxn(next.amountCents)}</strong><div className="dp-rule"><span>Saldo después del pago</span><b>{formatMxn(next.remainingCents)}</b></div><Button onClick={() => openPayment(next)}>Registrar pago</Button></> : <p>Agrega una deuda activa para preparar tu primer pago.</p>}<button className="dp-text-action" disabled={!active.length} onClick={() => openPayment()}>Añadir pago extra</button></section>
+        <section className="dp-surface dp-next"><div className="dp-section-head"><h3>Tu siguiente movimiento</h3></div>{next ? <><small className="dp-blue">{labelDate(next.date, "EEEE, d 'de' MMMM")}</small><h4>{data.debtPlan.debts.find(debt => debt.id === next.debtId)?.name}</h4><strong className="dp-big">{formatMxn(next.amountCents)}</strong><div className="dp-rule"><span>Saldo después del pago</span><b>{formatMxn(next.remainingCents)}</b></div><Button loading={busy} onClick={() => registerHabitualPayment(next)}>Registrar pago</Button><Button variant="ghost" onClick={() => openPayment(next)}>Otro monto o fecha</Button></> : <p>Agrega una deuda activa para preparar tu primer pago.</p>}<button className="dp-text-action" disabled={!active.length} onClick={() => openPayment()}>Añadir pago extra</button></section>
         <section className="dp-surface dp-extra"><h3>Ritmo de aportación</h3><p>Simula una aportación mensual para acelerar la salida.</p><label className="dp-slider">Aportación mensual prevista<input aria-label="Simular aportación mensual" type="range" min="0" max={Math.max(20000, (preferences?.monthlyContributionCents ?? 0) * 2 / 100)} step="100" value={(monthlyDraft ?? preferences?.monthlyContributionCents ?? 0) / 100} onChange={event => setMonthlyDraft(Number(event.target.value) * 100)} /></label><strong className="dp-medium">{formatMxn(monthlyDraft ?? preferences?.monthlyContributionCents ?? 0)}</strong><p className="dp-hint">La proyección no aparta dinero.</p>{monthlyDraft != null && monthlyDraft !== preferences?.monthlyContributionCents && <Button size="sm" loading={busy} onClick={() => void run(async () => { await financeDebtRepository.savePreferences({ ...preferences!, monthlyContributionCents: monthlyDraft }, userId); setMonthlyDraft(undefined); await saved('Ritmo mensual actualizado.', false) })}>Aplicar ritmo</Button>}<div className="dp-impact"><span><Flag size={14} />{projection.finishDate ? labelDate(projection.finishDate) : 'Sin fecha dentro de 18 meses'}</span><span><CheckCircle2 size={14} />{advance ? `${Math.floor(advance / 7)} semanas antes` : 'Mismo plazo que el plan actual'}</span><span><CircleDollarSign size={14} />{formatMxn(projection.avoidedCostCents)} de costo futuro evitado</span></div><button className="dp-text-action" onClick={() => setDialog('settings')}><Settings2 size={13} />Ajustar montos y meta</button></section>
       </aside>
     </div>
@@ -284,13 +298,12 @@ function PlanSettings({ data, busy, error, onClose, onSave }: { data: FinanceDat
 }
 
 export function DebtPaymentDialog({ debt, data, event, busy, error, onClose, onSave }: { debt: FinanceDebt; data: FinanceData; event?: DebtPlanEvent; busy: boolean; error: string; onClose: () => void; onSave: (input: Omit<FinanceTransaction, 'createdAt' | 'updatedAt'>) => Promise<void> }) {
-  const existing = data.transactions.find(transaction => transaction.id === event?.transactionId)
-  const recurring = data.recurring.find(item => item.id === event?.recurringId)
-  const accounts = data.accounts.filter(account => account.isActive && account.currency === 'MXN')
-  const [amount, setAmount] = useState(moneyInput(existing?.amountCents ?? event?.amountCents ?? debt.paymentCents))
+  const defaults = debtPaymentDefaults(debt, data, event)
+  const { existing, recurring, accounts } = defaults
+  const [amount, setAmount] = useState(moneyInput(defaults.amountCents))
   const [date, setDate] = useState(event && event.date <= dateKey() ? event.date : dateKey())
-  const [accountId, setAccountId] = useState(existing?.accountId ?? recurring?.accountId ?? accounts.find(account => debtPlanBalanceCents(data, account.id) > 0)?.id ?? accounts[0]?.id ?? '')
-  const [fromPlan, setFromPlan] = useState(moneyInput(Math.min(event?.amountCents ?? debt.paymentCents, debtPlanBalanceCents(data, accountId))))
+  const [accountId, setAccountId] = useState(defaults.accountId)
+  const [fromPlan, setFromPlan] = useState(moneyInput(defaults.planAmountCents))
   const [principal, setPrincipal] = useState('')
   const [updatedBalance, setUpdatedBalance] = useState('')
   const [updatedQuote, setUpdatedQuote] = useState('')
@@ -324,7 +337,25 @@ export function DebtPaymentDialog({ debt, data, event, busy, error, onClose, onS
       recurringTransactionId: event?.occurrenceId ? event.recurringId : existing?.recurringTransactionId, budgetId: existing?.budgetId,
       notes: notes || existing?.notes })
   }
-  return <Modal open title={`Registrar pago · ${debt.name}`} panelClassName="dp-modal" onClose={onClose}><form className="dp-form" onSubmit={submit}><div className="dp-form-grid"><MoneyField label="Pago real MXN" value={amount} onChange={setAmount} /><label>Fecha real de pago<input required type="date" max={dateKey()} min={debt.balanceDate} value={date} onChange={change => setDate(change.target.value)} onInput={change => setDate(change.currentTarget.value)} onBlur={change => setDate(change.currentTarget.value)} /></label></div>{event && event.date > dateKey() && <p className="dp-hint">El pago estaba previsto para {labelDate(event.date)}. Se registrará como un adelanto en la fecha que elijas.</p>}<label>Cuenta del pago<select required value={accountId} onChange={change => { setAccountId(change.target.value); setFromPlan(moneyInput(Math.min(cents(amount), debtPlanBalanceCents(data, change.target.value)))) }}><option value="">Selecciona</option>{accounts.map(account => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label><MoneyField label="Usar de Plan MXN" value={fromPlan} min="0" onChange={setFromPlan} /><p className="dp-hint">Plan en esta cuenta: {formatMxn(available)} · Fuera de Plan: {formatMxn(Math.max(0, cents(amount) - cents(fromPlan || '0')))}</p><MoneyField label="Abono al saldo MXN · opcional" required={false} min="0" value={principal} onChange={setPrincipal} /><p className="dp-hint">Déjalo vacío si todo el pago reduce el saldo. Si incluye intereses no incluidos en tu saldo, indica sólo el abono a capital.</p>{!settles && <fieldset><legend>Cifras actualizadas del acreedor · opcional</legend><MoneyField label="Saldo a plazo después de este pago MXN" required={false} min="0" value={updatedBalance} onChange={setUpdatedBalance} /><p className="dp-hint">Copia el saldo que muestra Coppel después de pagar. La diferencia se registra como ajuste por intereses o corrección, sin crear otro gasto.</p><MoneyField label="Nuevo monto para liquidar MXN" required={false} value={updatedQuote} onChange={setUpdatedQuote} /><label>Cotización válida hasta<input type="date" min={date} value={quoteUntil} onChange={change => setQuoteUntil(change.target.value)} /></label><p className="dp-hint">Sin vigencia, la cotización sólo se considera válida el día del pago. Las cifras futuras son estimadas y no añaden intereses desconocidos.</p></fieldset>}<label className="dp-check"><input type="checkbox" checked={settles} onChange={change => setSettles(change.target.checked)} />Este pago liquida la deuda</label>{settles && <label className="dp-check"><input type="checkbox" checked={confirmed} onChange={change => setConfirmed(change.target.checked)} />Confirmé con el acreedor que este monto deja el saldo en cero.</label>}<div className="dp-payment-result"><span>Saldo actual<strong>{formatMxn(balance)}</strong></span><span>Después del pago<strong>{formatMxn(settles ? 0 : updatedBalance ? cents(updatedBalance) : Math.max(0, balance - cents(principal || amount)))}</strong></span></div><label>Notas<textarea rows={2} maxLength={1000} value={notes} onChange={change => setNotes(change.target.value)} /></label>{(validation || error) && <p className="dp-error" role="alert">{validation || error}</p>}<div className="dp-form-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit" loading={busy}>Confirmar pago registrado</Button></div></form></Modal>
+  return <Modal open title={`Registrar pago · ${debt.name}`} panelClassName="dp-modal dp-payment-modal" onClose={onClose}><form className="dp-form" onSubmit={submit}>
+    <div className="dp-payment-summary"><span>Pago a registrar</span><strong>{formatMxn(cents(amount))}</strong><p>{labelDate(date)} · {accounts.find(account => account.id === accountId)?.name ?? 'Selecciona una cuenta'}</p></div>
+    <div className="dp-payment-result"><span>Saldo pendiente<strong>{formatMxn(balance)}</strong></span><span>Después del pago<strong>{formatMxn(settles ? 0 : updatedBalance ? cents(updatedBalance) : Math.max(0, balance - cents(principal || amount)))}</strong></span></div>
+    <p className="dp-hint">FARO actualizará el saldo restante, tu historial y los próximos pagos automáticamente.{available > 0 && ` Se usarán ${formatMxn(cents(fromPlan || '0'))} de tu reserva de Plan.`}</p>
+    <details className="dp-payment-adjustments"><summary>Ajustar monto, fecha o cuenta</summary>
+      <div className="dp-form-grid"><MoneyField label="Pago real MXN" value={amount} onChange={value => { setAmount(value); setFromPlan(moneyInput(Math.min(cents(value), available))) }} /><label>Fecha real de pago<input required type="date" max={dateKey()} min={debt.balanceDate} value={date} onChange={change => setDate(change.target.value)} onInput={change => setDate(change.currentTarget.value)} onBlur={change => setDate(change.currentTarget.value)} /></label></div>
+      <label>Cuenta del pago<select required value={accountId} onChange={change => { setAccountId(change.target.value); setFromPlan(moneyInput(Math.min(cents(amount), debtPlanBalanceCents(data, change.target.value)))) }}><option value="">Selecciona</option>{accounts.map(account => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
+      <MoneyField label="Usar de Plan MXN" value={fromPlan} min="0" onChange={setFromPlan} />
+      <label>Notas<textarea rows={2} maxLength={1000} value={notes} onChange={change => setNotes(change.target.value)} /></label>
+    </details>
+    <details className="dp-payment-adjustments"><summary>Ajustes del acreedor</summary>
+      <MoneyField label="Abono al saldo MXN · opcional" required={false} min="0" value={principal} onChange={setPrincipal} /><p className="dp-hint">El pago completo se descuenta del saldo guardado. Ajusta el capital sólo si el acreedor reporta una distribución distinta.</p>
+      {!settles && <><MoneyField label="Saldo a plazo después de este pago MXN" required={false} min="0" value={updatedBalance} onChange={setUpdatedBalance} /><p className="dp-hint">Sólo si {debt.creditor || 'el acreedor'} reporta una corrección al saldo.</p><MoneyField label="Nuevo monto para liquidar MXN" required={false} value={updatedQuote} onChange={setUpdatedQuote} /><label>Cotización válida hasta<input type="date" min={date} value={quoteUntil} onChange={change => setQuoteUntil(change.target.value)} /></label></>}
+      <label className="dp-check"><input type="checkbox" checked={settles} onChange={change => setSettles(change.target.checked)} />Este pago liquida la deuda</label>
+    </details>
+    {settles && <label className="dp-check"><input type="checkbox" checked={confirmed} onChange={change => setConfirmed(change.target.checked)} />Confirmé con el acreedor que este monto deja el saldo en cero.</label>}
+    {(validation || error) && <p className="dp-error" role="alert">{validation || error}</p>}
+    <div className="dp-form-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit" loading={busy}>Registrar pago</Button></div>
+  </form></Modal>
 }
 
 function DebtLinks({ debt, data, busy, error, onClose, onLink }: { debt: FinanceDebt; data: FinanceData; busy: boolean; error: string; onClose: () => void; onLink: (debtId: string | undefined, source: { recurringId?: string; transactionId?: string }) => Promise<void> }) {

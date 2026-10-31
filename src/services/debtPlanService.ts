@@ -28,6 +28,20 @@ export function validSettlementQuote(debt: FinanceDebt, data: FinanceData, date:
   return !payments.some((payment, index) => payment.transactionDate >= quoteDate && (!quotePayment || index > payments.indexOf(quotePayment)))
 }
 
+/** A running estimate is distinct from a creditor's valid payoff quote. */
+export function debtPayoffEstimateCents(debt: FinanceDebt, data: FinanceData) {
+  const remaining = debtRemainingCents(debt, data)
+  if (!remaining) return 0
+  const quoted = debtWithLatestQuote(debt, data)
+  if (!quoted.settlementCents || !quoted.quoteDate) return remaining
+  const payments = debtPayments(debt, data).slice().sort((a, b) => a.transactionDate.localeCompare(b.transactionDate) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+  const quotePayment = payments.filter(payment => payment.transactionDate === quoted.quoteDate && payment.debtQuoteCents != null).at(-1)
+  const subsequent = payments.filter((payment, index) => payment.transactionDate > quoted.quoteDate!
+    || (payment.transactionDate === quoted.quoteDate && quotePayment != null && index > payments.indexOf(quotePayment)))
+  const paid = subsequent.reduce((sum, payment) => sum + (payment.debtPrincipalCents ?? payment.amountCents) - (payment.debtBalanceAdjustmentCents ?? 0), 0)
+  return Math.min(remaining, Math.max(0, quoted.settlementCents - paid))
+}
+
 export interface DebtPlanEvent {
   id: string
   debtId: string

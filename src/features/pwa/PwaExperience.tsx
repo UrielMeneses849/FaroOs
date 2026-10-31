@@ -20,6 +20,7 @@ export function PwaExperience() {
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent>()
   const [online, setOnline] = useState(() => navigator.onLine)
   const [installing, setInstalling] = useState(false)
+  const [updateStatus, setUpdateStatus] = useState('')
   const registrationRef = useRef<ServiceWorkerRegistration | undefined>(undefined)
   const {
     needRefresh: [needRefresh, setNeedRefresh],
@@ -29,6 +30,7 @@ export function PwaExperience() {
     immediate: true,
     onRegisteredSW(_url, registration) {
       registrationRef.current = registration
+      if (navigator.onLine) void registration?.update().catch(() => {})
     },
     onRegisterError(error) {
       if (import.meta.env.DEV) console.debug('[FARO PWA] Service worker registration failed.', error)
@@ -44,6 +46,17 @@ export function PwaExperience() {
         void registrationRef.current?.update().catch(() => { /* Retry on the next foreground / online event. */ })
       }
     }
+    const manualUpdate = () => {
+      const registration = registrationRef.current
+      if (!navigator.onLine) { setUpdateStatus('Conéctate a internet para actualizar FARO.'); return }
+      if (!registration) { setUpdateStatus('La app sigue cargando. Vuelve a intentar en unos segundos.'); return }
+      if (registration.waiting) { setNeedRefresh(true); return }
+      setUpdateStatus('Buscando actualizaciones…')
+      void registration.update().then(() => {
+        if (registration.waiting) setNeedRefresh(true)
+        setUpdateStatus(registration.installing ? 'Descargando la actualización…' : 'FARO está al día.')
+      }).catch(() => setUpdateStatus('No se pudo comprobar la actualización. Intenta de nuevo.'))
+    }
     const handleInstallPrompt = (event: Event) => {
       event.preventDefault()
       if (!isStandalone() && sessionStorage.getItem(installDismissedKey) !== 'true') {
@@ -57,6 +70,7 @@ export function PwaExperience() {
     window.addEventListener('beforeinstallprompt', handleInstallPrompt)
     window.addEventListener('appinstalled', handleInstalled)
     window.addEventListener('online', handleOnline)
+    window.addEventListener('faro:pwa-check-update', manualUpdate)
     window.addEventListener('offline', handleOffline)
     document.addEventListener('visibilitychange', checkUpdate)
     const updateTimer = window.setInterval(checkUpdate, 60 * 60 * 1000)
@@ -64,11 +78,12 @@ export function PwaExperience() {
       window.removeEventListener('beforeinstallprompt', handleInstallPrompt)
       window.removeEventListener('appinstalled', handleInstalled)
       window.removeEventListener('online', handleOnline)
+      window.removeEventListener('faro:pwa-check-update', manualUpdate)
       window.removeEventListener('offline', handleOffline)
       document.removeEventListener('visibilitychange', checkUpdate)
       window.clearInterval(updateTimer)
     }
-  }, [nativeRuntime])
+  }, [nativeRuntime, setNeedRefresh])
 
   if (nativeRuntime) return null
 
@@ -91,6 +106,7 @@ export function PwaExperience() {
 
   return (
     <aside className="pwa-experience" aria-live="polite" aria-atomic="true">
+      {updateStatus && !needRefresh && <section className="pwa-status-card"><RefreshCw size={17} /><div><strong>{updateStatus}</strong></div><button type="button" aria-label="Cerrar estado de actualización" onClick={() => setUpdateStatus('')}><X size={16} /></button></section>}
       {installPrompt && (
         <section className="pwa-install-card">
           <img src={`${import.meta.env.BASE_URL}pwa-icons/faro-192.png`} alt="" />

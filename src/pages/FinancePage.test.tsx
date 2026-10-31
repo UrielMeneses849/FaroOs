@@ -285,7 +285,7 @@ describe('Plan payments in recurring expenses', () => {
     expect(recurring.getAllByText('Moto').length).toBeGreaterThan(1)
     expect(recurring.getByText('Pagado')).toBeInTheDocument()
     expect(within(screen.getByRole('region', { name: 'Gastos eventuales' })).queryByText('Pago · Moto')).not.toBeInTheDocument()
-    fireEvent.click(recurring.getAllByRole('button', { name: 'Registrar pago' })[0])
+    fireEvent.click(recurring.getAllByRole('button', { name: 'Otro monto o fecha' })[0])
     expect(await screen.findByRole('dialog', { name: 'Registrar pago · Moto' })).toBeInTheDocument()
     expect(screen.getByLabelText('Pago real MXN')).toHaveValue(850)
     expect(mocks.save).not.toHaveBeenCalled()
