@@ -1,3 +1,4 @@
+import { scheduledDebtPayments } from './debtSchedule'
 import { addDays, addMonths, endOfMonth, format, isAfter, isBefore, isSameMonth, parseISO, startOfMonth } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { debtPlanAvailableCents, debtPlanBalanceCents } from './debtPlanBalance'
@@ -284,6 +285,9 @@ function financeProjectionComponents(data: FinanceData, month: Date, reference: 
       else if (item.type === 'expense' || item.type === 'debt_payment') gastosPendientes += occurrence.amountCents
     }
   }
+  gastosPendientes += scheduledDebtPayments(data, format(endOfMonth(month), 'yyyy-MM-dd'), reference)
+    .filter(payment => inMonth(payment.date, month))
+    .reduce((sum, payment) => sum + payment.amountCents, 0)
   // Budgets are envelopes, not second movements. Reserve only the portion that
   // has not already been committed by real or planned expenses in each category.
   gastosPendientes += financeBudgetReservations(data, month, reference).reduce((sum, item) => sum + item.amountCents, 0)
@@ -482,7 +486,7 @@ function budgetMovementCentsForPeriod(data: FinanceData, {
   periodEnd,
   isPersonal,
   sourceBudgetIds = [],
-}: Pick<CanonicalFinanceBudget, 'budget' | 'periodStart' | 'periodEnd' | 'isPersonal' | 'sourceBudgetIds'>) {
+}: Pick<CanonicalFinanceBudget, 'budget' | 'periodStart' | 'periodEnd' | 'isPersonal' | 'sourceBudgetIds'>, reference = new Date()) {
   const categoryIds = new Set(isPersonal
     ? data.categories
       .filter((category) => category.type === 'expense' && isPersonalName(category.name))
@@ -511,11 +515,16 @@ function budgetMovementCentsForPeriod(data: FinanceData, {
       return materialized ? occurrenceSum : occurrenceSum + occurrence.amountCents
     }, 0)
   }, 0)
-  return transactionCents + recurringCents
+  const isPlan = data.categories.some(category => category.id === budget.categoryId
+    && category.type === 'expense' && category.name.trim().toLowerCase() === 'plan')
+  const scheduledDebtCents = isPlan ? scheduledDebtPayments(data, periodEnd, reference)
+    .filter(payment => payment.date >= periodStart)
+    .reduce((sum, payment) => sum + payment.amountCents, 0) : 0
+  return transactionCents + recurringCents + scheduledDebtCents
 }
 
-function budgetMovementCents(data: FinanceData, budget: CanonicalFinanceBudget) {
-  return budgetMovementCentsForPeriod(data, budget)
+function budgetMovementCents(data: FinanceData, budget: CanonicalFinanceBudget, reference = new Date()) {
+  return budgetMovementCentsForPeriod(data, budget, reference)
 }
 
 /** Planned and completed personal spending already dated inside a fortnight. */
@@ -564,7 +573,7 @@ export function personalBudgetBalanceIntoPeriod(data: FinanceData, periodStart: 
   return previous.budget.plannedAmountCents - budgetMovementCents(data, previous)
 }
 
-function reservationsForBudgets(data: FinanceData, budgets: CanonicalFinanceBudget[]): FinanceBudgetReservation[] {
+function reservationsForBudgets(data: FinanceData, budgets: CanonicalFinanceBudget[], reference: Date): FinanceBudgetReservation[] {
   return budgets
     .map((budget) => {
       const previousPeriodEnd = format(addDays(parseISO(budget.periodStart), -1), 'yyyy-MM-dd')
@@ -592,7 +601,7 @@ function reservationsForBudgets(data: FinanceData, budgets: CanonicalFinanceBudg
         periodStart: budget.periodStart,
         periodEnd: budget.periodEnd,
         label: `Reserva · ${budget.budget.name ?? budget.category?.name ?? (budget.isPersonal ? 'Gastos Personales' : 'Presupuesto')} (${budget.periodStart.slice(-2) === '01' ? 'Q1' : 'Q2'})`,
-        amountCents: Math.max(0, budget.budget.plannedAmountCents + adjustmentCents - budgetMovementCents(data, budget)),
+        amountCents: Math.max(0, budget.budget.plannedAmountCents + adjustmentCents - budgetMovementCents(data, budget, reference)),
         sourceBudgetIds: budget.sourceBudgetIds,
       }
     })
@@ -614,7 +623,7 @@ export function personalBudgetReservations(data: FinanceData, month: Date, refer
     .filter((budget) => budget.isPersonal
       && budget.periodStart <= selectedMonthEnd && budget.periodEnd >= selectedMonthStart
       && (!selectedIsCurrent || budget.periodEnd >= referenceKey))
-  return reservationsForBudgets(data, budgets)
+  return reservationsForBudgets(data, budgets, reference)
 }
 
 /** Remaining, not-yet-dated envelopes for the selected expense categories. */
@@ -637,7 +646,7 @@ export function categoryBudgetReservations(
   // Plan's allocated money already sits outside the operational balance.
   let reservedPlanCents = debtPlanAvailableCents(data)
   const planCategoryIds = new Set(data.categories.filter(category => category.type === 'expense' && category.name.trim().toLowerCase() === 'plan').map(category => category.id))
-  return reservationsForBudgets(data, budgets).map(reservation => {
+  return reservationsForBudgets(data, budgets, reference).map(reservation => {
     const planBudget = budgets.find(budget => budget.budget.id === reservation.budgetId && planCategoryIds.has(budget.budget.categoryId))
     if (!planBudget) return reservation
     const alreadyReserved = Math.min(reservedPlanCents, reservation.amountCents)

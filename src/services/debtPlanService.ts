@@ -1,36 +1,14 @@
 import { addDays, addMonths, differenceInCalendarDays, endOfMonth, format, parseISO, startOfMonth } from 'date-fns'
 import type { FinanceDebt } from '../features/finance/debtTypes'
-import type { FinanceData, FinanceFrequency, FinanceTransaction } from '../features/finance/financeTypes'
+import type { FinanceData, FinanceTransaction } from '../features/finance/financeTypes'
+import { advanceDebtDate, debtPayments, debtRemainingCents, scheduledDebtPayments } from './debtSchedule'
+export { advanceDebtDate, debtPayments, debtRemainingCents } from './debtSchedule'
 import { debtPlanAvailableCents, debtPlanBalanceCents } from './debtPlanBalance'
 import { calculateFinanceMetrics, canonicalFinanceBudgetGroups } from './financeService'
 import { financeLiquidityProjection } from './financeLiquidityProjection'
 
 const key = (date: Date) => format(date, 'yyyy-MM-dd')
 const outflow = (type: string) => type === 'expense' || type === 'debt_payment'
-export const debtPayments = (debt: FinanceDebt, data: FinanceData) => data.transactions.filter(transaction =>
-  transaction.debtId === debt.id && transaction.status === 'completed' && outflow(transaction.type)
-  && transaction.transactionDate >= debt.balanceDate)
-
-export function debtRemainingCents(debt: FinanceDebt, data: FinanceData) {
-  const payments = debtPayments(debt, data)
-  if (payments.some(payment => payment.debtSettlement)) return 0
-  const nominal = Math.max(0, debt.balanceCents - payments.reduce((sum, payment) => sum + (payment.debtPrincipalCents ?? payment.amountCents) - (payment.debtBalanceAdjustmentCents ?? 0), 0))
-  if (debt.agreementStatus === 'confirmed' && debt.agreementCents) {
-    const agreedPaid = payments.filter(payment => payment.transactionDate >= (debt.agreementDate ?? debt.balanceDate))
-      .reduce((sum, payment) => sum + (payment.debtPrincipalCents ?? payment.amountCents) - (payment.debtBalanceAdjustmentCents ?? 0), 0)
-    return Math.min(nominal, Math.max(0, debt.agreementCents - agreedPaid))
-  }
-  return nominal
-}
-
-export function advanceDebtDate(date: string, frequency: FinanceFrequency, anchorDay?: number) {
-  const parsed = parseISO(date)
-  if (frequency === 'weekly' || frequency === 'biweekly') return key(addDays(parsed, frequency === 'weekly' ? 7 : 14))
-  const next = addMonths(startOfMonth(parsed), frequency === 'monthly' ? 1 : frequency === 'quarterly' ? 3 : 12)
-  next.setDate(Math.min(anchorDay ?? parsed.getDate(), endOfMonth(next).getDate()))
-  return key(next)
-}
-
 /** Quotes captured after a payment supersede the original quote and undo with it. */
 export function debtWithLatestQuote(debt: FinanceDebt, data: FinanceData): FinanceDebt {
   const latest = debtPayments(debt, data).filter(payment => payment.debtQuoteCents != null && payment.transactionDate >= (debt.quoteDate ?? debt.balanceDate))
@@ -111,15 +89,17 @@ export function projectDebtPlan(data: FinanceData, options: {
       date = advanceDebtDate(date, recurring.frequency, parseISO(recurring.nextOccurrence).getDate())
     }
   }
-  const due = new Map<string, Array<{ debt: FinanceDebt; amount: number; transactionId?: string; recurringId?: string; occurrenceId?: string }>>()
-  const addDue = (date: string, value: { debt: FinanceDebt; amount: number; transactionId?: string; recurringId?: string; occurrenceId?: string }) => {
+  type DuePayment = { debt: FinanceDebt; amount: number; transactionId?: string; recurringId?: string; occurrenceId?: string; settles?: boolean; principalCents?: number }
+  const due = new Map<string, DuePayment[]>()
+  const addDue = (date: string, value: DuePayment) => {
     const effective = date < today ? today : date
     if (effective <= horizon && value.amount > 0) due.set(effective, [...(due.get(effective) ?? []), value])
   }
+  const fallbackSchedule = scheduledDebtPayments(data, horizon, reference)
   for (const debt of debts) {
     const linked = data.recurring.filter(item => item.debtId === debt.id && item.isActive)
     const planned = data.transactions.filter(item => item.debtId === debt.id && outflow(item.type) && ['planned', 'pending'].includes(item.status))
-    for (const item of planned) addDue(item.transactionDate, { debt, amount: item.amountCents, transactionId: item.id })
+    for (const item of planned) addDue(item.transactionDate, { debt, amount: item.amountCents, transactionId: item.id, settles: item.debtSettlement, principalCents: item.debtPrincipalCents })
     for (const recurring of linked) {
       for (const occurrence of confirmed.filter(item => item.recurringTransactionId === recurring.id && item.status !== 'paid' && item.status !== 'skipped')) {
         if (data.transactions.some(item => item.recurringTransactionId === recurring.id && item.transactionDate === occurrence.expectedDate && item.status !== 'cancelled')) continue
@@ -128,15 +108,8 @@ export function projectDebtPlan(data: FinanceData, options: {
       }
       if (!confirmed.some(item => item.recurringTransactionId === recurring.id && item.period === `${today.slice(0, 7)}-01`)) warnings.add(`Define el periodo actual de ${recurring.description} en Gastos.`)
     }
-    if (!linked.length) {
-      let date = debt.nextPaymentDate
-      // A balance snapshot already includes older payments, so don't replay them.
-      for (let guard = 0; date < debt.balanceDate && guard < 800; guard++) date = advanceDebtDate(date, debt.frequency, parseISO(debt.nextPaymentDate).getDate())
-      for (let guard = 0; date <= horizon && guard < 800; guard++) {
-        const alreadyPaid = debtPayments(debt, data).some(item => item.transactionDate === date)
-        if (!alreadyPaid && !planned.some(item => item.transactionDate === date)) addDue(date, { debt, amount: debt.paymentCents })
-        date = advanceDebtDate(date, debt.frequency, parseISO(debt.nextPaymentDate).getDate())
-      }
+    for (const payment of fallbackSchedule.filter(item => item.debt.id === debt.id)) {
+      addDue(payment.date, { debt, amount: payment.amountCents })
     }
     if (debt.agreementStatus === 'proposed') warnings.add(`El convenio de ${debt.name} es una propuesta; se conserva el pago actual hasta confirmarlo.`)
   }
@@ -161,7 +134,7 @@ export function projectDebtPlan(data: FinanceData, options: {
     for (const event of projection.events) if (event.date >= today && event.date <= horizon) {
       // Keep linked commitments in budget usage, but replace their dated cash
       // events with the debt schedule so neither the debt nor budget is doubled.
-      if (linkedMovementEvents.has(event.id) || linkedRecurringEvents.has(event.id)) continue
+      if (event.source === 'debt' || linkedMovementEvents.has(event.id) || linkedRecurringEvents.has(event.id)) continue
       otherEvents.set(event.date, (otherEvents.get(event.date) ?? 0) + event.amountCents)
     }
   }
@@ -179,12 +152,12 @@ export function projectDebtPlan(data: FinanceData, options: {
     || (right.balanceCents - (right.settlementCents ?? right.balanceCents))
       - (left.balanceCents - (left.settlementCents ?? left.balanceCents))
     || left.balanceCents - right.balanceCents)
-  const pay = (debt: FinanceDebt, date: string, amount: number, kind: DebtPlanEvent['kind'], source?: { transactionId?: string; recurringId?: string; occurrenceId?: string }, settlement = false) => {
+  const pay = (debt: FinanceDebt, date: string, amount: number, kind: DebtPlanEvent['kind'], source?: { transactionId?: string; recurringId?: string; occurrenceId?: string }, settlement = false, principalCents?: number) => {
     const before = balances.get(debt.id) ?? 0
-    const paid = Math.min(before, amount)
+    const paid = before > 0 ? source?.transactionId ? amount : Math.min(before, amount) : 0
     if (paid <= 0) return
-    const after = settlement ? 0 : before - paid
-    if (settlement) avoided += before - paid
+    const after = settlement ? 0 : Math.max(0, before - (principalCents ?? paid))
+    if (settlement) avoided += Math.max(0, before - paid)
     balances.set(debt.id, after)
     cash -= paid
     pool -= Math.min(pool, paid)
@@ -202,11 +175,11 @@ export function projectDebtPlan(data: FinanceData, options: {
       if (lookKey !== date) futureCash += otherEvents.get(lookKey) ?? 0
       for (const item of due.get(lookKey) ?? []) {
         const left = futureBalances.get(item.debt.id) ?? 0
-        const scheduled = item.debt.agreementStatus === 'confirmed' && item.debt.agreementCents && item.debt.agreementPayments && lookKey >= (item.debt.agreementDate ?? item.debt.balanceDate)
+        const scheduled = !item.transactionId && item.debt.agreementStatus === 'confirmed' && item.debt.agreementCents && item.debt.agreementPayments && lookKey >= (item.debt.agreementDate ?? item.debt.balanceDate)
           ? Math.ceil(item.debt.agreementCents / item.debt.agreementPayments) : item.amount
-        const paid = Math.min(left, scheduled)
+        const paid = left > 0 ? item.transactionId ? scheduled : Math.min(left, scheduled) : 0
         futureCash -= paid
-        futureBalances.set(item.debt.id, left - paid)
+        futureBalances.set(item.debt.id, item.settles ? 0 : Math.max(0, left - (item.principalCents ?? paid)))
       }
       floor = Math.min(floor, futureCash)
     }
@@ -227,7 +200,9 @@ export function projectDebtPlan(data: FinanceData, options: {
     }
     for (const item of todayDue) {
       if (!activeAccounts.size) warnings.add('Crea una cuenta activa en MXN para registrar pagos.')
-      if (item.debt.agreementStatus === 'confirmed' && item.debt.agreementCents && item.debt.agreementPayments && date >= (item.debt.agreementDate ?? item.debt.balanceDate)) {
+      if (item.transactionId) {
+        pay(item.debt, date, item.amount, item.settles ? 'settlement' : 'payment', item, item.settles, item.principalCents)
+      } else if (item.debt.agreementStatus === 'confirmed' && item.debt.agreementCents && item.debt.agreementPayments && date >= (item.debt.agreementDate ?? item.debt.balanceDate)) {
         pay(item.debt, date, Math.ceil(item.debt.agreementCents / item.debt.agreementPayments), 'agreement', item)
       } else pay(item.debt, date, item.amount, 'payment', item)
     }

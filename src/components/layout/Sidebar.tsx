@@ -1,4 +1,4 @@
-import { ChevronDown, LogOut, PanelLeftClose, PanelLeftOpen, Sun, Target } from 'lucide-react'
+import { ChevronDown, LogOut, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useId, useState, type SyntheticEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { NavLink, useLocation } from 'react-router-dom'
@@ -29,8 +29,6 @@ export function Sidebar({ variant = 'default', collapsed, onToggleCollapsed, ope
     }) },
     { ...navigationGroups[1], collapsible: false, children: [
       ...personalIds.map((id) => all.find((entry) => entry.id === id)!),
-      { id: 'goals', label: 'Objetivos', icon: Target, route: '/goals', activePrefix: '/goals/' },
-      { id: 'today', label: 'Hoy', icon: Sun, route: '/today' },
       ...all.filter((item) => item.id === 'vault'),
     ] },
     ...navigationGroups.filter((group) => group.id === 'device' || group.id === 'faro'),

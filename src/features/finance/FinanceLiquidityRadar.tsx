@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Area, AreaChart, CartesianGrid, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Button, Modal } from '../../components/common'
 import { FinanceProjectionGuide } from './FinanceProjectionGuide'
+import { FinanceOverviewChart } from './FinanceOverviewChart'
 import type { FinanceData, FinanceLiquiditySnapshot } from './financeTypes'
 import {
   financeLiquidityDeviation,
@@ -20,6 +21,9 @@ import { canonicalFinanceBudgetGroups, formatMxn, personalBudgetBalanceIntoPerio
 import { fortnightPeriodForMonth } from '../../services/financeBudgetCycle'
 
 interface FinanceLiquidityRadarProps {
+  readOnly?: boolean
+  onOpenSimulation?: () => void
+  onOpenDetails?: () => void
   summary?: boolean
   data: FinanceData
   month: Date
@@ -54,7 +58,7 @@ const excludedCategoryReservationsKey = 'faro-finance-liquidity-excluded-budget-
 const personalScenarioStorageKey = (userId: string | undefined, periodStart: string) =>
   `faro-finance-liquidity-q2-scenario:v1:${userId ?? 'local'}:${periodStart}`
 
-export function FinanceLiquidityRadar({ summary = false, data, month, availableTodayCents, snapshot, userId, onSaveMinimumBuffer }: FinanceLiquidityRadarProps) {
+export function FinanceLiquidityRadar({ readOnly = false, onOpenSimulation, onOpenDetails, summary = false, data, month, availableTodayCents, snapshot, userId, onSaveMinimumBuffer }: FinanceLiquidityRadarProps) {
   const [simulation, setSimulation] = useState<LiquiditySimulationInput>()
   const [personalBudgetScenario, setPersonalBudgetScenario] = useState<PersonalBudgetScenarioInput>()
   const [showSimulator, setShowSimulator] = useState(false)
@@ -252,7 +256,7 @@ export function FinanceLiquidityRadar({ summary = false, data, month, availableT
           </div>
           <Button icon={<Sparkles size={15} />} disabled={isHistorical}
             title={isHistorical ? 'Los periodos cerrados muestran sólo movimientos realizados.' : undefined}
-            onClick={() => setShowSimulator(true)}>Simular movimiento</Button>
+            onClick={() => onOpenSimulation ? onOpenSimulation() : setShowSimulator(true)}>Simular movimiento</Button>
         </div>}
         <div className="liquidity-radar__minimum"><small>Punto mínimo</small><strong>{formatMxn(projection.minimumBalanceCents)}</strong><span>{dateLabel(projection.minimumDate, "EEE d 'de' MMM")}</span></div>
       </header>
@@ -260,7 +264,7 @@ export function FinanceLiquidityRadar({ summary = false, data, month, availableT
         projection={projection}
         bufferCents={data.liquidityPreference.minimumOperatingBufferCents}
         q2ReleaseDate={q2Period.periodStart}
-        onQ2ReleaseClick={isHistorical || summary ? undefined : () => {
+        onQ2ReleaseClick={readOnly || isHistorical || summary ? undefined : () => {
           setIncludePersonalBudgetReservations(true)
           setShowBudgetScenario(true)
         }}
@@ -317,7 +321,7 @@ export function FinanceLiquidityRadar({ summary = false, data, month, availableT
       </div>}
     </section>
 
-  if (summary) return <section className="liquidity-radar liquidity-radar--summary" aria-label="Tu disponible en el tiempo">{chartCard}</section>
+  if (summary) return <FinanceOverviewChart projection={projection} bufferCents={data.liquidityPreference.minimumOperatingBufferCents} onOpenDetails={onOpenDetails} />
 
   return <section className="liquidity-radar" aria-label="Radar de liquidez">
     {chartCard}

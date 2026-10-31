@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import { Sidebar } from './Sidebar'
@@ -9,12 +10,12 @@ vi.mock('../../hooks/auth', () => ({
   useAuth: () => auth,
 }))
 
-function renderSidebar(pathname: string, openGroups = {}, collapsed = false) {
+function renderSidebar(pathname: string, openGroups = {}, collapsed = false, variant: 'default' | 'paper' = 'default') {
   const onToggleGroup = vi.fn()
   const onToggleCollapsed = vi.fn()
   render(
     <MemoryRouter initialEntries={[pathname]}>
-      <Sidebar collapsed={collapsed} onToggleCollapsed={onToggleCollapsed} openGroups={openGroups} onToggleGroup={onToggleGroup} />
+      <Sidebar variant={variant} collapsed={collapsed} onToggleCollapsed={onToggleCollapsed} openGroups={openGroups} onToggleGroup={onToggleGroup} />
     </MemoryRouter>,
   )
   return { onToggleGroup, onToggleCollapsed }
@@ -82,6 +83,31 @@ describe('Sidebar V2', () => {
     expect(screen.getByRole('tooltip')).toHaveTextContent('Finanzas')
     fireEvent.keyDown(finance, { key: 'Escape' })
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['default', false], ['default', true], ['paper', false], ['paper', true],
+  ] as const)('omits Objetivos and Hoy from the %s sidebar with collapsed=%s', (variant, collapsed) => {
+    renderSidebar('/finance', { personal: true, organization: true, faro: true }, collapsed, variant)
+    expect(screen.queryByRole('link', { name: 'Objetivos', hidden: true })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Hoy', hidden: true })).not.toBeInTheDocument()
+    const links = screen.getAllByRole('link', { hidden: true })
+    expect(links.map(link => link.getAttribute('href'))).not.toContain('/goals')
+    expect(links.map(link => link.getAttribute('href'))).not.toContain('/today')
+    expect(screen.getByRole('link', { name: 'Finanzas' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('link', { name: 'Diario' })).toHaveAttribute('href', '/journal')
+  })
+
+  it('keeps keyboard access and rail tooltips working after the removed entries', async () => {
+    const user = userEvent.setup()
+    renderSidebar('/goals/existing-goal', {}, true, 'paper')
+    screen.getByRole('link', { name: 'Necesidades' }).focus()
+    await user.tab()
+    expect(screen.getByRole('link', { name: 'FinOps' })).toHaveFocus()
+    expect(screen.getByRole('tooltip')).toHaveTextContent('FinOps')
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Expandir menú lateral' })).toBeEnabled()
   })
 
 })

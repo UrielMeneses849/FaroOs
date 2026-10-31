@@ -1,0 +1,62 @@
+.finance-monthly-overview {
+  --overview-ink: #172333;
+  --overview-muted: #637085;
+  --overview-line: #dfe5ed;
+  display: block; min-width: 0; margin: 0 0 20px;
+  border: 1px solid var(--overview-line); border-radius: 14px;
+  color: var(--overview-ink); background: #fff; color-scheme: light; overflow: hidden;
+}
+#root .finance-os.finance-os--overview .finance-monthly-overview > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 22px 24px 18px; border: 0; }
+#root .finance-os.finance-os--overview .finance-monthly-overview h2 { color: var(--overview-ink); margin: 4px 0 0; font-size: 20px; line-height: 1.3; letter-spacing: -.025em; }
+#root .finance-os.finance-os--overview .finance-monthly-overview__eyebrow { color: var(--overview-muted); font-size: 12px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
+#root .finance-os.finance-os--overview .finance-monthly-overview__period { color: var(--overview-muted); font-size: 13px; text-transform: capitalize; }
+#root .finance-os.finance-os--overview .finance-monthly-overview__forecasts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0 24px 24px; }
+#root .finance-os.finance-os--overview .finance-monthly-overview__forecasts > div { position: relative; display: flex; min-width: 0; flex-direction: column; align-items: flex-start; gap: 6px; padding: 17px 16px; border: 1px solid var(--overview-line); border-radius: 10px; background: #f8fafc; }
+#root .finance-os.finance-os--overview .finance-monthly-overview__forecasts svg { color: #45658b; margin-bottom: 5px; }
+#root .finance-os.finance-os--overview .finance-monthly-overview__forecasts dt { color: #526176; font-size: 13px; font-weight: 500; line-height: 1.45; }
+#root .finance-os.finance-os--overview .finance-monthly-overview__forecasts dd { margin: 0; color: var(--overview-ink); font-size: clamp(18px, 1.55vw, 25px); font-weight: 650; letter-spacing: -.035em; line-height: 1.3; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+#root .finance-os.finance-os--overview .finance-monthly-overview__forecasts dd span { font-size: .65em; }
+#root .finance-os.finance-os--overview .finance-monthly-overview__forecasts small { color: #627086; font-size: 12px; line-height: 1.5; }
+#root .finance-os.finance-os--overview .finance-monthly-overview__forecasts .is-income { background: #f3f9f6; border-color: #d8e8e0; }
+#root .finance-os.finance-os--overview .finance-monthly-overview__forecasts .is-income svg { color: #22755a; }
+#root .finance-os.finance-os--overview .finance-monthly-overview__forecasts .is-expense { background: #fdf8f8; border-color: #eddee1; }
+#root .finance-os.finance-os--overview .finance-monthly-overview__forecasts .is-expense svg { color: #a84d5b; }
+#root .finance-os.finance-os--overview .finance-monthly-overview__forecasts :is(.is-net, .is-savings) { background: #f3f6fb; border-color: #dbe4f0; }
+#root .finance-os.finance-os--overview .finance-monthly-overview__forecasts .is-deficit { background: #fff5f4; border-color: #edd6d5; }
+#root .finance-os.finance-os--overview .finance-monthly-overview__forecasts .is-deficit :is(svg, dd) { color: #a13e48; }
+#root .finance-os.finance-os--overview .finance-monthly-overview__comparison { padding: 20px 24px; border-top: 1px solid var(--overview-line); }
+#root .finance-os.finance-os--overview .finance-monthly-overview__comparison h3 { color: var(--overview-ink); margin: 0 0 15px; font-size: 16px; line-height: 1.4; letter-spacing: -.02em; }
+.finance-monthly-overview__table-wrap { min-width: 0; overflow-x: auto; border: 1px solid var(--overview-line); border-radius: 9px; }
+.finance-monthly-overview__table-wrap:focus-visible { outline: 2px solid #3d6f9c; outline-offset: 3px; }
+.finance-monthly-overview table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+#root .finance-os.finance-os--overview .finance-monthly-overview :is(th, td) { color: var(--overview-ink); padding: 12px 15px; font-size: 13px; line-height: 1.45; text-align: right; white-space: nowrap; border: 0; border-bottom: 1px solid var(--overview-line); }
+#root .finance-os.finance-os--overview .finance-monthly-overview thead th { color: #59687c; background: #f6f8fb; font-size: 12px; font-weight: 600; }
+#root .finance-os.finance-os--overview .finance-monthly-overview tr > :first-child { text-align: left; white-space: normal; }
+#root .finance-os.finance-os--overview .finance-monthly-overview tbody th { font-weight: 550; }
+#root .finance-os.finance-os--overview .finance-monthly-overview tbody tr:last-child > * { border-bottom: 0; }
+#root .finance-os.finance-os--overview .finance-monthly-overview td span { font-size: 13px; }
+#root .finance-os.finance-os--overview .finance-monthly-overview td small { display: block; color: #647186; font-size: 12px; line-height: 1.5; }
+#root .finance-os.finance-os--overview .finance-monthly-overview td.is-over :is(span, small) { color: #a13e48; }
+#root .finance-os.finance-os--overview .finance-monthly-overview td.is-favorable span { color: #237456; }
+#root .finance-os.finance-os--overview .finance-monthly-overview td.is-even { color: #647186; }
+#root .finance-os.finance-os--overview .finance-monthly-overview__comparison > p { margin: 13px 0 0; color: #627086; font-size: 12px; line-height: 1.6; }
+@media (max-width: 1100px) { #root .finance-os.finance-os--overview .finance-monthly-overview__forecasts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) {
+  #root .finance-os.finance-os--overview .finance-monthly-overview { margin-top: 16px; }
+  #root .finance-os.finance-os--overview .finance-monthly-overview > header { align-items: flex-start; padding: 20px 17px 16px; }
+  #root .finance-os.finance-os--overview .finance-monthly-overview h2 { font-size: 18px; }
+  #root .finance-os.finance-os--overview .finance-monthly-overview__period { font-size: 12px; }
+  #root .finance-os.finance-os--overview .finance-monthly-overview__forecasts { gap: 10px; padding: 0 17px 18px; }
+  #root .finance-os.finance-os--overview .finance-monthly-overview__forecasts > div { padding: 14px 12px; }
+  #root .finance-os.finance-os--overview .finance-monthly-overview__forecasts dd { font-size: clamp(18px, 4.8vw, 21px); }
+  #root .finance-os.finance-os--overview .finance-monthly-overview__forecasts dt { font-size: 12px; }
+  #root .finance-os.finance-os--overview .finance-monthly-overview__comparison { padding: 18px 17px; }
+  #root .finance-os.finance-os--overview .finance-monthly-overview :is(th, td) { padding: 11px 12px; font-size: 12px; }
+}
+
+/* Each money tile keeps its full width on the narrowest phone layouts. */
+@media (max-width: 350px) {
+  #root .finance-os.finance-os--overview .finance-monthly-overview > header { flex-wrap: wrap; gap: 10px; }
+  #root .finance-os.finance-os--overview .finance-monthly-overview__forecasts { grid-template-columns: minmax(0, 1fr); }
+  #root .finance-os.finance-os--overview .finance-monthly-overview__forecasts dd { font-size: 21px; }
+}

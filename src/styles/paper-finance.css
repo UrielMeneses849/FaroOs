@@ -502,7 +502,10 @@
   body:has(.app-shell--paper) #root .finance-os .finance-tabs button { min-height: 36px; padding: 6px 9px; font-size: 13px; }
   body:has(.app-shell--paper) #root .finance-os .finance-new-movement { width: auto; min-width: 180px; min-height: 42px !important; padding: 9px 13px; font-size: 13px; }
   body:has(.app-shell--paper) #root .finance-os .finance-layout { flex: 1 1 0; grid-template-columns: minmax(0, 1fr) 244px !important; grid-template-rows: minmax(0, 1fr); gap: 16px; align-items: stretch; height: auto; min-height: 0; overflow: hidden; }
-  body:has(.app-shell--paper) #root .finance-os .finance-content { height: auto !important; min-height: 0; overflow-x: hidden !important; overflow-y: auto !important; scrollbar-gutter: stable; overscroll-behavior-y: contain; container-type: inline-size; container-name: finance-canvas; }
+  body:has(.app-shell--paper) #root .finance-os .finance-content { height: auto !important; min-height: 0; overflow-x: hidden !important; overflow-y: auto !important; scrollbar-gutter: stable; overscroll-behavior-y: contain; }
+  /* The display:contents fieldset also shares finance-content for legacy selectors.
+     Only the real canvas has a measurable width for the two-column queries. */
+  body:has(.app-shell--paper) #root .finance-os .finance-layout > div.finance-content { container-type: inline-size; container-name: finance-canvas; }
   body:has(.app-shell--paper) #root .finance-os .finance-side-kpis { position: static; align-self: stretch; height: auto; min-height: 0; max-height: 100%; overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; overscroll-behavior-y: contain; }
   body:has(.app-shell--paper) #root .finance-os .finance-side-kpis .finance-kpis { grid-template-columns: minmax(0, 1fr) !important; gap: 10px; width: 100%; }
   body:has(.app-shell--paper) #root .finance-os .finance-side-kpis .finance-kpi-group { grid-template-columns: minmax(0, 1fr); }

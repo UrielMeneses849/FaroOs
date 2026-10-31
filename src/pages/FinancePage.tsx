@@ -4,21 +4,29 @@ import { addDays, addMonths, endOfMonth, format, isSameDay, parseISO, subMonths 
 import { es } from 'date-fns/locale'
 import {
   ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight,
-  Ban, Calculator, CalendarDays, ChartNoAxesCombined, Check, Clock3, Copy, FileDown, FileUp, Landmark, Pencil, PiggyBank, Plus, RefreshCw, Repeat2,
+  Ban, Calculator, CalendarDays, Check, Clock3, Copy, FileDown, FileUp, Landmark, Pencil, PiggyBank, Plus, RefreshCw, Repeat2,
   RotateCcw, Target, Trash2, WalletCards, House, Ellipsis, Search,
 } from 'lucide-react'
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Bar, BarChart, CartesianGrid, Cell, LabelList, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Button, ConfirmDialog, EmptyState, Modal, ProgressBar } from '../components/common'
 import { PageHeader } from '../components/layout'
-import { ExpenseCategoryDonut } from '../features/finance/ExpenseCategoryDonut'
+import { FinanceOverviewAnalysis } from '../features/finance/FinanceOverviewAnalysis'
+import { FinanceMonthlyOverview } from '../features/finance/FinanceMonthlyOverview'
 import { FinanceLiquidityRadar } from '../features/finance/FinanceLiquidityRadar'
 import { SharedReceiptDialog } from '../features/finance/SharedReceiptDialog'
-import { FinanceNavigation } from '../features/finance/FinanceNavigation'
+import { FinanceNavigation, type FinancePanel } from '../features/finance/FinanceNavigation'
 import { FinanceCategoryManager, FundEntryEditor, ReservedContributionEditor } from '../features/finance/FinanceRecordDialogs'
 import { FinanceList } from '../features/finance/FinanceList'
-import { DebtPlanPanel } from '../features/finance/DebtPlanPanel'
+import { FinanceDecisionTools, type FinanceDecisionPanel } from '../features/finance/FinanceDecisionTools'
+import { financeDecisionPanels } from '../features/finance/financePanels'
+import { FinanceSimulationPanel } from '../features/finance/FinanceSimulationPanel'
+import { useFinanceSimulation } from '../hooks/useFinanceSimulation'
+import { useFinanceForecastJournal } from '../hooks/useFinanceForecastJournal'
+import { applyFinanceSimulation } from '../services/financeSimulation'
+import { DebtPaymentDialog, DebtPlanPanel } from '../features/finance/DebtPlanPanel'
 import { DebtMovementFields, DebtPicker } from '../features/finance/DebtMovementFields'
+import { scheduledDebtPayments, debtRemainingCents, debtHasRecurringSchedule, type ScheduledDebtPayment } from '../services/debtSchedule'
+import { financeDebtRepository } from '../repositories/financeDebtRepository'
 import { debtPlanBalanceCents } from '../services/debtPlanBalance'
 import type { FinanceDebt } from '../features/finance/debtTypes'
 import {
@@ -40,7 +48,7 @@ import {
 import { budgetNameForCategory, fortnightPeriodForMonth } from '../services/financeBudgetCycle'
 import { FINANCE_LIQUIDITY_PROJECTION_VERSION, financeLiquidityProjection } from '../services/financeLiquidityProjection'
 
-type Panel = 'overview' | 'advisor' | 'transactions' | 'income' | 'accounts' | 'budgets' | 'recurring' | 'savings' | 'fund' | 'goals' | 'plan'
+type Panel = FinancePanel
 type Dialog = 'movementMenu' | 'transaction' | 'account' | 'budget' | 'budgetClose' | 'recurring' | 'goal' | 'goalDetail' | 'contribution' | 'fundEntry' | 'goalItem' | 'purchaseItem' | 'categories' | 'editContribution' | null
 interface MovementPreset { type?: FinanceTransactionType; categoryName?: string; status?: FinanceTransactionStatus; contribution?: boolean }
 const typeLabel: Record<FinanceTransactionType, string> = {
@@ -71,13 +79,19 @@ const categoryTypeLabel: Record<FinanceCategoryType, string> = {
 export function FinancePage() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { data, loading, error, refresh, user } = useFinance()
+  const { data: realData, loadedForUserId, loading, error, refresh, user } = useFinance()
+  const simulation = useFinanceSimulation(user?.id)
+  const simulationEnabled = simulation.state.enabled
+  const data = useMemo(() => applyFinanceSimulation(realData, simulation.state), [realData, simulation.state])
+  const forecastJournal = useFinanceForecastJournal(realData, user?.id, loading || loadedForUserId !== user?.id, error, simulationEnabled)
   const [month, setMonth] = useState(() => new Date())
   const [panel, setPanel] = useState<Panel>(() => {
     const stored = sessionStorage.getItem('faro-finance-panel')
-    return ['overview', 'advisor', 'transactions', 'income', 'recurring', 'savings', 'fund', 'budgets', 'goals', 'accounts', 'plan'].includes(stored ?? '')
+    return ['overview', 'advisor', 'transactions', 'income', 'recurring', 'savings', 'fund', 'budgets', 'goals', 'accounts', 'plan', ...financeDecisionPanels.map(([id]) => id)].includes(stored ?? '')
       ? stored as Panel : 'overview'
   })
+  const [debtPayment, setDebtPayment] = useState<ScheduledDebtPayment>()
+  const [debtPaymentError, setDebtPaymentError] = useState('')
   const [dialog, setDialog] = useState<Dialog>(null)
   const [isFinanceMobile, setIsFinanceMobile] = useState(() => window.matchMedia('(max-width: 760px)').matches)
   useEffect(() => {
@@ -157,6 +171,8 @@ export function FinancePage() {
       consumedQuickLocation.current = entry
       if (!activeAccounts.length) {
         setFeedback(quickExpensePending ? 'Crea una cuenta antes de registrar tu primer gasto.' : 'Crea una cuenta antes de registrar tu primer movimiento.')
+      } else if (simulationEnabled) {
+        setPanel('simulation')
       } else if (quickExpensePending) {
         setMovementPreset({ type: 'expense', status: 'completed' })
         setDialog('transaction')
@@ -166,7 +182,7 @@ export function FinancePage() {
       navigate({ pathname: location.pathname, search: search.toString() ? `?${search}` : '', hash: location.hash }, { replace: true, state: location.state })
     })
     return () => { cancelled = true }
-  }, [activeAccounts.length, loading, location, navigate, quickExpensePending, quickMovementPending])
+  }, [simulationEnabled, activeAccounts.length, loading, location, navigate, quickExpensePending, quickMovementPending])
 
   useEffect(() => {
     const url = new URL(window.location.href)
@@ -201,9 +217,9 @@ export function FinancePage() {
     const timeout = window.setTimeout(() => setFeedback(''), 3000)
     return () => window.clearTimeout(timeout)
   }, [feedback])
-  useEffect(()=>{if(loading||dialog||sharedReceipt||sharePending||quickExpensePending||quickMovementPending)return;const candidate=data.budgets.find(item=>(item.periodEnd??item.month)<format(new Date(),'yyyy-MM-dd')&&!dismissedBudgetIds.includes(item.id)&&!data.budgetClosures.some(closure=>closure.budgetId===item.id));if(candidate)queueMicrotask(()=>{setClosingBudget(candidate);setDialog('budgetClose')})},[data.budgetClosures,data.budgets,dialog,dismissedBudgetIds,loading,quickExpensePending,quickMovementPending,sharedReceipt,sharePending])
+  useEffect(()=>{if(simulationEnabled||loading||dialog||sharedReceipt||sharePending||quickExpensePending||quickMovementPending)return;const candidate=data.budgets.find(item=>(item.periodEnd??item.month)<format(new Date(),'yyyy-MM-dd')&&!dismissedBudgetIds.includes(item.id)&&!data.budgetClosures.some(closure=>closure.budgetId===item.id));if(candidate)queueMicrotask(()=>{setClosingBudget(candidate);setDialog('budgetClose')})},[simulationEnabled,data.budgetClosures,data.budgets,dialog,dismissedBudgetIds,loading,quickExpensePending,quickMovementPending,sharedReceipt,sharePending])
   useEffect(() => {
-    if (loading || dialog || sharedReceipt || sharePending || quickExpensePending || quickMovementPending || !user || monthKey(month) !== monthKey(new Date())) return
+    if (simulationEnabled || loading || dialog || sharedReceipt || sharePending || quickExpensePending || quickMovementPending || !user || monthKey(month) !== monthKey(new Date())) return
     const today = format(new Date(), 'yyyy-MM-dd')
     const half = today.slice(-2) <= '15' ? 'q1' : 'q2'
     const period = fortnightPeriodForMonth(monthKey(month), half)
@@ -217,7 +233,7 @@ export function FinancePage() {
       setBudgetHalfToEdit(half)
       setDialog('budget')
     })
-  }, [data.budgets, data.categories, dialog, loading, month, quickExpensePending, quickMovementPending, sharedReceipt, sharePending, user])
+  }, [simulationEnabled, data.budgets, data.categories, dialog, loading, month, quickExpensePending, quickMovementPending, sharedReceipt, sharePending, user])
 
   const metrics = useMemo(() => calculateFinanceMetrics(data, month), [data, month])
   const projectionBreakdown = useMemo(() => financeProjectionBreakdown(data, month), [data, month])
@@ -245,7 +261,7 @@ export function FinancePage() {
     snapshot.month === monthKey(month) && snapshot.projectionVersion === FINANCE_LIQUIDITY_PROJECTION_VERSION)
   const liquiditySnapshotRequests = useRef(new Set<string>())
   useEffect(() => {
-    if (!user || loading || liquiditySnapshot) return
+    if (simulationEnabled || !user || loading || liquiditySnapshot) return
     const key = monthKey(month)
     if (liquiditySnapshotRequests.current.has(key)) return
     liquiditySnapshotRequests.current.add(key)
@@ -258,7 +274,7 @@ export function FinancePage() {
       liquiditySnapshotRequests.current.delete(key)
       if (import.meta.env.DEV) console.debug('[FARO finance] No se pudo capturar snapshot de liquidez.', reason)
     })
-  }, [baselineLiquidityProjection.closingBalanceCents, baselineLiquidityProjection.minimumBalanceCents, liquiditySnapshot, loading, month, refresh, user])
+  }, [simulationEnabled, baselineLiquidityProjection.closingBalanceCents, baselineLiquidityProjection.minimumBalanceCents, liquiditySnapshot, loading, month, refresh, user])
   useEffect(() => {
     if (!import.meta.env.DEV) return
     console.debug('[FARO finance] Liquidity projection computed.', {
@@ -274,11 +290,6 @@ export function FinancePage() {
     expenseCents: periodFlow.expenseCents,
     netCents: periodFlow.incomeCents - periodFlow.expenseCents,
   }), [periodFlow])
-  const approvedAvailableEvolution = useMemo(() => ({
-    initialCents: metrics.availableBalanceCents - approvedPeriodFlow.incomeCents + approvedPeriodFlow.expenseCents,
-    ...approvedPeriodFlow,
-    finalCents: metrics.availableBalanceCents,
-  }), [approvedPeriodFlow, metrics.availableBalanceCents])
   const annualTotals = useMemo(() => annualFinanceTotals(data, month.getFullYear()), [data, month])
   const previous = useMemo(() => calculateFinanceMetrics(data, subMonths(month, 1)), [data, month])
   const summary = useMemo(() => financeSummary(data, month), [data, month])
@@ -289,6 +300,13 @@ export function FinancePage() {
   const monthlyTransactions = data.transactions.filter((item) => item.transactionDate.startsWith(format(month, 'yyyy-MM')))
   const eventualIncomes = eventualIncomeTransactions(monthlyTransactions)
   const selectedPeriod = monthKey(month)
+  const debtPaymentsForMonth = scheduledDebtPayments(data, format(endOfMonth(month), 'yyyy-MM-dd'))
+    .filter(payment => payment.date.startsWith(format(month, 'yyyy-MM')))
+  const debtScheduledMovements = monthlyTransactions.filter(item => item.debtId && !item.recurringTransactionId
+    && (item.type === 'expense' || item.type === 'debt_payment') && item.status !== 'cancelled'
+    && data.debtPlan?.debts.some(debt => debt.id === item.debtId
+      && !debtHasRecurringSchedule(data, debt.id, item.transactionDate)))
+  const debtScheduledMovementIds = new Set(debtScheduledMovements.map(item => item.id))
   const recurringForMonth = data.recurring
     .filter((item) => recurringAppliesToMonth(item, month))
     .flatMap<{ item: FinanceRecurringTransaction; occurrence?: FinanceRecurringOccurrence; expectedDate?: string }>((item) => {
@@ -320,8 +338,10 @@ export function FinancePage() {
       .filter((item) => Boolean(item.recurringTransactionId) && matches(item.type) && item.status === 'completed')
       .reduce((sum, item) => sum + item.amountCents, 0)
       + pendingRecurring.reduce((sum, occurrence) => sum + (occurrence.amountCents ?? 0), 0)
+      + (kind === 'expense' ? debtPaymentsForMonth.reduce((sum, item) => sum + item.amountCents, 0)
+        + debtScheduledMovements.reduce((sum, item) => sum + item.amountCents, 0) : 0)
     const eventualCents = monthlyTransactions
-      .filter((item) => !item.recurringTransactionId && matches(item.type) && item.status !== 'cancelled')
+      .filter((item) => !item.recurringTransactionId && !debtScheduledMovementIds.has(item.id) && matches(item.type) && item.status !== 'cancelled')
       .reduce((sum, item) => sum + item.amountCents, 0)
     const realizedCents = monthlyTransactions
       .filter((item) => matches(item.type) && item.status === 'completed')
@@ -330,7 +350,7 @@ export function FinancePage() {
     const budgetReservationCents = kind === 'expense'
       ? financeBudgetReservations(data, month).reduce((sum, reservation) => sum + reservation.amountCents, 0)
       : 0
-    const pendingCount = pendingRecurring.length + monthlyTransactions.filter((item) => !item.recurringTransactionId && matches(item.type) && ['planned', 'pending'].includes(item.status)).length
+    const pendingCount = pendingRecurring.length + (kind === 'expense' ? debtPaymentsForMonth.length + debtScheduledMovements.filter(item => item.status === 'planned' || item.status === 'pending').length : 0) + monthlyTransactions.filter((item) => !item.recurringTransactionId && !debtScheduledMovementIds.has(item.id) && matches(item.type) && ['planned', 'pending'].includes(item.status)).length
     return { recurringCents, eventualCents, totalCents: realizedCents + pendingCents, realizedCents, pendingCents, pendingCount, budgetReservationCents }
   }
   const incomeProjection = projectionFor('income')
@@ -341,13 +361,17 @@ export function FinancePage() {
     && (statusFilter === 'all' || item.status === statusFilter)
     && (accountFilter === 'all' || item.accountId === accountFilter),
   )
-  const categoryExpenses = data.categories.map((category) => ({
-    name: category.name,
-    value: monthlyTransactions.filter((item) =>
-      item.categoryId === category.id && item.status === 'completed'
-      && (item.type === 'expense' || item.type === 'debt_payment'))
-      .reduce((sum, item) => sum + item.amountCents, 0),
-  })).filter((item) => item.value > 0)
+  const categoryExpenses = useMemo(() => {
+    const totals = new Map<string, number>()
+    const names = new Map(data.categories.map(category => [category.id, category.name]))
+    for (const item of data.transactions) {
+      if (!item.transactionDate.startsWith(format(month, 'yyyy-MM')) || item.status !== 'completed'
+        || (item.type !== 'expense' && item.type !== 'debt_payment')) continue
+      const name = names.get(item.categoryId ?? '') ?? 'Sin categoría'
+      totals.set(name, (totals.get(name) ?? 0) + item.amountCents)
+    }
+    return [...totals].map(([name, value]) => ({ name, value })).filter(item => item.value > 0)
+  }, [data.categories, data.transactions, month])
   const reportExpenses = monthlyTransactions
     .filter((item) => item.status === 'completed' && (item.type === 'expense' || item.type === 'debt_payment'))
     .map((item) => ({
@@ -357,6 +381,7 @@ export function FinancePage() {
       category: data.categories.find((category) => category.id === item.categoryId)?.name,
     }))
   const exportMonthlyReport = async () => {
+    if (simulationEnabled) { setFeedback('Apaga la simulación para exportar el reporte de tus finanzas reales.'); return }
     setFeedback('Generando reporte financiero…')
     try {
       const { downloadFinanceReportPdf } = await import('../services/financeReportPdf')
@@ -384,7 +409,7 @@ export function FinancePage() {
     setFeedback(message)
   }
   const status = async (transaction: FinanceTransaction, next: FinanceTransactionStatus) => {
-    if (!user) return
+    if (!user || simulationEnabled) return
     try {
       await financeTransactionRepository.setStatus(transaction.id, next, user.id)
       await finish('Movimiento actualizado.')
@@ -398,7 +423,12 @@ export function FinancePage() {
     sessionStorage.setItem('faro-finance-panel', next)
     if (isFinanceMobile) window.scrollTo({ top: 0, behavior: 'auto' })
   }
+  const openSimulation = () => { changePanel('simulation') }
+  const openNewMovement = () => simulationEnabled ? openSimulation() : setDialog('movementMenu')
+  const isDecisionPanel = financeDecisionPanels.some(([id]) => id === panel)
+  const panelLabel = financeDecisionPanels.find(([id]) => id === panel)?.[1]
   const startMovement = (preset: MovementPreset) => {
+    if (simulationEnabled) { openSimulation(); return }
     if (preset.contribution) {
       setSelectedGoal(undefined)
       setDialog('contribution')
@@ -472,26 +502,26 @@ export function FinancePage() {
   return <div className={`page finance-os finance-os--${panel}`} aria-busy={loading}>
     <div className="finance-mobile-heading">
       <span>FARO · Finanzas</span>
-      <h1>{panel === 'overview' ? 'Tu resumen' : panel === 'transactions' ? 'Movimientos' : panel === 'advisor' ? 'Proyecciones' : panel === 'plan' ? 'Tu plan' : ({ income: 'Ingresos', recurring: 'Gastos', savings: 'Ahorro', budgets: 'Presupuesto', goals: 'Metas', accounts: 'Cuentas', fund: 'Fondo' } as const)[panel]}</h1>
+      <h1>{panel === 'overview' ? 'Tu resumen' : panel === 'transactions' ? 'Movimientos' : panel === 'advisor' ? 'Proyecciones' : panel === 'plan' ? 'Tu plan' : (panelLabel ?? ({ income: 'Ingresos', recurring: 'Gastos', savings: 'Ahorro', budgets: 'Presupuesto', goals: 'Metas', accounts: 'Cuentas', fund: 'Fondo' } as const)[panel as 'income' | 'recurring' | 'savings' | 'budgets' | 'goals' | 'accounts' | 'fund'])}</h1>
     </div>
     <nav className="finance-mobile-tabs" aria-label="Navegación de finanzas">
       {([{ id: 'overview', label: 'Resumen' }, { id: 'advisor', label: 'Proyecciones' }, { id: 'income', label: 'Ingresos' }, { id: 'recurring', label: 'Gastos' }, { id: 'plan', label: 'Plan' }, { id: 'transactions', label: 'Movimientos' }, { id: 'budgets', label: 'Presupuestos' }] as const).map(({ id, label }) => <button key={id} type="button" aria-current={panel === id ? 'page' : undefined} onClick={() => changePanel(id)}>{label}</button>)}
-      <button type="button" aria-haspopup="dialog" aria-expanded={mobileMoreOpen} aria-label="Más secciones de Finanzas" className={['savings', 'goals', 'accounts', 'fund'].includes(panel) ? 'is-active' : ''} onClick={() => setMobileMoreOpen(true)}><Ellipsis size={18} aria-hidden="true" /><span>Más</span></button>
+      <button type="button" aria-haspopup="dialog" aria-expanded={mobileMoreOpen} aria-label="Más secciones de Finanzas" className={['savings', 'goals', 'accounts', 'fund', ...financeDecisionPanels.map(([id]) => id)].includes(panel) ? 'is-active' : ''} onClick={() => setMobileMoreOpen(true)}><Ellipsis size={18} aria-hidden="true" /><span>Más</span></button>
     </nav>
     <PageHeader
       eyebrow={format(new Date(), "EEEE, d 'de' MMMM", { locale: es })}
       title="Finanzas"
-      trailing={panel === 'plan' ? <div className="finance-period finance-period--page-toolbar"><span className="finance-plan-current-date"><CalendarDays size={16} />{format(new Date(), 'd MMM yyyy', { locale: es })}</span><button aria-label="Actualizar datos financieros" title="Actualizar" onClick={() => void refresh()}><RefreshCw size={14} /></button></div> : <div className="finance-period finance-period--page-toolbar"><button aria-label="Mes anterior" onClick={() => setMonth((value) => subMonths(value, 1))}><ArrowLeft size={15} /></button><label><CalendarDays size={16} /><span>{format(month, "MMMM 'de' yyyy", { locale: es })}</span><input aria-label="Periodo" type="month" value={format(month, 'yyyy-MM')} onChange={(event) => event.target.value && setMonth(parseISO(`${event.target.value}-01`))} /></label><button aria-label="Mes siguiente" onClick={() => setMonth((value) => addMonths(value, 1))}><ArrowRight size={15} /></button><button aria-label="Actualizar datos financieros" title="Actualizar" onClick={() => void refresh()}><RefreshCw size={14} /></button><button aria-label="Descargar reporte financiero en PDF" title="Descargar reporte PDF" onClick={exportMonthlyReport}><FileDown size={14} /></button></div>}
+      trailing={panel === 'plan' || isDecisionPanel ? <div className="finance-period finance-period--page-toolbar"><span className="finance-plan-current-date"><CalendarDays size={16} />{format(new Date(), 'd MMM yyyy', { locale: es })}</span><button aria-label="Actualizar datos financieros" title="Actualizar" onClick={() => void refresh()}><RefreshCw size={14} /></button></div> : <div className="finance-period finance-period--page-toolbar"><button aria-label="Mes anterior" onClick={() => setMonth((value) => subMonths(value, 1))}><ArrowLeft size={15} /></button><label><CalendarDays size={16} /><span>{format(month, "MMMM 'de' yyyy", { locale: es })}</span><input aria-label="Periodo" type="month" value={format(month, 'yyyy-MM')} onChange={(event) => event.target.value && setMonth(parseISO(`${event.target.value}-01`))} /></label><button aria-label="Mes siguiente" onClick={() => setMonth((value) => addMonths(value, 1))}><ArrowRight size={15} /></button><button aria-label="Actualizar datos financieros" title="Actualizar" onClick={() => void refresh()}><RefreshCw size={14} /></button><button aria-label="Descargar reporte financiero en PDF" title="Descargar reporte PDF" onClick={exportMonthlyReport}><FileDown size={14} /></button></div>}
     />
     {(error || loading) && <div className={`finance-data-status${error ? ' finance-data-status--error' : ''}`} role={error ? 'alert' : 'status'}>
       <div><strong>{error ? 'No pudimos actualizar tus finanzas' : 'Actualizando tus finanzas'}</strong><p>{error ? `${error} Estás viendo los últimos datos cargados.` : 'Conservamos tus datos mientras termina la actualización.'}</p></div>
       {error && <Button variant="secondary" onClick={() => void refresh()}>Reintentar</Button>}
     </div>}
     {feedback && <div className="finance-feedback" role="status">{feedback}<button aria-label="Cerrar aviso" onClick={() => setFeedback('')}>×</button></div>}
-    {!data.accounts.length && <section className="finance-onboarding"><WalletCards /><div><strong>Crea tu primera cuenta</strong><p>El saldo inicial será la base de tus cálculos. Después podrás registrar tu primer ingreso sin ingresar datos bancarios sensibles.</p></div><Button onClick={() => setDialog('account')}>Crear cuenta</Button><Button variant="ghost" disabled title="Crea una cuenta antes de registrar el ingreso">Registrar ingreso</Button></section>}
+    {!data.accounts.length && <section className="finance-onboarding"><WalletCards /><div><strong>Crea tu primera cuenta</strong><p>El saldo inicial será la base de tus cálculos. Después podrás registrar tu primer ingreso sin ingresar datos bancarios sensibles.</p></div><Button disabled={simulationEnabled} onClick={() => setDialog('account')}>Crear cuenta</Button><Button variant="ghost" disabled title="Crea una cuenta antes de registrar el ingreso">Registrar ingreso</Button></section>}
     <div className="finance-tabs-row">
-      <FinanceNavigation value={panel} onChange={changePanel} onManageCategories={() => setDialog('categories')} />
-      <Button className="finance-new-movement" icon={<Plus size={17} />} disabled={!activeAccounts.length} onClick={() => setDialog('movementMenu')}>Nuevo movimiento</Button>
+      <FinanceNavigation value={panel} onChange={changePanel} onManageCategories={() => simulationEnabled ? setFeedback('Apaga la simulación para administrar tus categorías reales.') : setDialog('categories')} />
+      <Button className="finance-new-movement" icon={<Plus size={17} />} disabled={!activeAccounts.length} onClick={openNewMovement}>{simulationEnabled ? 'Agregar simulación' : 'Nuevo movimiento'}</Button>
     </div>
     {(panel === 'overview' || panel === 'transactions') && <section className="finance-mobile-balance" aria-label="Resumen de saldo">
       <span>Disponible operativo hoy</span>
@@ -502,60 +532,56 @@ export function FinancePage() {
       </div>
     </section>}
     {(panel === 'overview' || panel === 'transactions') && <div className="finance-mobile-actions">
-      <Button icon={<Plus size={20} />} disabled={!activeAccounts.length} onClick={() => setDialog('movementMenu')}>Registrar movimiento</Button>
+      <Button icon={<Plus size={20} />} disabled={!activeAccounts.length} onClick={openNewMovement}>{simulationEnabled ? 'Agregar simulación' : 'Registrar movimiento'}</Button>
       {panel === 'overview' && <Button variant="ghost" icon={<CalendarDays size={19} />} onClick={() => startMovement({ type: 'expense', status: 'planned' })} disabled={!activeAccounts.length}>Planificar gasto</Button>}
     </div>}
     <Modal open={mobileMoreOpen} title="Tus herramientas de Finanzas" panelClassName="finance-dialog finance-mobile-more-modal" onClose={() => setMobileMoreOpen(false)}>
       <p className="finance-mobile-more-intro">Todo lo que necesitas para organizar tu dinero.</p>
       <nav className="finance-mobile-more" aria-label="Herramientas de Finanzas">
         {mobileFinanceSections.map(({ id, label, description, icon: Icon }) => <button key={id} type="button" aria-current={panel === id ? 'page' : undefined} onClick={() => { changePanel(id); setMobileMoreOpen(false) }}><i aria-hidden="true"><Icon size={21} /></i><span><strong>{label}</strong><small>{description}</small></span><ArrowRight size={17} /></button>)}
+        {financeDecisionPanels.map(([id, label]) => <button key={id} type="button" aria-current={panel === id ? 'page' : undefined} onClick={() => { changePanel(id); setMobileMoreOpen(false) }}><i aria-hidden="true"><Calculator size={21} /></i><span><strong>{label}</strong><small>Herramienta de planeación financiera</small></span><ArrowRight size={17} /></button>)}
       </nav>
-      <div className="finance-mobile-more-utilities"><button type="button" onClick={() => { setMobileMoreOpen(false); setDialog('categories') }}>Gestionar categorías</button>
+      <div className="finance-mobile-more-utilities"><button type="button" onClick={() => { setMobileMoreOpen(false); if (!simulationEnabled) setDialog('categories'); else setFeedback('Apaga la simulación para administrar tus categorías reales.') }}>Gestionar categorías</button>
         <button type="button" onClick={() => { setMobileMoreOpen(false); void refresh() }}><RefreshCw size={17} />Actualizar datos</button>
         <button type="button" onClick={() => { setMobileMoreOpen(false); void exportMonthlyReport() }}><FileDown size={17} />Reporte PDF</button>
         <Link to="/dashboard"><House size={17} />Inicio de FARO<ArrowRight size={16} /></Link>
       </div>
     </Modal>
+    <section className={`finance-simulation-bar${simulationEnabled ? ' is-active' : ''}`} aria-label="Control de simulación">
+      <label className="finance-simulation-switch"><input type="checkbox" role="switch" aria-label="Modo simulación" checked={simulationEnabled}
+        disabled={Boolean(dialog || debtPayment || deleting || deletingAccount || deletingRecurring || deletingBudget || deletingGoal || deletingGoalItem || deletingFundEntry || deletingContribution || revertingOccurrence || sharedReceipt || savingPaymentId)}
+        onChange={event => simulation.setEnabled(event.target.checked)} />Modo simulación</label>
+      <div><strong>{simulationEnabled ? 'Estás viendo el escenario simulado' : 'Estás viendo tus finanzas reales'}{simulationEnabled && <span className="finance-simulation-badge">SIMULACIÓN</span>}</strong><p>{simulationEnabled ? 'Consulta el impacto en las vistas. Agrega o cambia tus planes en Simulaciones; para registrar pagos reales, apaga el modo.' : `${simulation.state.items.length} ${simulation.state.items.length === 1 ? 'movimiento simulado guardado' : 'movimientos simulados guardados'}. Al activar el modo se aplican juntos; al apagarlo se conservan.`}</p></div>
+      <Button variant="secondary" onClick={openSimulation}>Editar simulaciones</Button>
+    </section>
+    {simulation.storageError && <p className="finance-simulation-warning" role="alert">{simulation.storageError}</p>}
     <div className="finance-layout">
     <div ref={financeContentRef} className="finance-content" role="region" aria-label="Contenido de Finanzas" tabIndex={0}>
 
-    {panel === 'plan' && user && <DebtPlanPanel data={data} userId={user.id} onRefresh={refresh} onEditMovement={item => { setEditingTransaction(item); setDialog('transaction') }} onDeleteMovement={item => setDeleting(item)} />}
+    {panel === 'simulation' && <FinanceSimulationPanel key={user?.id ?? 'local'} data={realData} state={simulation.state} onSave={simulation.upsertItem} onRemove={simulation.removeItem} onClear={simulation.clear} onOpenProjection={() => { const first = simulation.state.items.filter(item => item.date >= format(new Date(), 'yyyy-MM-dd')).sort((a, b) => a.date.localeCompare(b.date))[0]; if (!first) return; simulation.setEnabled(true); setMonth(parseISO(`${first.date.slice(0, 7)}-01`)); changePanel('advisor') }} />}
+    {isDecisionPanel && panel !== 'simulation' && <FinanceDecisionTools panel={panel as FinanceDecisionPanel} data={panel === 'audit' ? realData : data} userId={user?.id ?? 'local'} journal={forecastJournal} />}
+    <fieldset className="finance-content finance-simulation-readonly" disabled={simulationEnabled && panel !== 'overview'} aria-label="Vistas financieras" key={simulationEnabled ? 'simulated' : 'real'}>
+    {panel === 'plan' && user && <DebtPlanPanel readOnly={simulationEnabled} data={data} userId={user.id} onRefresh={refresh} onEditMovement={item => { setEditingTransaction(item); setDialog('transaction') }} onDeleteMovement={item => setDeleting(item)} />}
 
     {panel === 'overview' && <>
-      <div className="finance-mobile-chart finance-overview-chart"><FinanceLiquidityRadar summary data={data} month={month} availableTodayCents={metrics.availableBalanceCents} snapshot={liquiditySnapshot} userId={user?.id} onSaveMinimumBuffer={async () => {}} /></div>
+      <div className="finance-mobile-chart finance-overview-chart"><FinanceLiquidityRadar readOnly={simulationEnabled} onOpenDetails={() => changePanel('advisor')} summary data={data} month={month} availableTodayCents={metrics.availableBalanceCents} snapshot={liquiditySnapshot} userId={user?.id} onSaveMinimumBuffer={async () => {}} /></div>
       <button className="finance-mobile-details-toggle" type="button" aria-expanded={showOverviewDetails} aria-controls="finance-overview-details" onClick={() => setShowOverviewDetails((value) => !value)}>{showOverviewDetails ? 'Ocultar detalles del resumen' : 'Ver más del resumen'}<ArrowDownRight size={17} /></button>
       <div id="finance-overview-details" className={`finance-overview-details${showOverviewDetails ? ' is-expanded' : ''}`}>
-      <ProjectionStrip
-        compact
-        items={[
-          { icon: <WalletCards />, label: 'Ingresos proyectados', value: incomeProjection.totalCents, tone: 'positive' },
-          { icon: <Calculator />, label: 'Gastos proyectados', value: expenseProjection.totalCents, tone: 'negative' },
-          { icon: <ChartNoAxesCombined />, label: 'Flujo neto proyectado', value: incomeProjection.totalCents - expenseProjection.totalCents, tone: incomeProjection.totalCents >= expenseProjection.totalCents ? 'positive' : 'negative' },
-          { icon: <PiggyBank />, label: 'Tasa de ahorro realizada', text: `${metrics.savingsRate.toFixed(1)}%`, context: 'sobre ingresos cobrados', tone: 'savings' },
-        ]}
-      />
-      <div className="finance-summary-grid">
-      <section className="finance-excel">
-        <header><span className="eyebrow">Previsión mensual</span><h2>Planeado contra real</h2></header>
-        <div className="finance-table finance-table--summary finance-scroll-region" tabIndex={0} role="region" aria-label="Comparativo mensual: planeado contra real"><div className="finance-table__head"><span>Concepto</span><span>Planeado</span><span>Real</span><span>Diferencia</span></div>
-          {summary.map((row) => <div className="finance-table__row" key={row.label}><strong>{row.label}</strong><span data-label="Planeado">{formatMxn(row.planned)}</span><span data-label="Real">{formatMxn(row.actual)}</span><span data-label="Diferencia" className={row.difference >= 0 ? 'positive' : 'negative'}>{formatMxn(row.difference)}</span></div>)}
-        </div>
-      </section>
-        <section className="finance-period-flow"><header><span className="eyebrow">{format(month, 'MMMM yyyy', { locale: es })}</span><h2>Flujo del periodo</h2></header><PeriodFlowChart flow={approvedPeriodFlow} /></section>
-        <section><header><span className="eyebrow">Distribución</span><h2>Gasto por categoría</h2></header><ExpenseCategoryDonut data={categoryExpenses} /></section>
-        <section className="finance-available-evolution"><header><span className="eyebrow">Disponible operativo</span><h2>Evolución del disponible</h2></header><div className="finance-waterfall"><span><small>Inicial</small><strong>{formatMxn(approvedAvailableEvolution.initialCents)}</strong></span><i>+</i><span className="positive"><small>Ingresos</small><strong>{formatMxn(approvedAvailableEvolution.incomeCents)}</strong></span><i>−</i><span className="negative"><small>Gastos</small><strong>{formatMxn(approvedAvailableEvolution.expenseCents)}</strong></span><i>=</i><span className="final"><small>Final</small><strong>{formatMxn(approvedAvailableEvolution.finalCents)}</strong></span></div><p>Las transferencias sólo redistribuyen dinero entre cuentas y no alteran este resultado.</p></section>
-      </div>
+      <FinanceMonthlyOverview month={month} rows={summary} incomeCents={incomeProjection.totalCents} expenseCents={expenseProjection.totalCents} savingsRate={metrics.savingsRate} hasRefunds={monthlyTransactions.some(item => item.type === 'refund' && item.status !== 'cancelled')} />
+      <FinanceOverviewAnalysis flow={approvedPeriodFlow} categories={categoryExpenses} month={month} refundCents={monthlyTransactions.filter(item => item.type === 'refund' && item.status === 'completed').reduce((total, item) => total + item.amountCents, 0)} />
       </div>
     </>}
 
     {panel === 'advisor' && <FinanceLiquidityRadar
+      onOpenSimulation={openSimulation}
+      readOnly={simulationEnabled}
       data={data}
       month={month}
       availableTodayCents={metrics.availableBalanceCents}
       snapshot={liquiditySnapshot}
       userId={user?.id}
       onSaveMinimumBuffer={async (minimumOperatingBufferCents) => {
-        if (!user) throw new Error('No hay una sesión activa.')
+        if (simulationEnabled || !user) throw new Error('Apaga la simulación para cambiar el colchón real.')
         await financeLiquidityRepository.saveMinimumOperatingBuffer(minimumOperatingBufferCents, user.id)
         await refresh()
       }}
@@ -598,11 +624,11 @@ export function FinancePage() {
         <nav>
           <Button variant="ghost" icon={<Pencil size={13} />} onClick={() => { setEditingAccount(account); setDialog('account') }}>Editar</Button>
           {account.isActive
-            ? <><Button variant="ghost" onClick={async () => { if (!user) return; await financeAccountRepository.archive(account.id, user.id); await finish('Cuenta archivada.') }}>Archivar</Button><Button variant="ghost" icon={<Trash2 size={13} />} onClick={() => setDeletingAccount(account)}>Eliminar</Button></>
-            : <><Button variant="ghost" icon={<RotateCcw size={13} />} onClick={async () => { if (!user) return; await financeAccountRepository.restore(account.id, user.id); await finish('Cuenta restaurada.') }}>Restaurar</Button><Button variant="ghost" icon={<Trash2 size={13} />} onClick={() => setDeletingAccount(account)}>Eliminar definitivamente</Button></>}
+            ? <><Button variant="ghost" onClick={async () => { if (!user || simulationEnabled) return; await financeAccountRepository.archive(account.id, user.id); await finish('Cuenta archivada.') }}>Archivar</Button><Button variant="ghost" icon={<Trash2 size={13} />} onClick={() => setDeletingAccount(account)}>Eliminar</Button></>
+            : <><Button variant="ghost" icon={<RotateCcw size={13} />} onClick={async () => { if (!user || simulationEnabled) return; await financeAccountRepository.restore(account.id, user.id); await finish('Cuenta restaurada.') }}>Restaurar</Button><Button variant="ghost" icon={<Trash2 size={13} />} onClick={() => setDeletingAccount(account)}>Eliminar definitivamente</Button></>}
         </nav>
       </article>)}</div>
-      {!data.accounts.length && <EmptyState title="Tus cuentas, en orden" description="Añade una cuenta para registrar movimientos y conocer tu saldo." action={<Button onClick={() => setDialog('account')}>Crear cuenta</Button>} />}
+      {!data.accounts.length && <EmptyState title="Tus cuentas, en orden" description="Añade una cuenta para registrar movimientos y conocer tu saldo." action={<Button disabled={simulationEnabled} onClick={() => setDialog('account')}>Crear cuenta</Button>} />}
     </section>}
 
     {panel === 'budgets' && <section className="finance-section finance-budgets"><SectionHead eyebrow="Control quincenal" title="Presupuestos por categoría" action="Definir presupuesto" onClick={() => { setBudgetHalfToEdit(undefined); setBudgetCategoryToEdit(undefined); setDialog('budget') }} />{budgets.length ? <div className="finance-budget-list">{budgets.map((budget) => { const half = budget.periodStart?.slice(-2) === '01' ? 'q1' : 'q2'; return <article key={budget.id} className={budget.usedPercentage > 100 ? 'exceeded' : budget.usedPercentage >= 85 ? 'warning' : budget.usedPercentage >= 70 ? 'attention' : ''}><div><div><small>{half === 'q1' ? 'Q1 · 1 al 15' : 'Q2 · 16 al cierre'}</small><strong>{budget.name ?? budget.category?.name ?? 'Presupuesto'}</strong></div><span>{budget.periodStart} — {budget.periodEnd}</span></div>{budget.previousPeriodAdjustmentCents < 0 && <div className="finance-budget-adjustment"><span>Exceso de Q1 aplicado a Q2</span><strong>{formatMxn(budget.previousPeriodAdjustmentCents)}</strong><small>Tu límite disponible se ajustó a {formatMxn(budget.effectivePlannedAmountCents)}.</small></div>}<div className="finance-budget-amounts"><span>Asignado<strong>{formatMxn(budget.plannedAmountCents)}</strong></span><span>Gastado<strong>{formatMxn(budget.actualCents)}</strong></span><span>Disponible<b>{formatMxn(budget.remainingCents)}</b></span></div><ProgressBar value={Math.min(100, budget.usedPercentage)} /><footer><span>{budget.usedPercentage.toFixed(0)}% utilizado · {budget.usedPercentage > 100 ? 'Excedido' : budget.usedPercentage >= 100 ? 'Límite alcanzado' : budget.usedPercentage >= 85 ? 'Alerta 85%' : budget.usedPercentage >= 70 ? 'Atención 70%' : 'En control'}</span><div className="finance-budget-actions"><b>{Math.max(0, 100 - budget.usedPercentage).toFixed(0)}% libre</b><Button variant="ghost" size="sm" icon={<Pencil size={12} />} onClick={() => { setBudgetHalfToEdit(half); setBudgetCategoryToEdit(budget.categoryId); setDialog('budget') }}>Editar {half.toUpperCase()}</Button><Button variant="ghost" size="sm" icon={<Trash2 size={12} />} aria-label={`Eliminar presupuesto ${budget.name ?? ''}`} onClick={() => setDeletingBudget(budget)}>Eliminar</Button></div></footer></article> })}</div> : <EmptyState title="Sin presupuesto quincenal" description="Define un límite por categoría para esta quincena." action={<Button onClick={() => { setBudgetHalfToEdit(undefined); setBudgetCategoryToEdit(undefined); setDialog('budget') }}>Crear presupuesto</Button>} />}</section>}
@@ -632,12 +658,20 @@ export function FinancePage() {
       <ProjectionStrip items={projectionItems(expenseProjection)} />
       <section className="finance-expense-panel">
         <SectionHead eyebrow="Calendario financiero" title="Gastos recurrentes" action="+" actionLabel="Registrar gasto recurrente" onClick={() => setDialog('recurring')} />
-        <FinanceList label="Gastos recurrentes">{recurringForMonth.filter(({ item }) => item.type !== 'income' && item.type !== 'refund').map(({ item, expectedDate, occurrence }) => <RecurringCard key={occurrence?.id ?? item.id} item={item} expectedDate={expectedDate} occurrence={occurrence} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={[data.categories.find((category) => category.id === item.categoryId)?.name, item.debtId ? `Deuda: ${data.debtPlan?.debts.find(debt => debt.id === item.debtId)?.name ?? 'vinculada'}` : undefined].filter(Boolean).join(' · ')} busy={savingPaymentId === (occurrence?.id ?? item.id)} onRegister={() => void registerRecurringPayment(item, occurrence)} onEdit={() => { setRecurringEditMode('period'); setEditingRecurring(item); setEditingOccurrence(occurrence); setDialog('recurring') }} onDelete={() => setDeletingRecurring(item)} />)}</FinanceList>
-        {!recurringForMonth.some(({ item }) => item.type !== 'income' && item.type !== 'refund') && <EmptyState title="Sin gastos recurrentes" description="Registra renta, servicios o cualquier gasto periódico." />}
+        <FinanceList label="Gastos recurrentes">{recurringForMonth.filter(({ item }) => item.type !== 'income' && item.type !== 'refund').map(({ item, expectedDate, occurrence }) => <RecurringCard key={occurrence?.id ?? item.id} item={item} expectedDate={expectedDate} occurrence={occurrence} account={data.accounts.find((account) => account.id === item.accountId)?.name} category={[data.categories.find((category) => category.id === item.categoryId)?.name, item.debtId ? `Deuda: ${data.debtPlan?.debts.find(debt => debt.id === item.debtId)?.name ?? 'vinculada'}` : undefined].filter(Boolean).join(' · ')} busy={savingPaymentId === (occurrence?.id ?? item.id)} onRegister={() => void registerRecurringPayment(item, occurrence)} onEdit={() => { setRecurringEditMode('period'); setEditingRecurring(item); setEditingOccurrence(occurrence); setDialog('recurring') }} onDelete={() => setDeletingRecurring(item)} />)}{debtPaymentsForMonth.map(payment => <article key={payment.id} className="finance-expense--pending">
+          <header><div><strong>{payment.debt.name}</strong><small>{formatFinanceDate(payment.date)}</small></div><div className="finance-expense-amount"><b>{formatMxn(payment.amountCents)}</b><span className="finance-occurrence-status finance-occurrence-status--pending">Pendiente</span></div></header>
+          <div className="finance-expense-meta"><small>Pago recurrente de Plan · {payment.debt.creditor}</small></div>
+          <footer><Button onClick={() => { setDebtPaymentError(''); setDebtPayment(payment) }}>Registrar pago</Button><Button variant="ghost" onClick={() => changePanel('plan')}>Ver en Plan</Button></footer>
+        </article>)}{debtScheduledMovements.map(item => <article key={item.id} className={`finance-expense--${item.status === 'completed' ? 'paid' : 'pending'}`}>
+          <header><div><strong>{data.debtPlan?.debts.find(debt => debt.id === item.debtId)?.name}</strong><small>{formatFinanceDate(item.transactionDate)}</small></div><div className="finance-expense-amount"><b>{formatMxn(item.amountCents)}</b><span className={`finance-occurrence-status finance-occurrence-status--${item.status === 'completed' ? 'paid' : 'pending'}`}>{item.status === 'completed' ? 'Pagado' : 'Pendiente'}</span></div></header>
+          <div className="finance-expense-meta"><small>Pago de Plan · {data.accounts.find(account => account.id === item.accountId)?.name}</small></div>
+          <footer><Button variant="ghost" onClick={() => { setEditingTransaction(item); setDialog('transaction') }}>Editar pago</Button><Button variant="ghost" onClick={() => changePanel('plan')}>Ver en Plan</Button></footer>
+        </article>)}</FinanceList>
+        {!debtPaymentsForMonth.length && !debtScheduledMovements.length && !recurringForMonth.some(({ item }) => item.type !== 'income' && item.type !== 'refund') && <EmptyState title="Sin gastos recurrentes" description="Registra renta, servicios o cualquier gasto periódico." />}
       </section>
       <section className="finance-expense-panel">
         <SectionHead eyebrow="Una sola ocasión" title="Gastos eventuales" action="+" actionLabel="Registrar eventual" onClick={() => startMovement({ type: 'expense', status: 'planned' })} />
-        <FinanceList label="Gastos eventuales">{monthlyTransactions.filter((item) => !item.recurringTransactionId && (item.type === 'expense' || item.type === 'debt_payment')).sort((a, b) => {
+        <FinanceList label="Gastos eventuales">{monthlyTransactions.filter((item) => !item.recurringTransactionId && !debtScheduledMovementIds.has(item.id) && (item.type === 'expense' || item.type === 'debt_payment')).sort((a, b) => {
           const rank = (status: FinanceTransactionStatus) => status === 'planned' ? 0 : status === 'pending' ? 1 : 2
           return rank(a.status) - rank(b.status) || a.transactionDate.localeCompare(b.transactionDate)
         }).map((item) => <article key={item.id}>
@@ -651,7 +685,7 @@ export function FinancePage() {
             <Button variant="ghost" icon={<Trash2 size={13} />} onClick={() => setDeleting(item)}>Eliminar</Button>
           </footer>
         </article>)}</FinanceList>
-        {!monthlyTransactions.some((item) => !item.recurringTransactionId && (item.type === 'expense' || item.type === 'debt_payment')) && <EmptyState title="Sin gastos eventuales" description="Planea una compra o pago futuro sin afectar todavía tu saldo real." />}
+        {!monthlyTransactions.some((item) => !item.recurringTransactionId && !debtScheduledMovementIds.has(item.id) && (item.type === 'expense' || item.type === 'debt_payment')) && <EmptyState title="Sin gastos eventuales" description="Planea una compra o pago futuro sin afectar todavía tu saldo real." />}
       </section>
     </div>}
 
@@ -659,18 +693,36 @@ export function FinancePage() {
 
     {panel === 'fund' && <section className="finance-section finance-fund"><SectionHead eyebrow="Reserva flexible" title="Fondo de Ahorro" action="Registrar movimiento" onClick={() => { setEditingFundEntry(undefined); setDialog('fundEntry') }} /><div className="finance-fund-hero"><div><PiggyBank size={24} /><span>Saldo disponible en el fondo</span><strong>{formatMxn(fundMetrics.balanceCents)}</strong><small>Dinero reservado sin asignarlo a una meta específica.</small></div><div><span>Ritmo del mes</span><strong>{formatMxn(fundMetrics.monthCents)}</strong><small>{fundMetrics.lastEntry ? `Último movimiento · ${fundMetrics.lastEntry.entryDate}` : 'Haz tu primera aportación'}</small></div></div><div className="finance-fund-kpis"><FinanceKpi label="Aportado este año" value={fundMetrics.yearCents} /><FinanceKpi label="Última aportación" value={fundMetrics.lastEntry?.amountCents ?? 0} context={fundMetrics.lastEntry?.entryDate ?? 'Sin movimientos'} /></div><div className="finance-fund-history"><header><span>Fecha</span><span>Concepto</span><span>Monto</span><span>Acciones</span></header>{data.savingsFundEntries.map(item=><article key={item.id}><time>{item.entryDate}</time><span>{item.description??(item.amountCents>0?'Aportación':'Retiro')}</span><strong className={item.amountCents>=0?'positive':'negative'}>{item.amountCents >= 0 ? '+' : '−'}{formatMxn(Math.abs(item.amountCents))}</strong><nav aria-label={`Acciones del fondo: ${item.description ?? item.entryDate}`}><Button size="sm" variant="ghost" icon={<Pencil size={13} />} onClick={() => { setEditingFundEntry(item); setDialog('fundEntry') }}>Editar</Button><Button size="sm" variant="ghost" icon={<Trash2 size={13} />} onClick={() => setDeletingFundEntry(item)}>Eliminar</Button></nav></article>)}{!data.savingsFundEntries.length&&<EmptyState title="Fondo vacío" description="Reserva dinero sin asignarlo a una meta específica." />}</div></section>}
 
-    {panel === 'goals' && <section className="finance-section"><SectionHead eyebrow="Dirección" title="Metas financieras" action="Nueva meta" onClick={() => setDialog('goal')} /><div className="finance-goals">{data.goals.map((goal) => { const progress=goalProgress(goal.id,data);const target=goalTargetCents(goal.id,data);const spent=goalSpentCents(goal.id,data);const available=goalAvailableCents(goal.id,data);return <article className="finance-goal-summary" key={goal.id} onClick={()=>{setSelectedGoal(goal);setDialog('goalDetail')}}><header><Target /><div><strong>{goal.name}</strong><small>{goal.priority} · {goal.status}</small></div><b>{progress.percentage.toFixed(0)}%</b></header><ProgressBar value={progress.percentage}/><div className="finance-goal-metrics"><span>Objetivo total<strong>{formatMxn(target)}</strong></span><span>Total aportado<strong>{formatMxn(progress.savedCents)}</strong></span><span>Total gastado<strong>{formatMxn(spent)}</strong></span><span>Disponible en meta<strong>{formatMxn(available)}</strong></span><span>Pendiente por comprar<strong>{formatMxn(Math.max(0,target-spent))}</strong></span><span>Pendiente por financiar<strong>{formatMxn(Math.max(0,target-progress.savedCents))}</strong></span></div><footer onClick={event=>event.stopPropagation()}><Button variant="secondary" onClick={()=>{setSelectedGoal(goal);setDialog('goalDetail')}}>Ver detalle</Button><Button variant="secondary" onClick={()=>{setSelectedGoal(goal);setDialog('contribution')}}>Registrar aportación</Button><Button variant="ghost" onClick={()=>{setEditingGoal(goal);setDialog('goal')}}>Editar meta</Button>{goal.status==='active'&&<Button variant="ghost" onClick={async()=>{if(!user)return;await financeGoalRepository.save({...goal,status:'paused'},user.id);await finish('Meta pausada.')}}>Pausar</Button>}{goal.status==='paused'&&<Button variant="ghost" onClick={async()=>{if(!user)return;await financeGoalRepository.save({...goal,status:'active'},user.id);await finish('Meta reanudada.')}}>Reanudar</Button>}<Button variant="danger" icon={<Trash2 size={13}/>} onClick={()=>setDeletingGoal(goal)}>Eliminar meta</Button></footer></article>})}</div>{!data.goals.length&&<EmptyState title="Sin metas financieras" description="Convierte una intención de ahorro en una dirección medible."/>}</section>}
+    {panel === 'goals' && <section className="finance-section"><SectionHead eyebrow="Dirección" title="Metas financieras" action="Nueva meta" onClick={() => setDialog('goal')} /><div className="finance-goals">{data.goals.map((goal) => { const progress=goalProgress(goal.id,data);const target=goalTargetCents(goal.id,data);const spent=goalSpentCents(goal.id,data);const available=goalAvailableCents(goal.id,data);return <article className="finance-goal-summary" key={goal.id} onClick={()=>{if(simulationEnabled)return;setSelectedGoal(goal);setDialog('goalDetail')}}><header><Target /><div><strong>{goal.name}</strong><small>{goal.priority} · {goal.status}</small></div><b>{progress.percentage.toFixed(0)}%</b></header><ProgressBar value={progress.percentage}/><div className="finance-goal-metrics"><span>Objetivo total<strong>{formatMxn(target)}</strong></span><span>Total aportado<strong>{formatMxn(progress.savedCents)}</strong></span><span>Total gastado<strong>{formatMxn(spent)}</strong></span><span>Disponible en meta<strong>{formatMxn(available)}</strong></span><span>Pendiente por comprar<strong>{formatMxn(Math.max(0,target-spent))}</strong></span><span>Pendiente por financiar<strong>{formatMxn(Math.max(0,target-progress.savedCents))}</strong></span></div><footer onClick={event=>event.stopPropagation()}><Button variant="secondary" onClick={()=>{if(simulationEnabled)return;setSelectedGoal(goal);setDialog('goalDetail')}}>Ver detalle</Button><Button variant="secondary" onClick={()=>{setSelectedGoal(goal);setDialog('contribution')}}>Registrar aportación</Button><Button variant="ghost" onClick={()=>{setEditingGoal(goal);setDialog('goal')}}>Editar meta</Button>{goal.status==='active'&&<Button variant="ghost" onClick={async()=>{if(!user||simulationEnabled)return;await financeGoalRepository.save({...goal,status:'paused'},user.id);await finish('Meta pausada.')}}>Pausar</Button>}{goal.status==='paused'&&<Button variant="ghost" onClick={async()=>{if(!user||simulationEnabled)return;await financeGoalRepository.save({...goal,status:'active'},user.id);await finish('Meta reanudada.')}}>Reanudar</Button>}<Button variant="danger" icon={<Trash2 size={13}/>} onClick={()=>setDeletingGoal(goal)}>Eliminar meta</Button></footer></article>})}</div>{!data.goals.length&&<EmptyState title="Sin metas financieras" description="Convierte una intención de ahorro en una dirección medible."/>}</section>}
+    </fieldset>
     </div>
-    {panel !== 'plan' && panel !== 'advisor' && <aside className="finance-side-kpis" aria-label="Resumen financiero" tabIndex={0}><FinanceMetrics metrics={metrics} previous={previous} hasPreviousData={hasPreviousData} midMonthProjection={midMonthProjection} projection={baselineLiquidityProjection} projectionBreakdown={projectionBreakdown} month={month} /></aside>}
+    {!isDecisionPanel && panel !== 'plan' && panel !== 'advisor' && <aside className="finance-side-kpis" aria-label="Resumen financiero" tabIndex={0}><FinanceMetrics metrics={metrics} previous={previous} hasPreviousData={hasPreviousData} midMonthProjection={midMonthProjection} projection={baselineLiquidityProjection} projectionBreakdown={projectionBreakdown} month={month} /></aside>}
     </div>
 
+    {!simulationEnabled && <>
     <input ref={receiptInputRef} className="finance-receipt-input" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Importar comprobante" onChange={(event) => { const file = event.target.files?.[0]; if (file) setSharedReceipt(file); event.target.value = '' }} />
     {dialog === 'movementMenu' && <MovementMenu canTransfer={activeAccounts.length > 1} onClose={() => setDialog(null)} onSelect={startMovement} onImport={() => { setDialog(null); receiptInputRef.current?.click() }} />}
     {sharedReceipt && <SharedReceiptDialog file={sharedReceipt} accounts={activeAccounts} categories={data.categories} budgets={data.budgets} onClose={() => setSharedReceipt(undefined)} onSave={async (item) => { if (!user) throw new Error('Inicia sesión para guardar el gasto.'); await financeTransactionRepository.save(item, user.id); setSharedReceipt(undefined); await finish('Gasto capturado desde el comprobante.') }} />}
-    {dialog === 'transaction' && <TransactionDialog financeData={data} initial={editingTransaction} preset={movementPreset} accounts={data.accounts.filter((item) => item.isActive)} categories={data.categories.filter((item) => item.isActive)} budgets={data.budgets} onClose={() => { setDialog(null); setEditingTransaction(undefined); setMovementPreset(undefined) }} onCreateCategory={async (item) => { if (!user) throw new Error('Inicia sesión para crear una categoría.'); return financeCategoryRepository.save(item, user.id) }} onSave={async (item) => { if (!user) return; await financeTransactionRepository.save(item, user.id); setMovementPreset(undefined); await finish('Movimiento guardado.') }} />}
-    {dialog === 'account' && <AccountDialog initial={editingAccount} onClose={() => { setDialog(null); setEditingAccount(undefined) }} onSave={async (item) => { if (!user) return; await financeAccountRepository.save(item, user.id); await finish('Cuenta guardada.') }} />}
-    {dialog === 'budget' && <BudgetDialog data={data} month={monthKey(month)} initialHalf={budgetHalfToEdit} initialCategoryId={budgetCategoryToEdit} budgets={data.budgets} categories={data.categories.filter((item) => item.type === 'expense' && item.isActive)} onClose={() => { setDialog(null); setBudgetHalfToEdit(undefined); setBudgetCategoryToEdit(undefined) }} onSave={async (item) => { if (!user) return; await financeBudgetRepository.save(item, user.id); await finish('Presupuesto guardado.') }} onDelete={(item) => { setDialog(null); setDeletingBudget(item) }} />}
-    {dialog==='budgetClose'&&closingBudget&&<BudgetCloseDialog budget={closingBudget} performance={budgetPerformance(data,parseISO(closingBudget.periodEnd??closingBudget.month)).find(item=>item.id===closingBudget.id)} goals={data.goals.filter(goal=>goal.status==='active')} onClose={()=>{setDismissedBudgetIds(current=>[...current,closingBudget.id]);setDialog(null);setClosingBudget(undefined)}} onSave={async(destination,goalId)=>{if(!user)return;await financePlanningRepository.closeBudget(closingBudget.id,destination,goalId,user.id);setClosingBudget(undefined);await finish('Cierre de quincena guardado.')}}/>}
+    {dialog === 'transaction' && <TransactionDialog financeData={data} initial={editingTransaction} preset={movementPreset} accounts={data.accounts.filter((item) => item.isActive)} categories={data.categories.filter((item) => item.isActive)} budgets={data.budgets} onClose={() => { setDialog(null); setEditingTransaction(undefined); setMovementPreset(undefined) }} onCreateCategory={async (item) => { if (!user) throw new Error('Inicia sesión para crear una categoría.'); return financeCategoryRepository.save(item, user.id) }} onSave={async (item) => { if (!user || simulationEnabled) return; await financeTransactionRepository.save(item, user.id); setMovementPreset(undefined); await finish('Movimiento guardado.') }} />}
+    {dialog === 'account' && <AccountDialog initial={editingAccount} onClose={() => { setDialog(null); setEditingAccount(undefined) }} onSave={async (item) => { if (!user || simulationEnabled) return; await financeAccountRepository.save(item, user.id); await finish('Cuenta guardada.') }} />}
+    {dialog === 'budget' && <BudgetDialog data={data} month={monthKey(month)} initialHalf={budgetHalfToEdit} initialCategoryId={budgetCategoryToEdit} budgets={data.budgets} categories={data.categories.filter((item) => item.type === 'expense' && item.isActive)} onClose={() => { setDialog(null); setBudgetHalfToEdit(undefined); setBudgetCategoryToEdit(undefined) }} onSave={async (item) => { if (!user || simulationEnabled) return; await financeBudgetRepository.save(item, user.id); await finish('Presupuesto guardado.') }} onDelete={(item) => { setDialog(null); setDeletingBudget(item) }} />}
+    {dialog==='budgetClose'&&closingBudget&&<BudgetCloseDialog budget={closingBudget} performance={budgetPerformance(data,parseISO(closingBudget.periodEnd??closingBudget.month)).find(item=>item.id===closingBudget.id)} goals={data.goals.filter(goal=>goal.status==='active')} onClose={()=>{setDismissedBudgetIds(current=>[...current,closingBudget.id]);setDialog(null);setClosingBudget(undefined)}} onSave={async(destination,goalId)=>{if(!user||simulationEnabled)return;await financePlanningRepository.closeBudget(closingBudget.id,destination,goalId,user.id);setClosingBudget(undefined);await finish('Cierre de quincena guardado.')}}/>}
+    {debtPayment && <DebtPaymentDialog key={debtPayment.id} debt={debtPayment.debt} data={data}
+      event={{ id: debtPayment.id, debtId: debtPayment.debt.id, date: debtPayment.date, amountCents: debtPayment.amountCents,
+        remainingCents: Math.max(0, debtRemainingCents(debtPayment.debt, data) - debtPayment.amountCents), kind: 'payment',
+        closes: debtPayment.amountCents >= debtRemainingCents(debtPayment.debt, data) }}
+      busy={savingPaymentId === debtPayment.id} error={debtPaymentError} onClose={() => setDebtPayment(undefined)}
+      onSave={async input => {
+        if (!user || paymentLocks.current.has(debtPayment.id)) return
+        const lockId = debtPayment.id
+        paymentLocks.current.add(lockId); setSavingPaymentId(lockId); setDebtPaymentError('')
+        try {
+          await financeDebtRepository.pay(input, undefined, user.id)
+          setDebtPayment(undefined)
+          await finish('Pago registrado. Se actualizaron tu deuda y Plan.')
+        } catch (reason) { setDebtPaymentError(reason instanceof Error ? reason.message : 'No se pudo registrar el pago.') }
+        finally { paymentLocks.current.delete(lockId); setSavingPaymentId(undefined) }
+      }} />}
     {dialog === 'recurring' && <RecurringDialog
       key={recurringEditMode}
       initial={editingRecurring}
@@ -687,7 +739,7 @@ export function FinancePage() {
       onPostpone={editingRecurring ? () => void setRecurringMonthStatus(editingRecurring, editingOccurrence, 'postponed') : undefined}
       onSkip={editingRecurring ? () => void setRecurringMonthStatus(editingRecurring, editingOccurrence, 'skipped') : undefined}
       onToggleActive={editingRecurring ? async () => {
-        if (!user) return
+        if (!user || simulationEnabled) return
         await financeRecurringRepository.setActive(editingRecurring.id, !editingRecurring.isActive, user.id)
         await finish(editingRecurring.isActive ? 'Recurrente pausado.' : 'Recurrente reanudado.')
       } : undefined}
@@ -695,7 +747,7 @@ export function FinancePage() {
         if (editingOccurrence) setRevertingOccurrence(editingOccurrence)
       } : undefined}
       onSave={async (item) => {
-        if (!user) return
+        if (!user || simulationEnabled) return
         if (editingRecurring && editingOccurrence && recurringEditMode === 'period') {
           await financeRecurringOccurrenceRepository.saveOccurrence(editingOccurrence.id, item.nextOccurrence, item.amountCents, user.id, item.description)
         } else if (editingRecurring && recurringEditMode === 'period') {
@@ -710,11 +762,11 @@ export function FinancePage() {
         await finish(editingRecurring ? recurringEditMode === 'period' ? 'Periodo recurrente actualizado.' : 'Recurrencia actualizada.' : 'Movimiento recurrente guardado.')
       }}
     />}
-    {dialog === 'goal' && <GoalDialog initial={editingGoal} accounts={data.accounts.filter((item) => item.isActive)} onClose={() => { setDialog(null); setEditingGoal(undefined) }} onSave={async (item) => { if (!user) return; await financeGoalRepository.save(item, user.id); await finish('Meta guardada.') }} />}
-    {dialog === 'contribution' && <ContributionDialog goal={selectedGoal} goals={data.goals.filter((item) => item.status === 'active')} accounts={data.accounts.filter((item) => item.isActive)} onClose={() => { setDialog(null); setSelectedGoal(undefined) }} onSave={async (item) => { if (!user) return; await financeGoalRepository.contribute(item, user.id); await finish('Aportación registrada y vinculada a la meta.') }} />}
-    {dialog === 'fundEntry' && data.savingsFund && <FundEntryEditor fundId={data.savingsFund.id} initial={editingFundEntry} balanceCents={fundMetrics.balanceCents} onClose={() => { setDialog(null); setEditingFundEntry(undefined) }} onSave={async item => { if (!user) return; await financePlanningRepository.saveFundEntry(item, user.id); await finish(editingFundEntry ? 'Movimiento del fondo actualizado.' : 'Movimiento del fondo registrado.') }} />}
-    {dialog === 'categories' && <FinanceCategoryManager categories={data.categories} onClose={() => setDialog(null)} onSave={async category => { if (!user) throw new Error('Inicia sesión para administrar categorías.'); await financeCategoryRepository.save(category, user.id); await refresh() }} onDelete={async category => { if (!user) return; await financeCategoryRepository.remove(category.id, user.id); await refresh() }} />}
-    {dialog === 'editContribution' && editingContribution && <ReservedContributionEditor initial={editingContribution} goalName={data.goals.find(goal => goal.id === editingContribution.goalId)?.name ?? 'Meta'} onClose={() => { setEditingContribution(undefined); setDialog(selectedGoal ? 'goalDetail' : null) }} onSave={async contribution => { if (!user) return; await financeGoalRepository.updateReservedContribution(contribution, user.id); await finish('Aportación actualizada.') }} />}
+    {dialog === 'goal' && <GoalDialog initial={editingGoal} accounts={data.accounts.filter((item) => item.isActive)} onClose={() => { setDialog(null); setEditingGoal(undefined) }} onSave={async (item) => { if (!user || simulationEnabled) return; await financeGoalRepository.save(item, user.id); await finish('Meta guardada.') }} />}
+    {dialog === 'contribution' && <ContributionDialog goal={selectedGoal} goals={data.goals.filter((item) => item.status === 'active')} accounts={data.accounts.filter((item) => item.isActive)} onClose={() => { setDialog(null); setSelectedGoal(undefined) }} onSave={async (item) => { if (!user || simulationEnabled) return; await financeGoalRepository.contribute(item, user.id); await finish('Aportación registrada y vinculada a la meta.') }} />}
+    {dialog === 'fundEntry' && data.savingsFund && <FundEntryEditor fundId={data.savingsFund.id} initial={editingFundEntry} balanceCents={fundMetrics.balanceCents} onClose={() => { setDialog(null); setEditingFundEntry(undefined) }} onSave={async item => { if (!user || simulationEnabled) return; await financePlanningRepository.saveFundEntry(item, user.id); await finish(editingFundEntry ? 'Movimiento del fondo actualizado.' : 'Movimiento del fondo registrado.') }} />}
+    {dialog === 'categories' && <FinanceCategoryManager categories={data.categories} onClose={() => setDialog(null)} onSave={async category => { if (!user) throw new Error('Inicia sesión para administrar categorías.'); await financeCategoryRepository.save(category, user.id); await refresh() }} onDelete={async category => { if (!user || simulationEnabled) return; await financeCategoryRepository.remove(category.id, user.id); await refresh() }} />}
+    {dialog === 'editContribution' && editingContribution && <ReservedContributionEditor initial={editingContribution} goalName={data.goals.find(goal => goal.id === editingContribution.goalId)?.name ?? 'Meta'} onClose={() => { setEditingContribution(undefined); setDialog(selectedGoal ? 'goalDetail' : null) }} onSave={async contribution => { if (!user || simulationEnabled) return; await financeGoalRepository.updateReservedContribution(contribution, user.id); await finish('Aportación actualizada.') }} />}
     <ConfirmDialog open={Boolean(deletingFundEntry)} title="Eliminar movimiento del fondo" description={`Eliminarás “${deletingFundEntry?.description ?? 'este movimiento'}” del fondo y se recalculará su saldo.`} confirmLabel="Eliminar movimiento" onClose={() => setDeletingFundEntry(undefined)} onConfirm={async () => { if (!user || !deletingFundEntry) return; try { if (fundMetrics.balanceCents - deletingFundEntry.amountCents < 0) throw new Error('Esta aportación ya se utilizó. Corrige primero los retiros vinculados al saldo del fondo.'); await financePlanningRepository.removeFundEntry(deletingFundEntry.id, user.id); setDeletingFundEntry(undefined); await finish('Movimiento del fondo eliminado.') } catch (reason) { setDeletingFundEntry(undefined); setFeedback(reason instanceof Error ? reason.message : 'No se pudo eliminar el movimiento.') } }} />
     <ConfirmDialog open={Boolean(deletingContribution)} title="Eliminar aportación" description={deletingContribution?.transactionId ? 'Se eliminará también el movimiento de ahorro vinculado y se recalcularán los saldos de tu cuenta y tu meta.' : 'Se eliminará la aportación de dinero previamente apartado. No se modificará ningún movimiento de tus cuentas.'} confirmLabel="Eliminar aportación" onClose={() => { setDeletingContribution(undefined); setDialog(selectedGoal ? 'goalDetail' : null) }} onConfirm={async () => { if (!user || !deletingContribution) return; try { if (deletingContribution.transactionId) await financeTransactionRepository.remove(deletingContribution.transactionId, user.id); else await financeGoalRepository.removeReservedContribution(deletingContribution.id, user.id); setDeletingContribution(undefined); await finish('Aportación eliminada.') } catch (reason) { setDeletingContribution(undefined); setFeedback(reason instanceof Error ? reason.message : 'No se pudo eliminar la aportación.') } }} />
     {dialog === 'goalDetail' && selectedGoal && <GoalDetailModal goal={selectedGoal} data={data} onEditContribution={contribution => {
@@ -723,9 +775,9 @@ export function FinancePage() {
         if (!transaction) { setFeedback('Actualiza tus datos para cargar el movimiento de esta aportación.'); return }
         setEditingTransaction(transaction); setDialog('transaction')
       } else { setEditingContribution(contribution); setDialog('editContribution') }
-    }} onDeleteContribution={contribution => { setDialog(null); setDeletingContribution(contribution) }} onClose={()=>{setDialog(null);setSelectedGoal(undefined)}} onAdd={()=>{setSelectedGoalItem(undefined);setDialog('goalItem')}} onEdit={item=>{setSelectedGoalItem(item);setDialog('goalItem')}} onPurchase={item=>{setSelectedGoalItem(item);setDialog('purchaseItem')}} onDiscard={async item=>{if(!user)return;await financePlanningRepository.saveGoalItem({...item,status:'discarded'},user.id);await refresh();setFeedback('Artículo descartado.')}} onDelete={item=>setDeletingGoalItem(item)} />}
-    {dialog === 'goalItem' && selectedGoal && <GoalItemDialog goal={selectedGoal} initial={selectedGoalItem} onClose={()=>setDialog('goalDetail')} onSave={async item=>{if(!user)return;await financePlanningRepository.saveGoalItem(item,user.id);await refresh();setFeedback('Artículo guardado.');setSelectedGoalItem(undefined);setDialog('goalDetail')}} />}
-    {dialog === 'purchaseItem' && selectedGoalItem && <PurchaseItemDialog item={selectedGoalItem} accounts={activeAccounts} categories={data.categories.filter(item=>item.type==='expense'&&item.isActive)} transactions={data.transactions} onClose={()=>setDialog('goalDetail')} onSave={async (item,movement)=>{if(!user)return;if(movement)await financeTransactionRepository.save(movement,user.id);await financePlanningRepository.saveGoalItem(item,user.id);await refresh();setFeedback('Compra vinculada a la meta.');setDialog('goalDetail')}} />}
+    }} onDeleteContribution={contribution => { setDialog(null); setDeletingContribution(contribution) }} onClose={()=>{setDialog(null);setSelectedGoal(undefined)}} onAdd={()=>{setSelectedGoalItem(undefined);setDialog('goalItem')}} onEdit={item=>{setSelectedGoalItem(item);setDialog('goalItem')}} onPurchase={item=>{setSelectedGoalItem(item);setDialog('purchaseItem')}} onDiscard={async item=>{if(!user||simulationEnabled)return;await financePlanningRepository.saveGoalItem({...item,status:'discarded'},user.id);await refresh();setFeedback('Artículo descartado.')}} onDelete={item=>setDeletingGoalItem(item)} />}
+    {dialog === 'goalItem' && selectedGoal && <GoalItemDialog goal={selectedGoal} initial={selectedGoalItem} onClose={()=>setDialog('goalDetail')} onSave={async item=>{if(!user||simulationEnabled)return;await financePlanningRepository.saveGoalItem(item,user.id);await refresh();setFeedback('Artículo guardado.');setSelectedGoalItem(undefined);setDialog('goalDetail')}} />}
+    {dialog === 'purchaseItem' && selectedGoalItem && <PurchaseItemDialog item={selectedGoalItem} accounts={activeAccounts} categories={data.categories.filter(item=>item.type==='expense'&&item.isActive)} transactions={data.transactions} onClose={()=>setDialog('goalDetail')} onSave={async (item,movement)=>{if(!user||simulationEnabled)return;if(movement)await financeTransactionRepository.save(movement,user.id);await financePlanningRepository.saveGoalItem(item,user.id);await refresh();setFeedback('Compra vinculada a la meta.');setDialog('goalDetail')}} />}
     <ConfirmDialog open={Boolean(deletingGoalItem)} title={deletingGoalItem?.transactionId?'Conservar movimiento financiero':'Eliminar artículo'} description={deletingGoalItem?.transactionId?'Este artículo tiene un movimiento asociado. El movimiento no se eliminará; el artículo se marcará como descartado.':'El artículo se eliminará definitivamente de la meta. ¿Deseas continuar?'} confirmLabel={deletingGoalItem?.transactionId?'Descartar artículo':'Eliminar'} onClose={()=>setDeletingGoalItem(undefined)} onConfirm={async()=>{if(!user||!deletingGoalItem)return;if(deletingGoalItem.transactionId)await financePlanningRepository.saveGoalItem({...deletingGoalItem,status:'discarded'},user.id);else await financePlanningRepository.removeGoalItem(deletingGoalItem.id,user.id);setDeletingGoalItem(undefined);await refresh();setFeedback(deletingGoalItem.transactionId?'Artículo descartado; el movimiento se conservó.':'Artículo eliminado.')}} />
     <ConfirmDialog open={Boolean(deletingGoal)} title="Eliminar meta" description={`Eliminarás “${deletingGoal?.name ?? ''}” y sus artículos/aportaciones de planeación. Los movimientos financieros reales que registraste se conservarán intactos.`} confirmLabel="Eliminar meta" onClose={()=>setDeletingGoal(undefined)} onConfirm={async()=>{if(!user||!deletingGoal)return;const goal=deletingGoal;try{await financeGoalRepository.remove(goal.id,user.id);setDeletingGoal(undefined);if(selectedGoal?.id===goal.id){setSelectedGoal(undefined);setDialog(null)}await refresh();window.dispatchEvent(new Event('faro:finance-updated'));setFeedback(`Meta “${goal.name}” eliminada. Tus movimientos se conservaron.`)}catch(reason){setDeletingGoal(undefined);setFeedback(reason instanceof Error?reason.message:'No se pudo eliminar la meta.')}}} />
     <ConfirmDialog open={Boolean(deletingBudget)} title="Eliminar presupuesto" description={`Eliminarás el presupuesto “${deletingBudget?.name ?? ''}” de esta quincena. Los gastos realizados y programados permanecerán intactos.`} confirmLabel="Eliminar presupuesto" onClose={() => setDeletingBudget(undefined)} onConfirm={async () => {
@@ -763,6 +815,7 @@ export function FinancePage() {
       }
     }} />
     <ConfirmDialog open={Boolean(revertingOccurrence)} title={revertingOccurrence && data.recurring.find((item) => item.id === revertingOccurrence.recurringTransactionId)?.type === 'income' ? 'Deshacer cobro' : 'Deshacer pago'} description={revertingOccurrence && data.recurring.find((item) => item.id === revertingOccurrence.recurringTransactionId)?.type === 'income' ? 'Se eliminará el movimiento generado y el ingreso volverá a su estado anterior.' : 'Se eliminará el movimiento generado y el gasto volverá a su estado anterior.'} confirmLabel="Deshacer" onClose={() => setRevertingOccurrence(undefined)} onConfirm={() => void revertRecurringPayment()} />
+    </>}
   </div>
 }
 
@@ -865,36 +918,6 @@ function FinanceMetrics({ metrics, previous, hasPreviousData, midMonthProjection
       <FinanceKpi tone="projected" icon={<CalendarDays />} label="Disponible operativo al 15" value={midMonthProjection.balanceCents} context={midpointContext} />
     </div>
   </section>
-}
-
-function PeriodFlowChart({ flow }: { flow: { incomeCents: number; expenseCents: number; netCents: number } }) {
-  const rows = [
-    { name: 'Ingresos', value: flow.incomeCents, color: 'var(--finance-chart-income, #f1f1ef)' },
-    { name: 'Gastos', value: -flow.expenseCents, color: 'var(--finance-chart-expense, #858a91)' },
-    { name: 'Neto', value: flow.netCents, color: 'var(--finance-chart-net, #c5c8cb)' },
-  ]
-  const compactAxis = (value: number) => {
-    if (value === 0) return '0'
-    const amount = Math.abs(value) / 100000
-    return `${value < 0 ? '−' : ''}${Number.isInteger(amount) ? amount : amount.toFixed(1)}k`
-  }
-  return <div className="finance-period-flow__chart">
-    <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={rows} margin={{ top: 26, right: 18, bottom: 8, left: 2 }}>
-        <CartesianGrid vertical={false} stroke="var(--finance-chart-grid, #30343a)" strokeDasharray="4 6" />
-        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'var(--finance-chart-tick, #a8b0bb)', fontSize: 9 }} interval={0} />
-        <YAxis axisLine={false} tickLine={false} width={42} tick={{ fill: 'var(--finance-chart-tick, #9aa4b0)', fontSize: 8 }} tickFormatter={compactAxis} />
-        <ReferenceLine y={0} stroke="#62676e" strokeDasharray="4 4" />
-        <Tooltip cursor={{ fill: 'rgba(255,255,255,.035)' }} formatter={(value) => formatMxn(Number(value))} contentStyle={{ background: 'var(--finance-tooltip-bg, #1d2024)', border: '1px solid var(--finance-tooltip-border, #44484e)', borderRadius: 10 }} labelStyle={{ color: 'var(--finance-tooltip-text, #f3f3f1)' }} />
-        <Bar dataKey="value" maxBarSize={92} radius={[2, 2, 0, 0]}>
-          {rows.map((row) => <Cell key={row.name} fill={row.color} />)}
-          <LabelList dataKey="value" position="top" formatter={(value) => formatMxn(Number(value ?? 0))} fill="var(--finance-chart-tick, #e5ebf3)" fontSize={9} />
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
-    <div className="finance-period-flow__legend"><span><i />Ingresos</span><span><i />Gastos</span><span><i />Resultado neto</span></div>
-    <dl className="finance-flow-summary" aria-label="Importes del flujo del periodo"><div><dt>Ingresos</dt><dd>{formatMxn(flow.incomeCents)}</dd></div><div><dt>Gastos</dt><dd>{formatMxn(flow.expenseCents)}</dd></div><div><dt>Resultado neto</dt><dd>{formatMxn(flow.netCents)}</dd></div></dl>
-  </div>
 }
 
 function SavingsPanel({ metrics, annual, year, goals, contributions }: {

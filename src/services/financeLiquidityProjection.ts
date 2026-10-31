@@ -1,14 +1,15 @@
 import { addDays, addMonths, endOfMonth, format, isAfter, isSameMonth, startOfDay, startOfMonth, subMonths } from 'date-fns'
 import type { FinanceData, FinanceTransaction, FinanceTransactionType } from '../features/finance/financeTypes'
+import { scheduledDebtPayments } from './debtSchedule'
 import { categoryBudgetReservations, monthKey, personalBudgetBalanceIntoPeriod, personalBudgetUsageCents, personalBudgetReservations, recurringAppliesToMonth } from './financeService'
 
 /** Keeping the thresholds here makes the Radar auditable and keeps UI out of business rules. */
 export const LIQUIDITY_MODERATION_MULTIPLIER = 1.2
 /** Bump when a formula change makes stored comparison baselines incompatible. */
-export const FINANCE_LIQUIDITY_PROJECTION_VERSION = 7
+export const FINANCE_LIQUIDITY_PROJECTION_VERSION = 9
 
 export type FinanceLiquidityRadarStatus = 'stable' | 'moderation' | 'critical'
-export type LiquidityEventSource = 'movement' | 'recurring' | 'budget' | 'simulation'
+export type LiquidityEventSource = 'movement' | 'recurring' | 'budget' | 'simulation' | 'debt'
 
 export interface LiquidityProjectionEvent {
   id: string
@@ -400,6 +401,12 @@ function projectFinanceLiquidityMonth(
   const scheduledEvents = [
     ...plannedInPeriod,
     ...recurringEventsForMonth(data, month),
+    ...scheduledDebtPayments(data, periodEnd, reference)
+      .filter(payment => payment.date >= periodStart)
+      .map((payment): LiquidityProjectionEvent => ({
+        id: payment.id, date: payment.date, label: payment.debt.name,
+        amountCents: -payment.amountCents, kind: 'expense', source: 'debt',
+      })),
   ]
   for (const event of scheduledEvents) {
     if (event.date < referenceKey) {

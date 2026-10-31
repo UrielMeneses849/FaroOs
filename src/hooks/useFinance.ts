@@ -14,14 +14,15 @@ const emptyFinanceData: FinanceData = {
 export function useFinance() {
   const { user } = useAuth()
   const [data, setData] = useState<FinanceData>(emptyFinanceData)
+  const [loadedForUserId, setLoadedForUserId] = useState<string>()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const refresh = useCallback(async () => {
     if (!user) {
-      setData(emptyFinanceData); setLoading(false); setError('No hay una sesión activa.'); return
+      setData(emptyFinanceData); setLoadedForUserId(undefined); setLoading(false); setError('No hay una sesión activa.'); return
     }
     setLoading(true); setError(null)
-    try { setData(await loadFinanceData(user.id)) }
+    try { setData(await loadFinanceData(user.id)); setLoadedForUserId(user.id) }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'No fue posible cargar tus finanzas.') }
     finally { setLoading(false) }
   }, [user])
@@ -31,5 +32,5 @@ export function useFinance() {
     window.addEventListener('faro:finance-updated', handleFinanceUpdate)
     return () => window.removeEventListener('faro:finance-updated', handleFinanceUpdate)
   }, [refresh])
-  return { data, loading, error, refresh, user }
+  return { data, loadedForUserId, loading, error, refresh, user }
 }

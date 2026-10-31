@@ -1,3 +1,4 @@
+import { financeDecisionPanels } from './financePanels'
 import { ChevronDown } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
@@ -7,7 +8,7 @@ const primaryFinancePanels = [
   ['recurring', 'Gastos'], ['plan', 'Plan'], ['transactions', 'Movimientos'], ['budgets', 'Presupuestos'],
 ] as const
 const secondaryFinancePanels = [['savings', 'Ahorro'], ['goals', 'Metas'], ['accounts', 'Cuentas'], ['fund', 'Fondo']] as const
-export type FinancePanel = typeof primaryFinancePanels[number][0] | typeof secondaryFinancePanels[number][0]
+export type FinancePanel = typeof primaryFinancePanels[number][0] | typeof secondaryFinancePanels[number][0] | typeof financeDecisionPanels[number][0]
 
 export function FinanceNavigation({ value, onChange, onManageCategories }: { value: FinancePanel; onChange: (panel: FinancePanel) => void; onManageCategories: () => void }) {
   const [open, setOpen] = useState(false)
@@ -15,13 +16,14 @@ export function FinanceNavigation({ value, onChange, onManageCategories }: { val
   const trigger = useRef<HTMLButtonElement>(null)
   const menu = useRef<HTMLDivElement>(null)
   const id = useId()
-  const secondary = secondaryFinancePanels.find(([key]) => key === value)
+  const secondary = [...secondaryFinancePanels, ...financeDecisionPanels].find(([key]) => key === value)
   const close = (restoreFocus = false) => { setOpen(false); if (restoreFocus) trigger.current?.focus() }
   const choices = () => [...(menu.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"], [role="menuitem"]') ?? [])]
   useLayoutEffect(() => {
     if (!open || !trigger.current) return
     const rect = trigger.current.getBoundingClientRect()
-    setPosition({ left: Math.max(8, Math.min(rect.right - 220, window.innerWidth - 228)), top: Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - 252)) })
+    const height = Math.min(menu.current?.scrollHeight ?? 520, window.innerHeight - 24)
+    setPosition({ left: Math.max(8, Math.min(rect.right - 280, window.innerWidth - 288)), top: Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - height - 8)) })
     const selected = menu.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')
     ;(selected ?? choices()[0])?.focus()
   }, [open])
@@ -48,6 +50,9 @@ export function FinanceNavigation({ value, onChange, onManageCategories }: { val
       if (next >= 0) { event.preventDefault(); entries[next]?.focus() }
     }}>
       {secondaryFinancePanels.map(([key, label]) => <button key={key} type="button" role="menuitemradio" aria-checked={key === value} onClick={() => { close(true); onChange(key) }}>{label}</button>)}
+      <div className="finance-more-menu__divider" />
+      <span className="finance-more-menu__heading">Decisiones y simulaciones</span>
+      {financeDecisionPanels.map(([key, label]) => <button key={key} type="button" role="menuitemradio" aria-checked={key === value} onClick={() => { close(true); onChange(key) }}>{label}</button>)}
       <div className="finance-more-menu__divider" />
       <button type="button" role="menuitem" onClick={() => { close(); onManageCategories() }}>Gestionar categorías</button>
     </div>, document.body)}

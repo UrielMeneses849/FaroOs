@@ -26,7 +26,7 @@ const strategyLabels = { minimum: 'Pagos actuales', balanced: 'Equilibrado', fas
 type PlanEntry = NonNullable<FinanceData['debtPlan']>['entries'][number]
 type Dialog = 'debt' | 'fund' | 'settings' | 'scenarios' | 'payment' | 'links' | 'history' | 'forecast' | null
 
-export function DebtPlanPanel({ data, userId, onRefresh, onEditMovement, onDeleteMovement }: { data: FinanceData; userId: string; onRefresh: () => Promise<void>; onEditMovement?: (item: FinanceTransaction) => void; onDeleteMovement?: (item: FinanceTransaction) => void }) {
+export function DebtPlanPanel({ readOnly = false, data, userId, onRefresh, onEditMovement, onDeleteMovement }: { readOnly?: boolean; data: FinanceData; userId: string; onRefresh: () => Promise<void>; onEditMovement?: (item: FinanceTransaction) => void; onDeleteMovement?: (item: FinanceTransaction) => void }) {
   const [dialog, setDialog] = useState<Dialog>(null)
   const [selected, setSelected] = useState<FinanceDebt>()
   const [paymentEvent, setPaymentEvent] = useState<DebtPlanEvent>()
@@ -67,6 +67,7 @@ export function DebtPlanPanel({ data, userId, onRefresh, onEditMovement, onDelet
     setNotice(message); setError('')
   }
   const run = async (action: () => Promise<void>) => {
+    if (readOnly) { setError('Apaga la simulación para modificar tu Plan real.'); return }
     if (busy) return
     setBusy(true); setError('')
     try { await action() } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo guardar. Intenta nuevamente.') }
@@ -282,7 +283,7 @@ function PlanSettings({ data, busy, error, onClose, onSave }: { data: FinanceDat
   return <Modal open title="Configurar tu plan" panelClassName="dp-modal" onClose={onClose}><form className="dp-form" onSubmit={async event => { event.preventDefault(); await onSave({ monthlyContributionCents: cents(monthly), contributionDay: Number(day), targetDate: target, strategy }, cents(buffer)) }}><MoneyField label="Aportación mensual prevista MXN" min="0" value={monthly} onChange={setMonthly} /><label>Día previsto para aportar<input required type="number" min="1" max="28" value={day} onChange={event => setDay(event.target.value)} /></label><p className="dp-hint">Esta cifra simula futuras aportaciones. Registra el dinero real con “Aportar a Plan”.</p><div className="dp-form-grid"><label>Meta para quedar libre<input type="date" required value={target} onChange={event => setTarget(event.target.value)} onInput={event => setTarget(event.currentTarget.value)} onBlur={event => setTarget(event.currentTarget.value)} /></label><label>Estrategia<select value={strategy} onChange={event => setStrategy(event.target.value as typeof strategy)}>{Object.entries(strategyLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div><MoneyField label="Colchón operativo protegido MXN" value={buffer} min="0" onChange={setBuffer} /><p className="dp-hint">Es el mismo colchón que usa FARO Finanzas. El escenario Ataque total puede cruzarlo y siempre mostrará el riesgo.</p>{error && <p className="dp-error" role="alert">{error}</p>}<div className="dp-form-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit" loading={busy}>Guardar plan</Button></div></form></Modal>
 }
 
-function DebtPaymentDialog({ debt, data, event, busy, error, onClose, onSave }: { debt: FinanceDebt; data: FinanceData; event?: DebtPlanEvent; busy: boolean; error: string; onClose: () => void; onSave: (input: Omit<FinanceTransaction, 'createdAt' | 'updatedAt'>) => Promise<void> }) {
+export function DebtPaymentDialog({ debt, data, event, busy, error, onClose, onSave }: { debt: FinanceDebt; data: FinanceData; event?: DebtPlanEvent; busy: boolean; error: string; onClose: () => void; onSave: (input: Omit<FinanceTransaction, 'createdAt' | 'updatedAt'>) => Promise<void> }) {
   const existing = data.transactions.find(transaction => transaction.id === event?.transactionId)
   const recurring = data.recurring.find(item => item.id === event?.recurringId)
   const accounts = data.accounts.filter(account => account.isActive && account.currency === 'MXN')

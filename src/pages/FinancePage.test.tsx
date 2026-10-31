@@ -265,5 +265,29 @@ it('keeps all seven priorities in the same order on phones and groups only secon
   expect(nav.getAllByRole('button', { hidden: true }).map(button => button.textContent)).toEqual(['Resumen', 'Proyecciones', 'Ingresos', 'Gastos', 'Plan', 'Movimientos', 'Presupuestos', 'Más'])
   fireEvent.click(nav.getByLabelText('Más secciones de Finanzas'))
   const tools = within(screen.getByRole('navigation', { name: 'Herramientas de Finanzas' }))
-  expect(tools.getAllByRole('button').map(button => button.querySelector('strong')?.textContent)).toEqual(['Cuentas', 'Ahorro', 'Metas', 'Fondo'])
+  expect(tools.getAllByRole('button').map(button => button.querySelector('strong')?.textContent)).toEqual(['Cuentas', 'Ahorro', 'Metas', 'Fondo', 'Simulaciones', 'Precisión de proyecciones', 'Escenarios y estrés', 'Antes de decidir', 'Comparar deudas', 'Gastos futuros', 'Colchón sugerido'])
+})
+
+
+describe('Plan payments in recurring expenses', () => {
+  it('shows the motorcycle installments, opens the shared Plan payment dialog, and keeps paid installments visible', async () => {
+    const now = new Date()
+    const first = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+    mocks.data!.debtPlan = { entries: [], preferences: { monthlyContributionCents: 0, contributionDay: 15, strategy: 'minimum', targetDate: first }, debts: [{
+      id: 'moto', name: 'Moto', creditor: 'Crédito', kind: 'purchase', status: 'active', balanceCents: 500000, balanceDate: first,
+      paymentCents: 85000, frequency: 'weekly', nextPaymentDate: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`, agreementStatus: 'none', priority: 0, createdAt: '', updatedAt: '',
+    }] }
+    mocks.data!.categories.push({ id: 'plan', name: 'Plan', type: 'expense', isActive: true, isDefault: true })
+    mocks.data!.transactions.push({ id: 'paid-moto', debtId: 'moto', accountId: 'bank', type: 'expense', categoryId: 'plan', amountCents: 85000, transactionDate: first, description: 'Pago · Moto', status: 'completed', createdAt: '', updatedAt: '' })
+    sessionStorage.setItem('faro-finance-panel', 'recurring')
+    show()
+    const recurring = within(screen.getByRole('region', { name: 'Gastos recurrentes' }))
+    expect(recurring.getAllByText('Moto').length).toBeGreaterThan(1)
+    expect(recurring.getByText('Pagado')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Gastos eventuales' })).queryByText('Pago · Moto')).not.toBeInTheDocument()
+    fireEvent.click(recurring.getAllByRole('button', { name: 'Registrar pago' })[0])
+    expect(await screen.findByRole('dialog', { name: 'Registrar pago · Moto' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Pago real MXN')).toHaveValue(850)
+    expect(mocks.save).not.toHaveBeenCalled()
+  })
 })
