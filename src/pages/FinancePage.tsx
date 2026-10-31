@@ -27,7 +27,7 @@ import { DebtPaymentDialog, DebtPlanPanel } from '../features/finance/DebtPlanPa
 import { DebtMovementFields, DebtPicker } from '../features/finance/DebtMovementFields'
 import { scheduledDebtPayments, debtRemainingCents, debtHasRecurringSchedule, type ScheduledDebtPayment } from '../services/debtSchedule'
 import { financeDebtRepository } from '../repositories/financeDebtRepository'
-import { habitualDebtPayment } from '../services/debtPayment'
+import { habitualDebtPayment, habitualDebtPaymentId } from '../services/debtPayment'
 import { debtPlanBalanceCents } from '../services/debtPlanBalance'
 import type { FinanceDebt } from '../features/finance/debtTypes'
 import {
@@ -133,7 +133,6 @@ export function FinancePage() {
   const [deletingRecurring, setDeletingRecurring] = useState<FinanceRecurringTransaction>()
   const [revertingOccurrence, setRevertingOccurrence] = useState<FinanceRecurringOccurrence>()
   const paymentLocks = useRef(new Set<string>())
-  const debtPaymentIds = useRef(new Map<string, string>())
   const promptedFortnights = useRef(new Set<string>())
   const [savingPaymentId, setSavingPaymentId] = useState<string>()
   const [search, setSearch] = useState('')
@@ -444,8 +443,7 @@ export function FinancePage() {
     if (payment.date !== format(new Date(), 'yyyy-MM-dd')) { setDebtPayment(payment); return }
     paymentLocks.current.add(payment.id); setSavingPaymentId(payment.id)
     try {
-      const id = debtPaymentIds.current.get(payment.id) ?? crypto.randomUUID()
-      debtPaymentIds.current.set(payment.id, id)
+      const id = await habitualDebtPaymentId(payment.debt.id, payment.date)
       const input = habitualDebtPayment(payment.debt, data, id, payment)
       await financeDebtRepository.pay(input, undefined, user.id)
       await finish(`Pago de ${formatMxn(input.amountCents)} registrado. Saldo restante: ${formatMxn(Math.max(0, debtRemainingCents(payment.debt, data) - input.amountCents))}.`)

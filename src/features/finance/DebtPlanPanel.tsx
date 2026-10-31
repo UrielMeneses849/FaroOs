@@ -10,7 +10,7 @@ import { financeDebtRepository } from '../../repositories/financeDebtRepository'
 import { financeLiquidityRepository } from '../../repositories/financeRepositories'
 import { accountBalance, calculateFinanceMetrics, financeFrequencyLabel, formatMxn } from '../../services/financeService'
 import { debtPlanAvailableCents, debtPlanBalanceCents } from '../../services/debtPlanBalance'
-import { debtPaymentDefaults, habitualDebtPayment } from '../../services/debtPayment'
+import { debtPaymentDefaults, habitualDebtPayment, habitualDebtPaymentId } from '../../services/debtPayment'
 import { debtPayments, debtPayoffEstimateCents, debtWithLatestQuote, debtRemainingCents, projectDebtPlan, debtPlanAdvanceDays, validSettlementQuote, type DebtPlanEvent } from '../../services/debtPlanService'
 import './debt-plan.css'
 
@@ -42,7 +42,6 @@ export function DebtPlanPanel({ readOnly = false, data, userId, onRefresh, onEdi
   const [offset, setOffset] = useState(0)
   const [showArchived, setShowArchived] = useState(false)
   const [monthlyDraft, setMonthlyDraft] = useState<number>()
-  const paymentIds = useRef(new Map<string, string>())
   const preferences = data.debtPlan?.preferences
   const reference = useMemo(() => new Date(), [])
   const projection = useMemo(() => projectDebtPlan(data, { reference, monthlyContributionCents: monthlyDraft }), [data, reference, monthlyDraft])
@@ -85,8 +84,7 @@ export function DebtPlanPanel({ readOnly = false, data, userId, onRefresh, onEdi
     if (!debt) return
     if (event.date !== dateKey() || event.kind !== 'payment' || event.closes) { openPayment(event, debt); return }
     void run(async () => {
-      const id = paymentIds.current.get(event.id) ?? crypto.randomUUID()
-      paymentIds.current.set(event.id, id)
+      const id = event.transactionId ?? event.occurrenceId ?? await habitualDebtPaymentId(debt.id, event.date)
       const input = habitualDebtPayment(debt, data, id, event)
       await financeDebtRepository.pay(input, event.occurrenceId, userId)
       await saved(`Pago de ${formatMxn(input.amountCents)} registrado. Saldo restante: ${formatMxn(Math.max(0, debtRemainingCents(debt, data) - input.amountCents))}.`)

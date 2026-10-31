@@ -12,6 +12,15 @@ export interface DebtPaymentSource {
   occurrenceId?: string
 }
 
+/** The same due installment has one identity across Plan, desktop and the PWA. */
+export async function habitualDebtPaymentId(debtId: string, dueDate: string) {
+  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`faro:debt-installment:v1:${debtId}:${dueDate}`))).slice(0, 16)
+  bytes[6] = (bytes[6] & 0x0f) | 0x80
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 /** Share the same defaults between Plan, recurring expenses and the payment editor. */
 export function debtPaymentDefaults(debt: FinanceDebt, data: FinanceData, source?: DebtPaymentSource) {
   const accounts = data.accounts.filter(account => account.isActive && account.currency === 'MXN')
